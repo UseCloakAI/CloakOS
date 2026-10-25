@@ -1,0 +1,115 @@
+# Cloak for Vector — tuning lives here. Secrets / per-machine values go in .env.
+
+mode: auto            # starting mode: auto | teleop | idle
+tick_hz: 10
+
+robot:                # serial/ip/name usually come from .env (VECTOR_SERIAL, VECTOR_IP, VECTOR_NAME)
+  serial: null
+  ip: null
+  name: null
+  connect_timeout_s: 10
+  heartbeat_s: 3
+  max_backoff_s: 30
+
+# ── drives ─────────────────────────────────────────────
+# Each drive relaxes toward `baseline` with time constant `tau` (s).
+# `high` / `low` fire drive.<name>.high / .low once, re-arming after `hysteresis`.
+drives:
+  energy:     {init: 0.8, baseline: 0.6, tau: 1800, low: 0.25, hysteresis: 0.15}
+  curiosity:  {init: 0.5, baseline: 0.35, tau: 120, high: 0.75}
+  boredom:    {init: 0.1, baseline: 0.0, tau: 400, high: 0.7}
+  attachment: {init: 0.3, baseline: 0.2, tau: 300, high: 0.7}
+  fear:       {init: 0.0, baseline: 0.0, tau: 8, high: 0.6, hysteresis: 0.2}
+
+rates:                # per second
+  idle_after: 10      # seconds without stimulus before idle drift kicks in
+  boredom_idle: 0.004
+  curiosity_idle: 0.002
+  energy_active: -0.0015
+  energy_rest: 0.006
+  battery_low_cap: 0.3
+
+impulses:             # sense event -> drive deltas
+  face_seen:       {energy: 0.05, curiosity: 0.10, boredom: -0.30, attachment: 0.15, fear: -0.10}
+  face_lost:       {curiosity: 0.05}
+  touched:         {boredom: -0.20, attachment: 0.20, fear: -0.15}
+  picked_up:       {energy: 0.10, fear: 0.40}
+  put_down:        {fear: -0.10}
+  cliff:           {fear: 0.50, curiosity: -0.10}
+  loud_sound:      {curiosity: 0.20, boredom: -0.10, fear: 0.30}
+  heard_wake_word: {curiosity: 0.15, boredom: -0.25, attachment: 0.05}
+  button:          {boredom: -0.10, curiosity: 0.10}
+
+senses:
+  face_forget_s: 6
+  touch_debounce_s: 1.5
+  sound_cooldown_s: 3
+  ears:               # PC microphone loud-sound detector (pip install .[ears])
+    enabled: false
+    threshold_db: -18
+    device: null
+
+# ── behaviors ──────────────────────────────────────────
+# weight multiplies each behavior's score; anims are trigger names or substrings.
+behaviors:
+  stickiness: 0.15
+  wander:        {weight: 1.0, min_s: 8}
+  look_around:   {weight: 1.0, min_s: 6}
+  approach_face: {weight: 1.0, min_s: 3}
+  sulk:          {weight: 1.0, min_s: 12}
+  nap:           {weight: 1.0, min_s: 30, wake_at: 0.85}
+  startle:       {weight: 1.0}
+  idle:          {weight: 1.0}
+
+# ── voice ──────────────────────────────────────────────
+voice:
+  enabled: true
+  volume: 75
+  pitch: 1.15         # >1 = higher + faster, more creature
+  cooldown_s: 8       # minimum gap between any two lines
+  llm_ratio: 0.6      # chance to ask the LLM instead of a cached line
+  cache_dir: data/voice_cache
+  cache_max_files: 500
+  tts:
+    engine: kokoro    # kokoro | piper
+    kokoro: {model: models/kokoro-v1.0.int8.onnx, voices: models/voices-v1.0.bin, voice: af_heart, speed: 1.1, lang: en-us}
+    piper:  {model: models/en_US-lessac-medium.onnx}
+  # trigger key = drive crossing ("fear.high") or sense event ("picked_up")
+  triggers:
+    face_seen:        {hint: "you just spotted your human", cooldown_s: 30, lines: ["Hi!", "Oh! You!", "There you are."]}
+    picked_up:        {hint: "someone just lifted you into the air", cooldown_s: 15, lines: ["Whoa!", "Up we go!", "Put me down?"]}
+    touched:          {hint: "someone is petting your back", cooldown_s: 25, chance: 0.6, lines: ["Mmm.", "Nice.", "Hehe."]}
+    cliff:            {hint: "you almost fell off an edge", cooldown_s: 20, lines: ["Nope!", "Too high!"]}
+    fear.high:        {hint: "you are scared", cooldown_s: 20, lines: ["Eek!", "Scary."]}
+    boredom.high:     {hint: "nothing has happened for a long time, you are bored", cooldown_s: 90, lines: ["So bored.", "Hmm. Nothing.", "Play with me?"]}
+    curiosity.high:   {hint: "you are very curious about your surroundings", cooldown_s: 60, chance: 0.5, lines: ["What's that?", "Ooh."]}
+    attachment.high:  {hint: "you feel close and happy with your human", cooldown_s: 120, lines: ["I like you.", "Stay here."]}
+    energy.low:       {hint: "you are getting sleepy", cooldown_s: 120, lines: ["Sleepy...", "Nap time."]}
+
+llm:                  # any OpenAI-compatible endpoint; base_url/api_key/model usually from .env
+  enabled: true
+  base_url: null      # e.g. http://localhost:11434/v1 (Ollama) or your Cloak endpoint
+  api_key: null
+  model: null
+  timeout_s: 2.5
+  temperature: 1.0
+  max_words: 6
+
+teleop:
+  max_speed_mmps: 150
+  boost: 1.4
+  turn_gain: 0.7
+  head_rad_s: 1.5
+  lift_rad_s: 2.0
+  deadman_s: 0.5
+
+datalog:
+  dir: data
+  frame_size: [320, 180]
+  jpeg_quality: 80
+  frame_every: 1
+  auto_record: [teleop]   # modes that start recording automatically
+
+web:
+  host: 127.0.0.1
+  port: 8765

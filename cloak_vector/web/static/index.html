@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#131110">
+<title>Cloak for Vector</title>
+<link rel="icon" type="image/svg+xml" href="/static/orb.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/cloak.css">
+<link rel="stylesheet" href="/static/vector.css">
+<script>
+  // Same theme keys as Cloak chat, read before paint (no flash).
+  if(localStorage.getItem('cloak_dark')!=='0') document.documentElement.classList.add('dark');
+  document.documentElement.setAttribute('data-theme',localStorage.getItem('cloak_theme')||'default');
+</script>
+</head>
+<body>
+<div id="s-chat" class="active shell-in">
+  <div class="chat-shell">
+    <div class="sb-overlay" id="sb-overlay" onclick="closeMobileSidebar()"></div>
+
+    <!-- ── SIDEBAR ── -->
+    <div class="sidebar" id="sidebar">
+      <div class="sb-logo">
+        <span class="sb-word" role="img" aria-label="Cloak"><span class="sb-c">C</span><span>L</span><span>O</span><span>A</span><span>K</span></span>
+      </div>
+      <nav class="sb-nav" aria-label="Pages">
+        <button class="sb-btn on" type="button" data-nav="live" aria-current="page" onclick="goPage('live')" title="Live">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="sbl">Live</span>
+        </button>
+        <button class="sb-btn" type="button" data-nav="teleop" onclick="goPage('teleop')" title="Teleop">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="11" rx="0"/><path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 14h.01"/></svg>
+          <span class="sbl">Teleop</span>
+        </button>
+      </nav>
+      <button class="sb-btn sb-new" id="sb-rec" onclick="toggleRecord()" title="Record episode">
+        <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
+        <span class="sbl" id="sb-rec-label">Record episode</span>
+      </button>
+      <div class="sb-label">Recordings</div>
+      <div class="conv-list" id="conv-list"></div>
+
+      <div class="sb-footer" id="sb-footer">
+        <button class="user-row" type="button" onclick="goPage('settings')" aria-label="Robot" title="Robot">
+          <div class="user-av" id="sb-av">V</div>
+          <div class="user-info">
+            <div class="user-name" id="sb-name">Vector</div>
+            <div class="user-email" id="sb-email">connecting…</div>
+          </div>
+        </button>
+        <div class="sb-actions">
+          <button class="sb-btn sb-util" type="button" data-nav="settings" onclick="goPage('settings')" title="Settings">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+            <span class="sbl">Settings</span>
+          </button>
+          <button class="sb-btn sb-util" type="button" data-nav="lab" onclick="goPage('lab')" title="Drive lab">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/></svg>
+            <span class="sbl">Drive lab</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MAIN ── -->
+    <div class="main" id="main">
+
+      <!-- LIVE -->
+      <section class="page" id="page-live" data-page="live" aria-label="Live" tabindex="-1">
+        <div class="topbar">
+          <div class="topbar-left">
+            <button class="icon-btn sb-toggle" type="button" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-controls="sidebar">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            </button>
+            <div class="model-picker mode-picker">
+              <div class="model-btn" role="button" tabindex="0" onclick="toggleModeMenu(event)">
+                <span class="mode-swatch" data-mode="auto"></span>
+                <span class="mode-label">Auto</span>
+                <span class="mdl-chevron"><svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+              </div>
+              <div class="model-dropdown">
+                <div class="model-option" data-mode="auto" onclick="pickMode('auto')">
+                  <span class="model-option-name">Auto</span>
+                  <span class="model-option-desc">Drives pick the behavior. It's alive.</span>
+                  <span class="model-option-dot"></span>
+                </div>
+                <div class="model-option" data-mode="teleop" onclick="pickMode('teleop')">
+                  <span class="model-option-name">Teleop</span>
+                  <span class="model-option-desc">You drive. Records training data.</span>
+                  <span class="model-option-dot"></span>
+                </div>
+                <div class="model-option" data-mode="idle" onclick="pickMode('idle')">
+                  <span class="model-option-name">Idle</span>
+                  <span class="model-option-desc">Stock Vector runs. We just watch.</span>
+                  <span class="model-option-dot"></span>
+                </div>
+              </div>
+            </div>
+            <div class="status-pill"><span class="live-dot off"></span><span class="conn-label">Offline</span></div>
+          </div>
+          <div class="topbar-right">
+            <button class="icon-btn rec-btn" type="button" onclick="toggleRecord()" title="Record episode" aria-label="Record episode">
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="var(--acc)"/></svg>
+            </button>
+            <button class="icon-btn" type="button" onclick="toggleDark()" title="Toggle theme" aria-label="Toggle theme">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true">
+                <path class="moon" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                <g class="sun"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></g>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="vitals-wrap" id="vitals">
+          <div class="vitals">
+            <div class="cam cam-live" data-cam>
+              <div class="cam-empty"><span class="welcome-orb cloak-orb" style="width:34px;height:34px"><svg viewBox="-52 -52 104 104" aria-hidden="true"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg></span><span class="cam-msg">No camera yet</span></div>
+              <span class="cam-tag" hidden>Live</span>
+            </div>
+            <div class="drives" id="drives"></div>
+            <div class="vitals-stats">
+              <div class="vstat"><div class="vstat-k">Behavior</div><div class="vstat-v acc" id="v-behavior">—</div></div>
+              <div class="vstat"><div class="vstat-k">Battery</div><div class="vstat-v" id="v-battery">—</div></div>
+              <div class="vstat"><div class="vstat-k">Proximity</div><div class="vstat-v" id="v-prox">—</div></div>
+              <div class="vstat"><div class="vstat-k">Body</div><div class="vstat-v" id="v-body">—</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="chat-area" id="chat-area">
+          <div class="empty" id="empty-state">
+            <div class="empty-inner">
+              <div class="welcome-row">
+                <span class="welcome-orb cloak-orb"><svg viewBox="-52 -52 104 104" aria-hidden="true"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg></span>
+                <h1 class="empty-greeting">Hey, Vector.</h1>
+              </div>
+              <p class="empty-sub">What it senses, feels and says shows up here. Type below to make it talk.</p>
+            </div>
+          </div>
+          <div class="messages" id="messages"></div>
+        </div>
+
+        <div class="input-area">
+          <div class="input-wrap">
+            <div class="input-area-wrap">
+              <div class="plus-menu" id="plus-menu">
+                <button class="plus-item on" data-m="say" onclick="setSayMode('say')">
+                  <span class="plus-item-icon"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+                  <span class="plus-item-text"><span class="plus-item-label">Say it</span><span class="plus-item-desc">Vector speaks your words exactly</span></span>
+                  <span class="plus-item-check"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                </button>
+                <button class="plus-item" data-m="talk" onclick="setSayMode('talk')">
+                  <span class="plus-item-icon"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                  <span class="plus-item-text"><span class="plus-item-label">Talk to it</span><span class="plus-item-desc">It answers in character (LLM)</span></span>
+                  <span class="plus-item-check"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+                </button>
+              </div>
+              <div class="input-box" id="input-box">
+                <button class="plus-btn" id="plus-btn" onclick="togglePlusMenu(event)" title="Voice mode" aria-label="Voice mode"><span class="plus-glyph" aria-hidden="true">+</span></button>
+                <span class="say-mode" data-m="say" onclick="togglePlusMenu(event)">Say it</span>
+                <textarea class="chat-input" id="chat-input" placeholder="Make Vector say…" rows="1"></textarea>
+                <button class="send-btn" id="send-btn" onclick="send()" disabled aria-label="Send">
+                  <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="input-foot">
+              <span class="input-sub" id="voice-sub">Voice loading…</span>
+              <span class="input-sub">Enter to send &middot; Shift+Enter for new line</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TELEOP -->
+      <section class="page" id="page-teleop" data-page="teleop" aria-label="Teleop" tabindex="-1" hidden>
+        <div class="topbar">
+          <div class="topbar-left">
+            <button class="icon-btn sb-toggle" type="button" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-controls="sidebar">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            </button>
+            <h1 class="page-title">Teleop</h1>
+            <div class="status-pill"><span class="live-dot off"></span><span class="conn-label">Offline</span></div>
+          </div>
+          <div class="topbar-right">
+            <button class="icon-btn rec-btn" type="button" onclick="toggleRecord()" title="Record episode" aria-label="Record episode">
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="var(--acc)"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="tele-scroll">
+          <div class="tele">
+            <div>
+              <div class="cam" data-cam>
+                <div class="cam-empty"><span class="cam-msg">No camera yet</span></div>
+                <span class="cam-tag" hidden>Live</span>
+              </div>
+              <p class="tele-note" id="tele-note">Switch to Teleop mode to drive. Recording starts automatically in Teleop (config: <code>datalog.auto_record</code>).</p>
+            </div>
+            <div>
+              <div class="panel">
+                <div class="panel-h">Drive <button class="chip" id="tele-mode-btn" onclick="pickMode('teleop')">Take control</button></div>
+                <div class="panel-b">
+                  <div class="keys">
+                    <div class="key blank"></div><div class="key" data-k="w">W</div><div class="key blank"></div>
+                    <div class="key" data-k="a">A</div><div class="key" data-k="s">S</div><div class="key" data-k="d">D</div>
+                  </div>
+                  <div class="legend">
+                    <kbd>W A S D</kbd><span>Drive</span>
+                    <kbd>↑ ↓</kbd><span>Head</span>
+                    <kbd>R F</kbd><span>Lift up / down</span>
+                    <kbd>Shift</kbd><span>Boost</span>
+                    <kbd>Space</kbd><span>Stop</span>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-h">Command <span class="pad-state" id="pad-state">No gamepad</span></div>
+                <div class="panel-b" id="axes"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="page settings-page" id="page-settings" data-page="settings" aria-label="Settings" tabindex="-1" hidden>
+        <div class="topbar">
+          <div class="topbar-left">
+            <button class="icon-btn sb-toggle" type="button" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-controls="sidebar">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            </button>
+            <h1 class="page-title">Settings</h1>
+          </div>
+        </div>
+        <div class="vs-scroll"><div class="vs">
+          <h2>Robot</h2>
+          <dl class="kv" id="kv-robot"></dl>
+          <h2>Voice</h2>
+          <dl class="kv" id="kv-voice"></dl>
+          <h2>Animations</h2>
+          <div class="anim-form">
+            <input id="anim-key" list="anim-list" placeholder="Trigger or keyword, e.g. Happy">
+            <datalist id="anim-list"></datalist>
+            <button class="chip" onclick="playAnim()">Play</button>
+          </div>
+          <div class="trig-list" id="trig-list">Connect to load Vector's animation triggers.</div>
+          <p class="tele-note">Edit <code>config.yaml</code> to tune drives, behaviors and voice. Restart to apply.</p>
+        </div></div>
+      </section>
+
+      <!-- LAB -->
+      <section class="page settings-page" id="page-lab" data-page="lab" aria-label="Drive lab" tabindex="-1" hidden>
+        <div class="topbar">
+          <div class="topbar-left">
+            <button class="icon-btn sb-toggle" type="button" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-controls="sidebar">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            </button>
+            <h1 class="page-title">Drive lab</h1>
+          </div>
+        </div>
+        <div class="vs-scroll"><div class="vs">
+          <h2>Simulate a sense</h2>
+          <p class="tele-note">Fires the same event the robot would. Drives react, voice and behaviors follow.</p>
+          <div class="chip-row" id="sim-row"></div>
+          <h2>Set drives</h2>
+          <p class="tele-note">Drag to override. The value keeps decaying from wherever you drop it.</p>
+          <div id="lab-drives"></div>
+          <h2>Behavior scores</h2>
+          <dl class="kv" id="kv-scores"></dl>
+        </div></div>
+      </section>
+
+    </div>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
