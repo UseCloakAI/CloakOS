@@ -1,13 +1,15 @@
 # Cloak for Vector
 
 A living-creature brain for an OEM Anki/DDL Vector, part of [Cloak](https://usecloak.org).
-**The PC is the brain, Vector is the body.** No firmware mods: Vector talks to your PC over Wi-Fi through [wire-pod](https://github.com/kercre123/wire-pod) and the SDK.
+**The PC is the brain, Vector is the body.** No firmware mods and no Anki SDK. Everything is custom and built on [wire-pod](https://github.com/kercre123/wire-pod): Cloak asks wire-pod for the robot's address, token and cert, then talks gRPC straight to Vector with its own client.
 
 ```
- Vector ──Wi-Fi/gRPC──▶ RobotLink ──▶ World ──▶ Senses ──▶ bus ──▶ Drives ──▶ Policy ──▶ Body ──▶ Vector
-                                                     │                 │                     ▲
-                                                     └──▶ Voice (LLM → Kokoro/Piper → 16 kHz WAV)
-                                                     └──▶ Recorder (JSONL + JPEG episodes)
+ wire-pod ──HTTP──▶ discovery (serial · IP · token · cert)
+ Vector ◀──TLS gRPC──▶ VectorClient ──▶ World ──▶ Senses ──▶ bus ──▶ Drives ──▶ Policy ──▶ Body ──▶ Vector
+                                                         │               │                    ▲
+                                                         ├──▶ Expression (Cloak eyes · chirps · emotes)
+                                                         ├──▶ Voice (LLM → Kokoro/Piper → 16 kHz PCM)
+                                                         └──▶ Recorder (JSONL + JPEG episodes)
                                     Web dashboard (Cloak chat UI) ◀──WebSocket──▶ modes · teleop · say
 ```
 
@@ -20,8 +22,15 @@ cloak_vector/
   config.py        config.yaml + .env overrides
   bus.py           asyncio pub/sub (sense.*, drive.*, voice.said, behavior.changed, ...)
   world.py         latest sensor snapshot
-  connection/      robot.py  connect · heartbeat · reconnect w/ backoff · clean shutdown
-                   body.py   the one gateway to motors/anims/speaker; defines the Action space
+  vector/          our own robot client (no Anki SDK)
+                   discovery.py  wire-pod /api-sdk/get_sdk_info + /session-certs → serial, IP, token, cert
+                   client.py     async gRPC: control, events, camera, motors, actions, screen, speaker
+                   proto/ + pb/  Vector's external-interface protos (Apache-2.0, Anki) + generated stubs
+  connection/      robot.py  discover · connect · heartbeat · reconnect w/ backoff · clean shutdown
+                   body.py   the one gateway to motors/screen/speaker; defines the Action space
+  expression/      eyes.py   Cloak-styled procedural eyes on Vector's screen, driven by the drives
+                   chirps.py synthesized creature sounds
+                   emotes.py eyes + motion + chirp clips (greet, happy, curious, scared, sad, ...)
   perception/      senses.py raw state → debounced sense events   (YOLO slots in here, phase 2)
                    ears.py   optional loud-sound detector on the PC mic
   drives/          model.py  pure drive math, unit-tested
@@ -34,13 +43,14 @@ cloak_vector/
   web/             FastAPI server + static UI (vendored cloak.css from usecloakai/cloak)
 config.yaml        all tuning
 .env.example       robot + LLM secrets
-tests/             no robot needed (includes an end-to-end run against a fake SDK robot)
+scripts/gen_proto.py  regenerate vector/pb from vector/proto
+tests/             no robot needed (includes a fake Vector gRPC server over real TLS)
 ```
 
 ## Setup
 
 ### 1. wire-pod
-Set up wire-pod on a machine on the same network as Vector ([wire-pod wiki](https://github.com/kercre123/wire-pod/wiki)), then pair the bot through wire-pod's web UI (`http://<pod-ip>:8080`). Once Vector answers "Hey Vector" through wire-pod, you're good.
+Set up wire-pod on a machine on the same network as Vector ([wire-pod wiki](https://github.com/kercre123/wire-pod/wiki)), then pair and authenticate the bot in wire-pod's web UI (`http://<pod-ip>:8080`). Once Vector answers "Hey Vector" through wire-pod, you're good. That's the only robot setup: there's no SDK configure step.
 
 ### 2. Python
 ```bash
@@ -48,19 +58,15 @@ python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[kokoro]"          # or .[piper]; add ,ears for the PC mic, ,dev for tests
 ```
 
-### 3. SDK auth (once)
-```bash
-python -m anki_vector.configure
-```
-It asks for Vector's serial (on the bottom of the bot, or in wire-pod's bot list), the wire-pod address (`192.168.1.50:8080`, or blank for `escapepod.local`), the robot name (`Vector-A1B2`) and the IP. It pulls the cert from wire-pod and writes `~/.anki_vector/sdk_config.ini`.
-
-### 4. `.env`
+### 3. `.env`
 ```bash
 cp .env.example .env
 ```
-Set `VECTOR_SERIAL` (and `VECTOR_IP` if mDNS is flaky). For lines from an LLM, set `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY` to any OpenAI-compatible endpoint: Cloak, Ollama (`http://localhost:11434/v1`), LM Studio and so on. Without an LLM, Vector speaks from its cached line pool.
+Set `WIREPOD_URL` (default `http://escapepod.local:8080`). On connect, Cloak reads the bot's serial, IP and token from wire-pod's `/api-sdk/get_sdk_info` and fetches its TLS cert from `/session-certs/<serial>`; the cert is cached in `data/certs/`. Running several bots? Set `VECTOR_SERIAL` to pick one. `VECTOR_IP`, `VECTOR_GUID` and `VECTOR_NAME` override discovery if you ever need to.
 
-### 5. Voice models
+For lines from an LLM, set `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY` to any OpenAI-compatible endpoint: Cloak, Ollama (`http://localhost:11434/v1`), LM Studio and so on. Without an LLM, Vector speaks from its cached line pool.
+
+### 4. Voice models
 Kokoro (the default):
 ```bash
 mkdir -p models && cd models
@@ -77,7 +83,7 @@ python -m cloak_vector --mode teleop   # start in teleop (records automatically)
 python -m cloak_vector --mode idle     # stock Vector runs; we just watch and log
 python -m cloak_vector --no-web -v     # headless, debug logs
 ```
-Switch modes live from the dashboard's mode picker. Ctrl+C stops the motors, saves any recording and disconnects cleanly. If Vector drops off Wi-Fi, the link retries with backoff (1s up to 30s) and picks the mode back up on reconnect.
+Switch modes live from the dashboard's mode picker. Ctrl+C stops the motors, hands control back to Vector, saves any recording and disconnects cleanly. If Vector drops off Wi-Fi, or any stream dies, the link re-discovers through wire-pod and reconnects with backoff (1s up to 30s), then picks the mode back up.
 
 | Mode | Who drives | Behavior control |
 |---|---|---|
@@ -87,11 +93,11 @@ Switch modes live from the dashboard's mode picker. Ctrl+C stops the motors, sav
 
 ## Dashboard
 It's styled like Cloak chat: same sidebar, topbar, composer and themes (`cloak_dark` / `cloak_theme` in localStorage).
-- **Live**: camera with a face box, drive meters, behavior / battery / proximity / body tiles. Below that, the stream: what Vector says shows up as Cloak messages, and senses, drive crossings and behavior switches show up as event rows.
+- **Live**: camera with a face box and an inset of the eyes Cloak is drawing on Vector's screen (with no camera, the eyes fill the box, so you can watch them offline too), drive meters, behavior / battery / proximity / body tiles. Below that, the stream: what Vector says shows up as Cloak messages, and senses, drive crossings and behavior switches show up as event rows.
 - **Composer**: **Say it** makes Vector speak your text as written. **Talk to it** sends your text to the LLM, and Vector answers in character.
 - **Teleop**: `W A S D` to drive, `↑ ↓` head, `R F` lift, `Shift` boost, `Space` stop. Gamepads work too (left stick drives, right stick moves the head, triggers move the lift, A is boost). Input stops if the tab goes quiet for 0.5s (dead-man).
-- **Drive lab**: fire fake senses, drag drive values around, and watch the live behavior scores. Handy for tuning without the bot.
-- **Settings**: connection, voice and LLM status, and every animation trigger your Vector has, with a test player.
+- **Drive lab**: fire fake senses, play any emote, drag drive values around, and watch the live behavior scores. Handy for tuning without the bot.
+- **Settings**: wire-pod and robot info, voice and LLM status, and every stock animation trigger your Vector has, with a test player.
 
 Keep `cloak_vector/web/static/cloak.css` an exact copy of `usecloakai/cloak/cloak.css`. Put overrides in `vector.css`, and to sync, copy the file over again.
 
@@ -121,10 +127,17 @@ Every tick: `v += (baseline − v)·(1 − e^(−dt/τ)) + drift·dt`, clamped. 
 | look_around | `0.15 + 0.5·curiosity + 0.2·(1−energy)` | head and body scans |
 | idle | `0.2` | sits and glances around |
 
-The highest score wins. A running behavior keeps a +0.15 stickiness bonus and its `min_s` before it can be replaced, but reflexes cut in right away. Animations are picked by keyword from Vector's own trigger list, which blends stock animations into the rule behaviors.
+The highest score wins. A running behavior keeps a +0.15 stickiness bonus and its `min_s` before it can be replaced, but reflexes cut in right away. Behaviors express themselves through Cloak's own emotes (below).
+
+## Expression (custom)
+- **Eyes**: Cloak's look on Vector's 184×96 screen. Two square rust eyes with a hard offset shadow, redrawn 8×/s. Energy sets how open they are, curiosity their size and asymmetry, attachment gives happy `^ ^` lids, boredom droops them, fear makes them wide and shaky. They follow the face Vector sees, blink, wander when idle and shut during naps.
+- **Chirps**: creature sounds synthesized with numpy (gliding notes plus harmonics), with no sound files. They're separate from TTS speech.
+- **Emotes**: `greet happy curious scared startle sad bored sleepy wake`. Each one plays eyes, motion (wiggles, nods, head/lift moves) and a chirp together.
+- **Reactions**: sense → emote on top of the running behavior (`touched: happy`, `heard_wake_word: curious`, ...).
+- **Stock blend**: `expression.stock_blend` (default 0.25) is the chance an emote borrows one of Vector's built-in animations instead. Set it to `0` for a fully custom creature.
 
 ## Voice
-A trigger (a drive crossing like `fear.high`, or a sense like `picked_up`) leads to a line, then TTS, then a 16 kHz mono 16-bit WAV, then Vector's speaker.
+A trigger (a drive crossing like `fear.high`, or a sense like `picked_up`) leads to a line, then TTS, then 16 kHz mono 16-bit PCM, which our client streams to Vector's speaker in 1 KB chunks paced to real time.
 - Every fallback line in `voice.triggers` is rendered at startup, so those play with no TTS wait.
 - LLM lines race `llm.timeout_s` (2.5s). A slow or missing LLM falls back to a cached line.
 - Every rendered line is cached on disk by its text (LRU, 500 files).
@@ -141,23 +154,26 @@ Kokoro int8 takes roughly 0.5s per short line on a plain CPU. Cached lines skip 
   {"i": 42, "t": 1729830000.1, "mode": "teleop", "obs": {"head_angle": 0.17, "lift_mm": 32.0, "left_mmps": 148.2, "proximity_mm": 210.0, "picked_up": false, "face": {"cx": 0.52, "size": 0.14}, "...": "..."},
    "drives": {"energy": 0.71, "...": "..."}, "behavior": "teleop",
    "action": {"left_mmps": 150, "right_mmps": 150, "head_rate": 0, "lift_rate": 0}, "action_source": "teleop",
-   "events": [{"topic": "sense.touched"}, {"kind": "anim", "trigger": "GreetAfterLongTime"}], "frame": "frames/0000042.jpg"}
+   "events": [{"topic": "sense.touched"}, {"kind": "emote", "name": "happy"}], "frame": "frames/0000042.jpg"}
   ```
 - `frames/*.jpg`: 320×180 camera frames
 
-`action` is the continuous action space, the same one teleop produces and a learned policy will output. High-level moves (turns, anims, speech) are logged as discrete `events`. Each recording is one episode. Teleop records automatically, and the record button covers everything else.
+`action` is the continuous action space, the same one teleop produces and a learned policy will output. High-level moves (turns, emotes, speech) are logged as discrete `events`. Each recording is one episode. Teleop records automatically, and the record button covers everything else.
 
 ## Phase 2 hooks
 - **Vision (YOLO)**: a detector in `perception/` publishes `raw.face` / `raw.object` events on the bus. Senses, drives and behaviors don't change.
 - **Learned policy (ACT / diffusion)**: subclass `behaviors.base.Policy`, read the `Obs`, and send `body.apply(Action(...))` each step. Then register it in `Brain.policies` as a new mode. Write an exporter that turns `data/episodes` into LeRobot or HDF5.
 - **Personality LLM**: it's just `llm.base_url` / `llm.model` / `llm.persona`.
+- **Learned expression**: `Eyes.shape()` turns drives into a handful of eye parameters, so a model can drive the same parameters later.
 
 ## Tests
 ```bash
 pip install -e ".[dev]" && pytest
 ```
-The tests cover drive math, behavior selection, teleop mapping, the WAV format, the recorder, and a full brain run against a fake SDK robot (connect, auto, teleop with recording, idle, shutdown).
+The tests cover drive math, behavior selection, teleop mapping, audio, the recorder, eyes and chirps, wire-pod discovery (mocked HTTP) and our gRPC client against a fake Vector server over real TLS with token auth. There's also a full brain run against that fake robot: connect, control grant, events, camera, eyes on the screen, auto, teleop with recording, idle, shutdown.
+
+Protos: `cloak_vector/vector/proto/` holds Anki's Vector external-interface protos (Apache-2.0, via vector-go-sdk) with the REST annotations stripped. The generated stubs are committed. If you edit a proto, run `pip install -e ".[proto]" && python scripts/gen_proto.py`.
 
 ## Notes
-- The SDK doesn't expose Vector's microphone, so loud sounds come from the PC mic (`senses.ears.enabled: true`, `pip install -e ".[ears]"`). The "Hey Vector" wake word comes through the SDK as a sense event.
-- In Auto and Teleop, Cloak holds behavior control at default priority. Vector's own safety reactions, like the tuck when it's falling, still win.
+- Vector's external interface doesn't stream its microphone, so loud sounds come from the PC mic (`senses.ears.enabled: true`, `pip install -e ".[ears]"`). The "Hey Vector" wake word arrives on the event stream as a sense event.
+- In Auto and Teleop, Cloak holds behavior control at `robot.control_priority: default`. Vector's own safety reactions, like the tuck when it's falling, still win. `override` disables those too, so be careful.

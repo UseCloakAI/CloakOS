@@ -1,4 +1,4 @@
-"""Voice: trigger -> line -> TTS -> 16 kHz WAV -> Vector's speaker.
+"""Voice: trigger -> line -> TTS -> 16 kHz PCM -> Vector's speaker (streamed by our own client).
 
 Latency plan:
   - every fallback line is pre-rendered to the disk cache at startup, so those play instantly
@@ -12,6 +12,7 @@ import hashlib
 import logging
 import random
 import time
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -121,7 +122,9 @@ class Voice:
             path = await asyncio.to_thread(self._render, text)
             ready_ms = int((time.time() - t0) * 1000)
             self.bus.emit("voice.said", text=text, trigger=trigger, source=source, ready_ms=ready_ms, spoken=self.body.ready)
-            await self.body.say_wav(str(path), self.volume, text=text)
+            with wave.open(str(path)) as w:
+                pcm, rate = w.readframes(w.getnframes()), w.getframerate()
+            await self.body.play_pcm(pcm, self.volume, text=text, rate=rate)
         return True
 
     async def reply(self, heard: str) -> str | None:

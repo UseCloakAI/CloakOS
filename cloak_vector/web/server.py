@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..bus import Event
@@ -63,8 +63,12 @@ def create_app(brain: "Brain") -> FastAPI:
     @app.get("/api/info")
     async def info() -> JSONResponse:
         c = brain.cfg
+        bot = brain.link.client.bot if brain.link.client else None
         return JSONResponse({
-            "robot": {k: (c.get("robot", {}) or {}).get(k) for k in ("name", "ip")},
+            "wirepod": (c.get("wirepod", {}) or {}).get("url"),
+            "robot": {"name": bot.name if bot else None, "serial": bot.serial if bot else None,
+                      "host": bot.host if bot else None},
+            "emotes": brain.body.emotes.names if brain.body.emotes else [],
             "llm": {"base_url": (c.get("llm", {}) or {}).get("base_url"), "model": (c.get("llm", {}) or {}).get("model")},
             "tts": brain.voice.tts.id if brain.voice.tts else None,
             "tts_error": brain.voice.tts_error,
@@ -73,6 +77,15 @@ def create_app(brain: "Brain") -> FastAPI:
             "drives": list(DRIVES),
             "sim_events": list(SIM_EVENTS),
         })
+
+    @app.get("/eyes.png")
+    async def eyes() -> Response:
+        img = brain.eye_frame
+        if img is None:
+            return Response(status_code=204)
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return Response(buf.getvalue(), media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @app.get("/camera.mjpg")
     async def camera() -> StreamingResponse:
@@ -124,6 +137,8 @@ def create_app(brain: "Brain") -> FastAPI:
             asyncio.ensure_future(_talk(str(msg.get("text", ""))[:500]))
         elif kind == "anim":
             asyncio.ensure_future(brain.body.anim(str(msg.get("key", ""))))
+        elif kind == "emote":
+            brain.react(str(msg.get("name", "")))
         elif kind == "record":
             brain.toggle_recording(bool(msg.get("on")), note=str(msg.get("note", "")))
         elif kind == "poke" and msg.get("drive") in DRIVES:

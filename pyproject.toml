@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "Cloak for Vector: a living-creature brain for Anki/DDL Vector, running on your PC."
 requires-python = ">=3.11"
 dependencies = [
-  "wirepod_vector_sdk>=0.8",
+  "grpcio>=1.66.2",
+  "protobuf>=5.27.2",
+  "cryptography>=42",
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
   "httpx>=0.27",
@@ -24,6 +26,7 @@ kokoro = ["kokoro-onnx>=0.4"]
 piper = ["piper-tts>=1.2"]
 ears = ["sounddevice>=0.4"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+proto = ["grpcio-tools>=1.66.2"]
 
 [project.scripts]
 cloak-vector = "cloak_vector.__main__:main"
@@ -32,7 +35,7 @@ cloak-vector = "cloak_vector.__main__:main"
 include = ["cloak_vector*"]
 
 [tool.setuptools.package-data]
-cloak_vector = ["web/static/*"]
+cloak_vector = ["web/static/*", "vector/proto/*.proto"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

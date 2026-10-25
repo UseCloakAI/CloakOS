@@ -16,6 +16,8 @@ ENV_OVERRIDES = {
     "VECTOR_SERIAL": "robot.serial",
     "VECTOR_IP": "robot.ip",
     "VECTOR_NAME": "robot.name",
+    "VECTOR_GUID": "robot.guid",
+    "WIREPOD_URL": "wirepod.url",
     "LLM_BASE_URL": "llm.base_url",
     "LLM_API_KEY": "llm.api_key",
     "LLM_MODEL": "llm.model",

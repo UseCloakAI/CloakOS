@@ -18,8 +18,10 @@ from .bus import Bus, Event
 from .connection import Body, RobotLink
 from .datalog import Recorder
 from .drives import Context, DriveModel
+from .expression import Emotes, Eyes
 from .perception import Ears, Senses
 from .teleop import TeleopPolicy
+from .vector import rgb565
 from .voice import Voice
 from .world import World
 
@@ -42,6 +44,14 @@ class Brain:
         self.senses = Senses(cfg, self.bus, self.world)
         self.ears = Ears(cfg, self.bus)
         self.voice = Voice(cfg, self.bus, self.body, self.drives.values)
+        ex = cfg.get("expression", {}) or {}
+        self.eyes = Eyes(cfg)
+        self.eyes_on = bool(ex.get("eyes", True))
+        self.eye_fps = float(ex.get("eye_fps", 8))
+        self.eye_frame = None                    # latest rendered eyes (PIL), for the dashboard too
+        self.reactions: dict[str, str] = ex.get("reactions", {}) or {}
+        self.body.emotes = Emotes(cfg, self.eyes)
+        self._emote_task: asyncio.Task | None = None
         self.recorder = Recorder(cfg)
         self.policies: dict[str, Policy] = {
             "auto": RulePolicy(cfg, self.body, self.bus, self.world, self.drives.values),
@@ -66,6 +76,13 @@ class Brain:
         if name not in NON_STIMULI:
             self.world.stimulate()
         self._emit_crossings(self.drives.impulse(name))
+        if name in self.reactions and self.mode == "auto":
+            self.react(self.reactions[name])
+
+    def react(self, emote: str) -> None:
+        """Fire-and-forget emote on top of whatever's running; skipped if one is already playing."""
+        if self._emote_task is None or self._emote_task.done():
+            self._emote_task = asyncio.ensure_future(self.body.emote(emote))
 
     def _emit_crossings(self, crossings: list[str]) -> None:
         for c in crossings:
@@ -139,6 +156,19 @@ class Brain:
             self._record(obs)
             await asyncio.sleep(max(0.0, period - (time.monotonic() - start)))
 
+    async def _eye_loop(self) -> None:
+        """Render Cloak's eyes every frame; push them to the screen whenever we hold control."""
+        period = 1.0 / self.eye_fps
+        while not self._stop.is_set():
+            t0 = time.monotonic()
+            face = self.world.face
+            gaze = (face.cx, face.cy) if face is not None and self.world.face_visible(1.0) else None
+            behavior = self.policy.current if self.policy else "-"
+            self.eye_frame = self.eyes.render(self.eyes.shape(self.drives.values, behavior, gaze))
+            if self.eyes_on and self.body.ready:
+                await self.body.face(rgb565(self.eye_frame), int(3000 * period))
+            await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
+
     def _record(self, obs: Obs) -> None:
         events, self._tick_events = self._tick_events, []
         discrete = self.body.drain_discrete()
@@ -191,6 +221,7 @@ class Brain:
         tasks = [
             asyncio.create_task(self.link.run(), name="link"),
             asyncio.create_task(self._tick_loop(), name="tick"),
+            asyncio.create_task(self._eye_loop(), name="eyes"),
             asyncio.create_task(self.voice.start(), name="voice"),
         ]
         if web:

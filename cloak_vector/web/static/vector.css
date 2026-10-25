@@ -82,6 +82,8 @@
 .cam{position:relative;aspect-ratio:16/9;background:var(--p2);border-right:var(--bd);overflow:hidden}
 .cam img{display:block;width:100%;height:100%;object-fit:cover}
 .cam-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--ink);opacity:.45;text-align:center;padding:12px}
+.eyes-big{width:62%;max-width:240px;aspect-ratio:184/96;border:var(--bd);background:#000;image-rendering:auto}
+.eyes-inset{position:absolute;right:8px;bottom:8px;width:92px;aspect-ratio:184/96;border:var(--bd);background:#000;box-shadow:var(--shsm)}
 .cam-tag{position:absolute;left:8px;top:8px;padding:3px 7px;background:var(--ink);color:var(--paper);font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.14em}
 .cam-face{position:absolute;border:2px solid var(--acc);pointer-events:none;transition:all .12s linear}
 .drives{display:flex;flex-direction:column;justify-content:center;gap:9px;padding:14px 16px}
@@ -170,7 +172,9 @@
 @media (max-width:640px){
   .vitals{grid-template-columns:1fr}
   .cam{border-right:none;border-bottom:var(--bd)}
-  .cam-live{display:none}
+  .cam-live{aspect-ratio:auto;padding:10px 0}
+  .cam-live .cam-empty{position:static}
+  .cam-live .cam-msg{display:none}
   .drives{gap:6px;padding:10px 12px}
   .vitals-stats{grid-template-columns:repeat(2,1fr)}
   .vstat:nth-child(2){border-right:none}

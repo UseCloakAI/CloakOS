@@ -28,7 +28,7 @@ ACTION_SPACE = {
     "head_rate": "head motor command, rad/s, +-4",
     "lift_rate": "lift motor command, rad/s, +-4",
 }
-SECRET_KEYS = {"api_key", "serial"}
+SECRET_KEYS = {"api_key", "serial", "guid"}
 
 
 def _strip_secrets(d: Any) -> Any:

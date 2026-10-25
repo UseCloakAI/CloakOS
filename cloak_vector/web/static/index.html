@@ -116,10 +116,11 @@
         <div class="vitals-wrap" id="vitals">
           <div class="vitals">
             <div class="cam cam-live" data-cam>
-              <div class="cam-empty"><span class="welcome-orb cloak-orb" style="width:34px;height:34px"><svg viewBox="-52 -52 104 104" aria-hidden="true"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg></span><span class="cam-msg">No camera yet</span></div>
-              <span class="cam-tag" hidden>Live</span>
-            </div>
-            <div class="drives" id="drives"></div>
+                <div class="cam-empty"><img class="eyes-big" data-eyes alt="Vector's eyes"><span class="cam-msg">No camera yet · live eyes</span></div>
+                <span class="cam-tag" hidden>Live</span>
+                <img class="eyes-inset" data-eyes alt="" hidden>
+              </div>
+              <div class="drives" id="drives"></div>
             <div class="vitals-stats">
               <div class="vstat"><div class="vstat-k">Behavior</div><div class="vstat-v acc" id="v-behavior">—</div></div>
               <div class="vstat"><div class="vstat-k">Battery</div><div class="vstat-v" id="v-battery">—</div></div>
@@ -239,7 +240,8 @@
           <dl class="kv" id="kv-robot"></dl>
           <h2>Voice</h2>
           <dl class="kv" id="kv-voice"></dl>
-          <h2>Animations</h2>
+          <h2>Stock animations</h2>
+          <p class="tele-note">Cloak plays its own emotes. These are Vector's built-ins, blended in at <code>expression.stock_blend</code>.</p>
           <div class="anim-form">
             <input id="anim-key" list="anim-list" placeholder="Trigger or keyword, e.g. Happy">
             <datalist id="anim-list"></datalist>
@@ -264,6 +266,9 @@
           <h2>Simulate a sense</h2>
           <p class="tele-note">Fires the same event the robot would. Drives react, voice and behaviors follow.</p>
           <div class="chip-row" id="sim-row"></div>
+          <h2>Play an emote</h2>
+          <p class="tele-note">Cloak's own eyes, motion and chirp. Needs control (Auto or Teleop).</p>
+          <div class="chip-row" id="emote-row"></div>
           <h2>Set drives</h2>
           <p class="tele-note">Drag to override. The value keeps decaying from wherever you drop it.</p>
           <div id="lab-drives"></div>

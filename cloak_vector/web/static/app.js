@@ -99,11 +99,20 @@ function startCamera() {
   $$('[data-cam]').forEach(cam => {
     const img = new Image();
     img.alt = 'Vector camera';
-    img.onload = () => { $('.cam-empty', cam).hidden = true; $('.cam-tag', cam).hidden = false; if (!img.isConnected) cam.prepend(img); };
-    img.onerror = () => { img.remove(); $('.cam-empty', cam).hidden = false; $('.cam-tag', cam).hidden = true; setTimeout(() => { img.src = '/camera.mjpg?' + Date.now(); }, 3000); };
+    const inset = $('.eyes-inset', cam);
+    img.onload = () => { $('.cam-empty', cam).hidden = true; $('.cam-tag', cam).hidden = false; if (inset) inset.hidden = false; if (!img.isConnected) cam.prepend(img); };
+    img.onerror = () => { img.remove(); $('.cam-empty', cam).hidden = false; $('.cam-tag', cam).hidden = true; if (inset) inset.hidden = true; setTimeout(() => { img.src = '/camera.mjpg?' + Date.now(); }, 3000); };
     img.src = '/camera.mjpg';
   });
 }
+
+/* the eyes Cloak is drawing on Vector's screen, mirrored here (works offline too) */
+let eyeN = 0;
+setInterval(() => {
+  if (document.hidden || page !== 'live') return;
+  const src = '/eyes.png?' + (eyeN++);
+  $$('[data-eyes]').forEach(im => { if (im.offsetParent !== null) im.src = src; });
+}, 170);
 
 /* ── event stream ───────────────────────────────────────── */
 const EV_TEXT = {
@@ -122,6 +131,7 @@ function onEvent(m, quiet) {
   else if (t.startsWith('drive.')) { const [, n, edge] = t.split('.'); text = `${n} ${edge === 'high' ? 'is high' : 'is low'} · ${(+d.value).toFixed(2)}`; }
   else if (t === 'behavior.changed') text = `→ ${d.name.replace('_', ' ')}`;
   else if (t === 'mode.changed') text = `Mode: ${d.mode}`;
+  else if (t === 'robot.connection' && d.state === 'connected' && d.name) text = `Connected to ${d.name}`;
   else if (t === 'robot.connection') text = d.state === 'connected' ? 'Connected to Vector' : 'Disconnected';
   else if (t === 'record.started') text = 'Recording started';
   else if (t === 'record.stopped') text = `Saved ${d.steps} steps`;
@@ -261,7 +271,9 @@ function toggleDark() {
 async function loadInfo() {
   try { info = await (await fetch('/api/info')).json(); } catch { return; }
   const kv = (el, rows) => { $(el).innerHTML = rows.map(([k, v, cls]) => `<dt>${esc(k)}</dt><dd class="${cls || ''}">${esc(v ?? '—')}</dd>`).join(''); };
-  kv('#kv-robot', [['Connection', S ? S.connection : '—'], ['Name', info.robot.name], ['IP', info.robot.ip], ['Control', S && S.has_control ? 'held by Cloak' : 'stock Vector']]);
+  kv('#kv-robot', [['wire-pod', info.wirepod], ['Connection', S ? S.connection : '—'], ['Name', info.robot.name], ['Serial', info.robot.serial], ['Address', info.robot.host], ['Control', S && S.has_control ? 'held by Cloak' : 'stock Vector']]);
+  if (info.robot.name) $('#sb-name').textContent = info.robot.name;
+  $('#emote-row').innerHTML = (info.emotes || []).map(e => `<button class="chip" onclick="sendWS({type:'emote',name:'${e}'})">${esc(e)}</button>`).join('');
   kv('#kv-voice', [['TTS', info.tts], ...(info.tts_error ? [['TTS error', info.tts_error, 'err']] : []), ['LLM endpoint', info.llm.base_url], ['LLM model', info.llm.model]]);
   const trigs = info.anim_triggers || [];
   $('#anim-list').innerHTML = trigs.map(t => `<option value="${esc(t)}">`).join('');

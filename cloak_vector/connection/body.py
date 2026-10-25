@@ -1,8 +1,8 @@
-"""Body: the single gateway to Vector's motors, animations and speaker.
+"""Body: the single gateway to Vector's motors, screen and speaker.
 
 Behaviors, teleop and (later) a learned policy all move the robot through here, so the
 logger sees one consistent command stream. The continuous action space is Action
-(wheel speeds + head/lift rates); one-shot things (anims, speech, turns) are logged as
+(wheel speeds + head/lift rates); one-shot things (emotes, turns, speech) are logged as
 discrete events.
 """
 from __future__ import annotations
@@ -43,15 +43,12 @@ class Body:
         self.link = link
         self.cmd = Action()
         self.source = "none"          # who sent the last command: behavior name, "teleop", "policy"
+        self.emotes: Any = None       # expression.Emotes, attached by the brain
         self._discrete: list[dict[str, Any]] = []
 
     @property
     def ready(self) -> bool:
         return self.link.connected and self.link.has_control
-
-    @property
-    def _r(self) -> Any:
-        return self.link.robot
 
     def drain_discrete(self) -> list[dict[str, Any]]:
         out, self._discrete = self._discrete, []
@@ -60,13 +57,14 @@ class Body:
     def _mark(self, kind: str, **data: Any) -> None:
         self._discrete.append({"kind": kind, "t": time.time(), "source": self.source, **data})
 
-    async def _call(self, fut_factory, timeout: float = 10.0) -> Any:
+    async def _do(self, method: str, *args: Any) -> Any:
+        """Call a VectorClient method if we hold control; failures are logged, never raised."""
         if not self.ready:
             return None
         try:
-            return await self.link.call(fut_factory(), timeout=timeout)
+            return await getattr(self.link.client, method)(*args)
         except Exception as e:
-            log.debug("body call failed: %s", e)
+            log.debug("body %s failed: %s", method, e)
             return None
 
     # ── continuous ─────────────────────────────────────────────
@@ -77,24 +75,32 @@ class Body:
         prev, self.cmd = self.cmd, a
         if source:
             self.source = source
+        if not self.ready:
+            return
         if (a.left_mmps, a.right_mmps) != (prev.left_mmps, prev.right_mmps):
-            await self._call(lambda: self._r.motors.set_wheel_motors(a.left_mmps, a.right_mmps, 400, 400), 2)
+            await self._do("drive_wheels", a.left_mmps, a.right_mmps, 400)
         if a.head_rate != prev.head_rate:
-            await self._call(lambda: self._r.motors.set_head_motor(a.head_rate), 2)
+            await self._do("move_head", a.head_rate)
         if a.lift_rate != prev.lift_rate:
-            await self._call(lambda: self._r.motors.set_lift_motor(a.lift_rate), 2)
+            await self._do("move_lift", a.lift_rate)
 
     async def drive(self, left: float, right: float, source: str | None = None) -> None:
         await self.apply(Action(left, right, self.cmd.head_rate, self.cmd.lift_rate), source)
 
     async def stop(self) -> None:
         self.cmd = Action()
-        await self._call(lambda: self._r.motors.stop_all_motors(), 2)
+        await self._do("stop_all")
 
     # ── discrete ───────────────────────────────────────────────
 
+    async def emote(self, name: str) -> None:
+        """Play a custom emote (expression/emotes.py), sometimes blended with a stock animation."""
+        self._mark("emote", name=name)
+        if self.emotes is not None and self.ready:
+            await self.emotes.play(name, self)
+
     def resolve_anim(self, key: str) -> str | None:
-        """Exact trigger name, else a random trigger containing `key` (case-insensitive)."""
+        """Exact stock trigger name, else a random trigger containing `key` (case-insensitive)."""
         triggers = self.link.anim_triggers
         if key in triggers:
             return key
@@ -102,34 +108,35 @@ class Body:
         return random.choice(matches) if matches else None
 
     async def anim(self, *keys: str) -> str | None:
-        """Play the first key that resolves to a trigger. Returns the trigger played."""
+        """Play Vector's own animation: the first key that resolves to a trigger."""
         for key in keys:
             trig = self.resolve_anim(key)
             if trig:
                 self._mark("anim", trigger=trig)
-                await self._call(lambda: self._r.anim.play_animation_trigger(trig, ignore_body_track=False), 15)
+                await self._do("play_trigger", trig)
                 return trig
         return None
 
-    async def head_angle(self, deg: float) -> None:
-        from anki_vector.util import degrees
+    async def head_angle(self, deg: float, speed: float = 10.0) -> None:
         self._mark("head_angle", deg=deg)
-        await self._call(lambda: self._r.behavior.set_head_angle(degrees(deg)), 5)
+        await self._do("head_angle", deg, speed)
 
-    async def lift_height(self, h: float) -> None:
+    async def lift_height(self, h: float, speed: float = 10.0) -> None:
         self._mark("lift_height", h=h)
-        await self._call(lambda: self._r.behavior.set_lift_height(max(0.0, min(1.0, h))), 5)
+        await self._do("lift_height", h, speed)
 
     async def turn(self, deg: float, speed_dps: float = 90) -> None:
-        from anki_vector.util import degrees
         self._mark("turn", deg=deg)
-        await self._call(lambda: self._r.behavior.turn_in_place(degrees(deg), speed=degrees(speed_dps)), 10)
+        await self._do("turn", deg, speed_dps)
 
     async def straight(self, mm: float, speed_mmps: float = 80) -> None:
-        from anki_vector.util import distance_mm, speed_mmps as spd
         self._mark("straight", mm=mm)
-        await self._call(lambda: self._r.behavior.drive_straight(distance_mm(mm), spd(speed_mmps), should_play_anim=False), 15)
+        await self._do("straight", mm, speed_mmps)
 
-    async def say_wav(self, path: str, volume: int = 75, text: str = "") -> None:
-        self._mark("say", text=text)
-        await self._call(lambda: self._r.audio.stream_wav_file(path, volume), 30)
+    async def face(self, rgb565: bytes, duration_ms: int) -> None:
+        """Draw a frame on the screen. Not logged: the eye renderer calls this ~10x/s."""
+        await self._do("show_face", rgb565, duration_ms)
+
+    async def play_pcm(self, pcm: bytes, volume: int = 75, text: str = "", rate: int = 16000) -> None:
+        self._mark("say" if text else "sound", text=text)
+        await self._do("play_pcm", pcm, rate, volume)

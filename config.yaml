@@ -3,10 +3,16 @@
 mode: auto            # starting mode: auto | teleop | idle
 tick_hz: 10
 
-robot:                # serial/ip/name usually come from .env (VECTOR_SERIAL, VECTOR_IP, VECTOR_NAME)
+wirepod:              # everything about the robot is discovered from here (WIREPOD_URL in .env)
+  url: http://escapepod.local:8080
+
+robot:                # all optional: blank = take it from wire-pod. Set serial if you have several bots.
   serial: null
   ip: null
-  name: null
+  guid: null
+  name: null          # TLS name; read from the robot's cert if blank
+  cert_dir: data/certs
+  control_priority: default   # default | override (also ignores cliffs/low battery: careful)
   connect_timeout_s: 10
   heartbeat_s: 3
   max_backoff_s: 30
@@ -48,6 +54,23 @@ senses:
     enabled: false
     threshold_db: -18
     device: null
+
+# ── expression ─────────────────────────────────────────
+# Cloak's own face: square rust eyes with a hard shadow, synthesized chirps, motion emotes.
+expression:
+  eyes: true
+  eye_fps: 8
+  eye_color: "#D44D2A"
+  eye_shadow: "#5A1F10"
+  chirps: true
+  chirp_volume: 70
+  chirp_pitch: 1.0
+  stock_blend: 0.25   # chance an emote uses one of Vector's stock animations instead (0 = fully custom)
+  reactions:          # sense -> emote, in auto mode, on top of the running behavior
+    touched: happy
+    heard_wake_word: curious
+    put_down: wake
+  # stock: {happy: [Happy, Celebrat]}   # override which stock triggers each emote may borrow
 
 # ── behaviors ──────────────────────────────────────────
 # weight multiplies each behavior's score; anims are trigger names or substrings.

@@ -1,18 +1,17 @@
-"""RobotLink: owns the SDK connection. Connect, watchdog, reconnect with backoff, clean shutdown.
+"""RobotLink: owns the robot connection. Discover via wire-pod, connect, watchdog, reconnect, clean shutdown.
 
-The SDK runs its own event loop on a background thread. AsyncRobot methods return
-concurrent futures, which we await via asyncio.wrap_future; SDK callbacks hop back
-onto our loop through bus.emit_threadsafe.
+Built on our own gRPC client (cloak_vector.vector); no Anki SDK. Streams (events, camera,
+behavior control) run as tasks on the same asyncio loop as the brain.
 """
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import logging
 import time
 from typing import Any
 
 from ..bus import Bus
+from ..vector import VectorClient, discover
 from ..world import CAMERA_H, CAMERA_W, Face, World
 
 log = logging.getLogger(__name__)
@@ -20,10 +19,11 @@ log = logging.getLogger(__name__)
 
 class RobotLink:
     def __init__(self, cfg: dict, bus: Bus, world: World) -> None:
+        self.full_cfg = cfg
         self.cfg = cfg.get("robot", {}) or {}
         self.bus = bus
         self.world = world
-        self.robot: Any = None
+        self.client: VectorClient | None = None
         self.state = "disconnected"
         self.anim_triggers: list[str] = []
         self._want_control = False
@@ -31,14 +31,11 @@ class RobotLink:
 
     @property
     def connected(self) -> bool:
-        return self.state == "connected" and self.robot is not None
+        return self.state == "connected" and self.client is not None
 
     @property
     def has_control(self) -> bool:
-        try:
-            return self.connected and self.robot.conn.control_granted_event.is_set()
-        except Exception:
-            return False
+        return self.connected and self.client.has_control
 
     # ── lifecycle ──────────────────────────────────────────────
 
@@ -69,46 +66,37 @@ class RobotLink:
         self._stop.set()
 
     async def _connect(self) -> None:
-        import anki_vector  # lazy: the rest of the app (and tests) run without the SDK
-        from anki_vector.events import Events
-
         self._set_state("connecting")
-        robot = anki_vector.AsyncRobot(
-            serial=self.cfg.get("serial") or None,
-            ip=self.cfg.get("ip") or None,
-            name=self.cfg.get("name") or None,
-            default_logging=False,
-            behavior_control_level=None,   # take control per mode, not at connect
-            enable_face_detection=True,
-            cache_animation_lists=False,
-        )
-        timeout = float(self.cfg.get("connect_timeout_s", 10))
-        await asyncio.wait_for(asyncio.to_thread(robot.connect, timeout), timeout + 5)
-        self.robot = robot
-        loop = asyncio.get_running_loop()
-        self.bus.bind_loop(loop)
-
-        robot.camera.init_camera_feed()
-        robot.events.subscribe(self._on_face, Events.robot_observed_face)
-        robot.events.subscribe(self._on_wake_word, Events.wake_word)
+        bot = await discover(self.full_cfg, cert_dir=self.cfg.get("cert_dir", "data/certs"))
+        client = VectorClient(bot)
+        self.client = client
+        await client.connect(float(self.cfg.get("connect_timeout_s", 10)))
+        client.spawn(client.control_loop(), "control")
+        client.spawn(client.events(self._on_event), "events")
+        client.spawn(client.camera(self._on_frame), "camera")
         try:
-            await self.call(robot.anim.load_animation_trigger_list(), timeout=15)
-            self.anim_triggers = sorted(robot.anim.anim_trigger_list)
+            await client.face_detection(True)
         except Exception as e:
-            log.warning("could not load animation triggers: %s", e)
-
-        self._set_state("connected")
-        log.info("connected to Vector (%d anim triggers)", len(self.anim_triggers))
+            log.warning("face detection: %s", e)
+        try:
+            self.anim_triggers = await client.anim_triggers()
+        except Exception as e:
+            log.warning("could not list animation triggers: %s", e)
+        self._set_state("connected", name=bot.name, serial=bot.serial, host=bot.host)
+        log.info("connected to %s (%d anim triggers)", bot.name, len(self.anim_triggers))
         if self._want_control:
             await self._request_control()
 
     async def _watch(self) -> None:
-        """Heartbeat: battery read every few seconds; two misses in a row = dead link."""
+        """Heartbeat: battery read every few seconds; two misses or a dead stream = reconnect."""
         misses = 0
         interval = float(self.cfg.get("heartbeat_s", 3))
         while not self._stop.is_set():
+            dead = [t.get_name() for t in self.client._tasks if t.done()]
+            if dead:
+                raise ConnectionError(f"stream ended: {', '.join(dead)}")
             try:
-                b = await self.call(self.robot.get_battery_state(), timeout=5)
+                b = await self.client.battery()
                 self.world.battery_level = int(b.battery_level)
                 self.world.battery_volts = round(float(b.battery_volts), 2)
                 misses = 0
@@ -125,18 +113,21 @@ class RobotLink:
                 pass
 
     async def _disconnect(self) -> None:
-        robot, self.robot = self.robot, None
-        if robot is None:
+        client, self.client = self.client, None
+        if client is None:
             return
         self._set_state("disconnecting")
         try:
-            try:
-                await self.call(robot.motors.stop_all_motors(), timeout=2)
-            except Exception:
-                pass
-            await asyncio.wait_for(asyncio.to_thread(robot.disconnect), 10)
+            if client.has_control:
+                await asyncio.wait_for(client.stop_all(), 2)
+                await client.release_control()
+                await asyncio.sleep(0.2)          # let the release go out before closing the stream
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(client.close(), 5)
         except Exception as e:
-            log.debug("disconnect: %s", e)
+            log.debug("close: %s", e)
         self._set_state("disconnected")
 
     def _set_state(self, state: str, **extra: Any) -> None:
@@ -153,76 +144,58 @@ class RobotLink:
             return
         if want:
             await self._request_control()
-        elif self.has_control:
-            try:
-                await asyncio.to_thread(self.robot.conn.release_control, 10.0)
-            except Exception as e:
-                log.warning("release control: %s", e)
+        else:
+            await self.client.release_control()
 
     async def _request_control(self) -> None:
-        try:
-            await asyncio.to_thread(self.robot.conn.request_control, timeout=float(self.cfg.get("control_timeout_s", 10)))
-        except Exception as e:
-            log.warning("request control: %s", e)
+        ok = await self.client.request_control(self.cfg.get("control_priority", "default"),
+                                               float(self.cfg.get("control_timeout_s", 10)))
+        if not ok:
+            log.warning("behavior control not granted yet")
 
-    # ── calls + sensors ────────────────────────────────────────
-
-    async def call(self, fut: Any, timeout: float | None = None) -> Any:
-        """Await an SDK result (AsyncRobot returns concurrent futures)."""
-        if isinstance(fut, concurrent.futures.Future):
-            fut = asyncio.wrap_future(fut)
-        if asyncio.isfuture(fut) or asyncio.iscoroutine(fut):
-            return await asyncio.wait_for(fut, timeout)
-        return fut
+    # ── sensors ────────────────────────────────────────────────
 
     def poll(self) -> None:
-        """Copy the SDK's cached robot state into World. Cheap; called every tick."""
-        r, w = self.robot, self.world
+        """Copy the latest streamed robot state into World. Cheap; called every tick."""
+        w = self.world
         w.has_control = self.has_control
-        if r is None:
+        c = self.client
+        if c is None or c.state is None:
             return
-        try:
-            st = r.status
-            w.picked_up = st.is_picked_up
-            w.held = st.is_being_held
-            w.cliff = st.is_cliff_detected
-            w.button = st.is_button_pressed
-            w.on_charger = st.is_on_charger
-            w.charging = st.is_charging
-            w.wheels_moving = st.are_wheels_moving
-            w.animating = st.is_animating
-            touch = r.touch.last_sensor_reading
-            w.touching = bool(touch and touch.is_being_touched)
-            prox = r.proximity.last_sensor_reading
-            w.proximity_mm = None if prox is None or prox.unobstructed else round(prox.distance.distance_mm, 1)
-            w.head_angle = round(r.head_angle_rad, 4)
-            w.lift_mm = round(r.lift_height_mm, 1)
-            w.left_mmps = round(r.left_wheel_speed_mmps, 1)
-            w.right_mmps = round(r.right_wheel_speed_mmps, 1)
-            a, g, p = r.accel, r.gyro, r.pose
-            w.accel = (round(a.x, 1), round(a.y, 1), round(a.z, 1))
-            w.gyro = (round(g.x, 3), round(g.y, 3), round(g.z, 3))
-            w.pose = (round(p.position.x, 1), round(p.position.y, 1), round(p.rotation.angle_z.radians, 4))
-            img = r.camera.latest_image
-            if img is not None and r.camera.latest_image_id != w.frame_id:
-                w.frame = img.raw_image
-                w.frame_id = r.camera.latest_image_id
-        except Exception as e:
-            log.debug("poll: %s", e)
+        st = c.state
+        w.picked_up = c.status("picked_up")
+        w.held = c.status("held")
+        w.cliff = c.status("cliff")
+        w.button = c.status("button")
+        w.on_charger = c.status("on_charger")
+        w.charging = c.status("charging")
+        w.wheels_moving = c.status("wheels_moving")
+        w.animating = c.status("animating")
+        w.touching = bool(st.touch_data.is_being_touched)
+        prox = st.prox_data
+        w.proximity_mm = None if prox.unobstructed or not prox.found_object else float(prox.distance_mm)
+        w.head_angle = round(st.head_angle_rad, 4)
+        w.lift_mm = round(st.lift_height_mm, 1)
+        w.left_mmps = round(st.left_wheel_speed_mmps, 1)
+        w.right_mmps = round(st.right_wheel_speed_mmps, 1)
+        w.accel = (round(st.accel.x, 1), round(st.accel.y, 1), round(st.accel.z, 1))
+        w.gyro = (round(st.gyro.x, 3), round(st.gyro.y, 3), round(st.gyro.z, 3))
+        q = st.pose
+        w.pose = (round(q.x, 1), round(q.y, 1), round(st.pose_angle_rad, 4))
 
-    # SDK-thread callbacks: never touch World here, hand off to our loop.
+    def _on_event(self, kind: str, msg: Any) -> None:
+        if kind == "robot_observed_face":
+            r = msg.img_rect
+            self.bus.emit("raw.face", face=Face(
+                id=int(msg.face_id),
+                cx=(r.x_top_left + r.width / 2) / CAMERA_W,
+                cy=(r.y_top_left + r.height / 2) / CAMERA_H,
+                size=r.width / CAMERA_W,
+                t=time.time(),
+            ))
+        elif kind == "wake_word" and msg.WhichOneof("wake_word_type") == "wake_word_begin":
+            self.bus.emit("raw.wake_word")
 
-    def _on_face(self, _robot: Any, _event_type: Any, event: Any, *_: Any) -> None:
-        rect = event.img_rect
-        face = Face(
-            id=int(event.face_id),
-            cx=(rect.x_top_left + rect.width / 2) / CAMERA_W,
-            cy=(rect.y_top_left + rect.height / 2) / CAMERA_H,
-            size=rect.width / CAMERA_W,
-            t=time.time(),
-        )
-        self.bus.emit_threadsafe("raw.face", face=face)
-
-    def _on_wake_word(self, _robot: Any, _event_type: Any, event: Any, *_: Any) -> None:
-        if event.WhichOneof("wake_word_type") == "wake_word_begin":
-            self.bus.emit_threadsafe("raw.wake_word")
+    def _on_frame(self, img: Any, image_id: int) -> None:
+        self.world.frame = img
+        self.world.frame_id = image_id

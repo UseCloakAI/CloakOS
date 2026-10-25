@@ -22,7 +22,7 @@ def main() -> None:
         format="%(asctime)s %(levelname).1s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-    for noisy in ("anki_vector", "httpx", "uvicorn.access"):
+    for noisy in ("grpc", "httpx", "uvicorn.access"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     cfg = load_config(args.config)
