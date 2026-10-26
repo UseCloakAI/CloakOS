@@ -69,6 +69,8 @@ async def discover(cfg: dict, cert_dir: str | Path = "data/certs", transport: ht
             cert = cert_file.read_bytes()
         else:
             resp = await http.get(f"{pod}/session-certs/{serial}")
+            if resp.status_code == 404:
+                raise LookupError(f"wire-pod has no cert for {serial} yet; finish setting the bot up in wire-pod's web UI")
             resp.raise_for_status()
             cert = resp.content
             cert_file.parent.mkdir(parents=True, exist_ok=True)

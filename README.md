@@ -13,6 +13,27 @@ A living-creature brain for an OEM Anki/DDL Vector, part of [Cloak](https://usec
                                     Web dashboard (Cloak chat UI) ◀──WebSocket──▶ modes · teleop · say
 ```
 
+## Install (macOS)
+
+One command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/install.sh | bash
+```
+
+It installs everything into `~/Library/Application Support/Cloak Vector`:
+- Python (via [uv](https://docs.astral.sh/uv/), no Homebrew needed), the app and the voice model
+- **Cloak Vector** in `~/Applications`
+- a `cloak-vector` command
+
+Then it opens a setup wizard in your browser. The wizard finds wire-pod, lets you pick your robot and a voice (with previews), connects an LLM, and drops you on the dashboard. Have wire-pod running with Vector paired first.
+
+Run the same line again to update; your settings and recordings stay. Other commands: `cloak-vector open | stop | status | logs | update | uninstall`.
+
+To install from a branch: `curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/<branch>/install.sh | CLOAK_REF=<branch> bash`.
+
+The manual setup below is for development.
+
 ## Layout
 
 ```
@@ -40,14 +61,15 @@ cloak_vector/
   voice/           llm.py (OpenAI-compatible) · tts/ (kokoro, piper) · audio.py (16 kHz) · speaker.py (cache, triggers)
   datalog/         recorder.py  episodes for imitation learning
   teleop/          policy.py    keyboard/gamepad axes → Action, dead-man stop
-  web/             FastAPI server + static UI (vendored cloak.css from usecloakai/cloak)
+  web/             FastAPI server + static UI (vendored cloak.css from usecloakai/cloak) + first-run setup wizard
 config.yaml        all tuning
 .env.example       robot + LLM secrets
-scripts/gen_proto.py  regenerate vector/pb from vector/proto
+install.sh         one-command macOS installer
+scripts/           cloakctl.sh (the cloak-vector command) · make_icon.py (app icon) · gen_proto.py
 tests/             no robot needed (includes a fake Vector gRPC server over real TLS)
 ```
 
-## Setup
+## Setup (development)
 
 ### 1. wire-pod
 Set up wire-pod on a machine on the same network as Vector ([wire-pod wiki](https://github.com/kercre123/wire-pod/wiki)), then pair and authenticate the bot in wire-pod's web UI (`http://<pod-ip>:8080`). Once Vector answers "Hey Vector" through wire-pod, you're good. That's the only robot setup: there's no SDK configure step.

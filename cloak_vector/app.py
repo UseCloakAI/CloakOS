@@ -60,6 +60,7 @@ class Brain:
         self.mode = "idle"
         self.policy: Policy | None = None
         self._auto_rec = False
+        self.restart = False
         self._tick_events: list[dict[str, Any]] = []
         self._stop = asyncio.Event()
         self.bus.on("sense.*", self._on_sense)
@@ -234,6 +235,11 @@ class Brain:
             await self.shutdown(tasks)
 
     def request_stop(self) -> None:
+        self._stop.set()
+
+    def request_restart(self) -> None:
+        """Stop cleanly, then __main__ re-execs the process (used after the setup wizard saves)."""
+        self.restart = True
         self._stop.set()
 
     async def shutdown(self, tasks: list[asyncio.Task]) -> None:

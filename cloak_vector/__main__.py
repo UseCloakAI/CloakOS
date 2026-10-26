@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
+import sys
 
 from .app import MODES, Brain
 from .config import load_config
@@ -28,6 +30,8 @@ def main() -> None:
     cfg = load_config(args.config)
     brain = Brain(cfg)
     asyncio.run(brain.run(mode=args.mode or cfg.get("mode", "auto"), web=not args.no_web))
+    if brain.restart:   # the setup wizard saved new settings: start fresh with them
+        os.execv(sys.executable, [sys.executable, "-m", "cloak_vector", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

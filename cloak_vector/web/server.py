@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..bus import Event
 from ..drives import DRIVES
+from .setup_api import make_router
 
 if TYPE_CHECKING:
     from ..app import Brain
@@ -56,9 +57,15 @@ def create_app(brain: "Brain") -> FastAPI:
 
     brain.bus.on("*", on_event)
 
+    app.include_router(make_router(brain))
+
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
+
+    @app.get("/setup")
+    async def setup_page() -> FileResponse:
+        return FileResponse(STATIC / "setup.html")
 
     @app.get("/api/info")
     async def info() -> JSONResponse:
