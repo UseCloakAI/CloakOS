@@ -331,6 +331,9 @@ setInterval(() => {
   wasActive = active;
 }, 50);
 
+/* first run: no settings yet → the setup wizard */
+fetch('/api/setup/status').then(r => r.json()).then(st => { if (!st.done) location.replace('/setup'); }).catch(() => {});
+
 /* ── boot ───────────────────────────────────────────────── */
 buildDrives();
 connect();

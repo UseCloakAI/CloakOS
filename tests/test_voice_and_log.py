@@ -60,3 +60,14 @@ def test_chirps_and_eyes():
     img = eyes.render(happy)
     assert img.size == (184, 96)
     assert img.getpixel((92, 2)) == (0, 0, 0)                 # background stays black
+
+
+def test_setup_env_roundtrip(tmp_path):
+    from cloak_vector.web.setup_api import read_env, write_env
+
+    p = tmp_path / ".env"
+    p.write_text("# comment\n# LLM_MODEL=old\nWIREPOD_URL=http://a:8080\nOTHER=keep\n")
+    write_env(p, {"WIREPOD_URL": "http://b:8080", "LLM_MODEL": "llama3.2:3b", "VECTOR_SERIAL": "00e2"})
+    text = p.read_text()
+    assert "# comment" in text and "OTHER=keep" in text
+    assert read_env(p) == {"WIREPOD_URL": "http://b:8080", "LLM_MODEL": "llama3.2:3b", "OTHER": "keep", "VECTOR_SERIAL": "00e2"}

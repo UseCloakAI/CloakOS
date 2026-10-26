@@ -22,6 +22,7 @@ ENV_OVERRIDES = {
     "LLM_API_KEY": "llm.api_key",
     "LLM_MODEL": "llm.model",
     "TTS_ENGINE": "voice.tts.engine",
+    "KOKORO_VOICE": "voice.tts.kokoro.voice",
     "WEB_HOST": "web.host",
     "WEB_PORT": "web.port",
     "DATA_DIR": "datalog.dir",
@@ -55,7 +56,8 @@ def _coerce(value: str) -> Any:
 
 
 def load_config(path: str | os.PathLike = "config.yaml") -> Config:
-    load_dotenv()
+    # the .env next to where the app runs; it wins over inherited env so a wizard restart picks up new values
+    load_dotenv(os.environ.get("CLOAK_ENV_FILE", Path.cwd() / ".env"), override=True)
     path = Path(path)
     data = yaml.safe_load(path.read_text()) if path.exists() else {}
     cfg = Config(data or {})
