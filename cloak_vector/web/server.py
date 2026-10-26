@@ -12,16 +12,17 @@ import contextlib
 import io
 import json
 import logging
+from urllib.parse import quote
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..bus import Event
 from ..drives import DRIVES
-from .setup_api import autoconfigure_loop, make_router
+from .setup_api import autoconfigure_loop, make_router, robot_ota_url
 
 if TYPE_CHECKING:
     from ..app import Brain
@@ -66,6 +67,14 @@ def create_app(brain: "Brain") -> FastAPI:
     @app.get("/setup")
     async def setup_page() -> FileResponse:
         return FileResponse(STATIC / "setup.html")
+
+    @app.get("/pair", response_model=None)
+    async def pair_page(request: Request) -> Response:
+        # the pairing code reads its firmware URL from the query string
+        if "otaUrl" not in request.query_params:
+            pod = (brain.cfg.get("wirepod", {}) or {}).get("url") or ""
+            return RedirectResponse(f"/pair?otaUrl={quote(robot_ota_url(pod), safe='')}")
+        return FileResponse(STATIC / "pair.html")
 
     @app.get("/api/info")
     async def info() -> JSONResponse:

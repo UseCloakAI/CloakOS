@@ -89,11 +89,11 @@
         <div id="pair" hidden>
           <div class="pairing">
             <div class="onboard-item" style="--k:0"><span class="onboard-num">1</span><div class="onboard-text">Put Vector on his charger, near this Mac.</div></div>
-            <div class="onboard-item" style="--k:1"><span class="onboard-num">2</span><div class="onboard-text">In wire-pod, open <b>Bot Setup</b> and follow <b>Authenticate</b>. It uses Bluetooth, so use Chrome.</div></div>
-            <div class="onboard-item" style="--k:2"><span class="onboard-num">3</span><div class="onboard-text">Come back here. This page carries on by itself.</div></div>
+            <div class="onboard-item" style="--k:1"><span class="onboard-num">2</span><div class="onboard-text">Press <b>Pair Vector</b>. It's a few minutes of Bluetooth and Wi-Fi, done once. Use Chrome or Edge.</div></div>
+            <div class="onboard-item" style="--k:2"><span class="onboard-num">3</span><div class="onboard-text">Cloak picks him up the moment he's paired.</div></div>
           </div>
-          <a class="btn-primary btn-link" id="pod-open" href="http://localhost:8080" target="_blank" rel="noopener">Open wire-pod</a>
-          <div class="help">First time with this robot? <a href="https://github.com/kercre123/wire-pod/wiki/Installation#preparing-the-bot-production-bots-only" target="_blank" rel="noopener">Prepare it for wire-pod</a> once.</div>
+          <a class="btn-primary btn-link" href="/pair">Pair Vector</a>
+          <div class="help">Prefer wire-pod's own page? <a id="pod-open" href="http://localhost:8080" target="_blank" rel="noopener">Open wire-pod</a></div>
         </div>
 
         <div id="manual" hidden>
@@ -207,7 +207,7 @@ function show(r) {
   $('#auto-wait').hidden = r.state === 'pick' || r.state === 'no_pod';
   if (r.state === 'no_bots') {
     t.textContent = 'Pair your Vector';
-    sub.textContent = 'wire-pod is running. Now introduce it to your robot. This is the only part Cloak can\'t do for you.';
+    sub.textContent = 'wire-pod is running. Now let\'s pair your robot with it.';
     wait.textContent = 'Waiting for Vector to show up in wire-pod…';
     $('#pod-open').href = r.pod;
   } else if (r.state === 'no_pod') {

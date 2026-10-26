@@ -187,6 +187,38 @@ async def autoconfigure_loop(brain: "Brain") -> None:
         await asyncio.sleep(5)
 
 
+EP_OTA = "/api/get_ota/vicos-2.0.1.6076ep.ota"   # wire-pod serves the escape-pod firmware here
+
+
+def lan_ip() -> str:
+    """This machine's address on the network (what the robot can reach), not 127.0.0.1."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))          # no packet is sent; just picks the outbound interface
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def robot_ota_url(pod_url: str) -> str:
+    """The firmware URL as Vector must see it: wire-pod's LAN address, never localhost."""
+    import socket
+    from urllib.parse import urlparse
+    u = urlparse(pod_url or "http://escapepod.local:8080")
+    host = u.hostname or "escapepod.local"
+    if host in ("localhost", "127.0.0.1", "::1"):
+        host = lan_ip()
+    else:
+        try:
+            host = socket.gethostbyname(host)
+        except OSError:
+            pass
+    return f"http://{host}:{u.port or 8080}{EP_OTA}"
+
+
 def make_router(brain: "Brain") -> APIRouter:
     r = APIRouter(prefix="/api/setup")
 
