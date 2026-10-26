@@ -19,7 +19,7 @@
 [hidden]{display:none!important}
 .wiz{width:100%;max-width:460px}
 .wiz .auth-card{max-width:none;width:100%}
-.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:26px}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:26px}
 .steps i{height:6px;border:1.5px solid var(--ink);background:var(--p2);transition:background .3s var(--ease-out)}
 .steps i.on{background:var(--acc)}
 .step{display:none;flex-direction:column;gap:14px}
@@ -59,6 +59,10 @@
   .seg3:has(.seg-btn:nth-child(2).active)::before{transform:translateX(100%)}
   .seg3:has(.seg-btn:last-child.active)::before{transform:translateX(200%)}
 }
+.pairing{border:var(--bd);background:var(--p2);padding:2px 14px;margin-bottom:12px}
+.pairing .onboard-item:last-child{border-bottom:0}
+.onboard-text{font-size:13px;line-height:1.55}
+.btn-link{display:flex;align-items:center;justify-content:center;text-decoration:none}
 .restarting{position:fixed;inset:0;background:var(--paper);display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:50}
 .restarting.on{display:flex}
 .restarting h2{font-family:var(--fd);font-size:26px;font-weight:800;text-transform:uppercase;margin:0}
@@ -73,65 +77,56 @@
         <div class="brand-name">Cloak</div>
         <div class="brand-tag">for Vector</div>
       </div>
-      <div class="steps" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="steps" aria-hidden="true" hidden><i></i><i></i><i></i></div>
 
-      <!-- 0 · welcome -->
+      <!-- 0 · find (automatic; only asks when it has to) -->
       <section class="step" data-step="0">
         <svg class="hero-orb" viewBox="-52 -52 104 104" aria-hidden="true"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg>
-        <h2 style="text-align:center">Let's wake Vector up.</h2>
-        <p style="text-align:center">Four quick steps: find wire-pod, pick your robot, choose a voice, connect a brain. About a minute.</p>
-        <button class="btn-primary" onclick="go(1)">Start</button>
-        <button class="btn-ghost" onclick="skip()">I'll set it up later</button>
-      </section>
+        <h2 style="text-align:center" id="auto-title">Finding your Vector…</h2>
+        <p style="text-align:center" id="auto-sub">Looking for wire-pod and your robot on the network.</p>
+        <div class="searching" id="auto-wait"><span class="live-dot"></span><span id="auto-wait-text">Searching…</span></div>
 
-      <!-- 1 · wire-pod -->
-      <section class="step" data-step="1">
-        <div class="kicker">Step 1 of 4</div>
-        <h2>Find wire-pod</h2>
-        <p>wire-pod is how Cloak reaches Vector. It needs to be running on your network with Vector already paired.</p>
-        <div class="searching" id="pod-searching"><span class="live-dot"></span><span>Looking for wire-pod…</span></div>
-        <div class="ok-msg" id="pod-ok" hidden></div>
-        <div id="pod-manual" hidden>
+        <div id="pair" hidden>
+          <div class="pairing">
+            <div class="onboard-item" style="--k:0"><span class="onboard-num">1</span><div class="onboard-text">Put Vector on his charger, near this Mac.</div></div>
+            <div class="onboard-item" style="--k:1"><span class="onboard-num">2</span><div class="onboard-text">In wire-pod, open <b>Bot Setup</b> and follow <b>Authenticate</b>. It uses Bluetooth, so use Chrome.</div></div>
+            <div class="onboard-item" style="--k:2"><span class="onboard-num">3</span><div class="onboard-text">Come back here. This page carries on by itself.</div></div>
+          </div>
+          <a class="btn-primary btn-link" id="pod-open" href="http://localhost:8080" target="_blank" rel="noopener">Open wire-pod</a>
+          <div class="help">First time with this robot? <a href="https://github.com/kercre123/wire-pod/wiki/Installation#preparing-the-bot-production-bots-only" target="_blank" rel="noopener">Prepare it for wire-pod</a> once.</div>
+        </div>
+
+        <div id="manual" hidden>
           <label class="field-label" for="pod-url">wire-pod address</label>
           <input class="input" id="pod-url" placeholder="192.168.1.50:8080" autocomplete="off" spellcheck="false">
+          <button class="btn-primary" style="margin-top:12px" onclick="setPod()">Connect</button>
         </div>
-        <div class="err-msg" id="pod-err"></div>
-        <div class="row2">
-          <button class="btn-line" onclick="scanPod(true)">Search again</button>
-          <button class="btn-primary" id="pod-next" onclick="go(2)" disabled>Next</button>
-        </div>
-        <div class="help">No wire-pod yet? <a href="https://github.com/kercre123/wire-pod/wiki/Installation" target="_blank" rel="noopener">Set it up</a>, then come back.</div>
-      </section>
 
-      <!-- 2 · robot -->
-      <section class="step" data-step="2">
-        <div class="kicker">Step 2 of 4</div>
-        <h2>Pick your Vector</h2>
-        <p>These are the robots wire-pod knows. Pick the one Cloak should live in.</p>
-        <div class="pick" id="bots"></div>
-        <div class="err-msg" id="bot-err"></div>
-        <div class="row2">
-          <button class="btn-line" onclick="go(1)">Back</button>
-          <button class="btn-primary" id="bot-next" onclick="go(3)" disabled>Next</button>
+        <div id="pickbox" hidden>
+          <div class="pick" id="bots"></div>
+          <button class="btn-primary" style="margin-top:12px" id="bot-next" onclick="useBot()" disabled>Use this Vector</button>
         </div>
+
+        <div class="err-msg" id="auto-err"></div>
+        <button class="btn-ghost" onclick="go(3)">Customize voice &amp; brain</button>
       </section>
 
       <!-- 3 · voice -->
       <section class="step" data-step="3">
-        <div class="kicker">Step 3 of 4</div>
+        <div class="kicker">Customize · 1 of 2</div>
         <h2>Choose a voice</h2>
         <p>Runs on your Mac, no cloud. Vector plays it pitched up a little, so it sounds like a creature. Tap play to hear it.</p>
         <div class="pick" id="voices"></div>
         <div class="err-msg" id="voice-err"></div>
         <div class="row2">
-          <button class="btn-line" onclick="go(2)">Back</button>
+          <button class="btn-line" onclick="go(0)">Back</button>
           <button class="btn-primary" onclick="go(4)">Next</button>
         </div>
       </section>
 
       <!-- 4 · brain -->
       <section class="step" data-step="4">
-        <div class="kicker">Step 4 of 4</div>
+        <div class="kicker">Customize · 2 of 2</div>
         <h2>Connect a brain</h2>
         <p>An LLM writes Vector's little lines. Any OpenAI-compatible endpoint works. No brain? It still talks, using its built-in phrases.</p>
         <div class="seg seg3" style="margin-bottom:0">
@@ -157,10 +152,10 @@
       <!-- 5 · done -->
       <section class="step" data-step="5">
         <svg class="hero-orb" viewBox="-52 -52 104 104" aria-hidden="true"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg>
-        <h2 style="text-align:center">All set.</h2>
+        <h2 style="text-align:center">Looks good.</h2>
         <dl class="summary" id="summary"></dl>
         <div class="err-msg" id="save-err"></div>
-        <button class="btn-primary" id="save-btn" onclick="save()">Wake Vector</button>
+        <button class="btn-primary" id="save-btn" onclick="save()">Save &amp; wake Vector</button>
         <button class="btn-ghost" onclick="go(4)">Back</button>
       </section>
     </div>
@@ -178,58 +173,74 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(r => r.json());
-const S = { step: 0, pod: null, serial: '', voice: 'af_heart', llm: 'local' };
+const S = { step: 0, pod: null, serial: '', bots: [], voice: 'af_heart', llm: 'local' };
 const LLM_PRESETS = { local: { url: 'http://localhost:11434/v1', model: 'llama3.2:3b' }, custom: { url: '', model: '' } };
 let audio = null;
 
 function go(n) {
-  if (n === 2 && !S.pod) return;
-  if (n === 3 && !S.serial) return;
   S.step = n;
   document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', +s.dataset.step === n));
-  document.querySelectorAll('.steps i').forEach((i, k) => i.classList.toggle('on', k < n));
-  if (n === 1 && !S.pod) scanPod(false);
-  if (n === 2) renderBots();
+  $('.steps').hidden = n === 0;
+  document.querySelectorAll('.steps i').forEach((i, k) => i.classList.toggle('on', k <= n - 3));
   if (n === 5) renderSummary();
   if (audio) audio.pause();
 }
 
 function err(id, msg) { const e = $(id); e.textContent = msg || ''; e.classList.toggle('show', !!msg); }
 
-/* 1 · wire-pod */
-async function scanPod(manual) {
-  const url = manual ? $('#pod-url').value.trim() : '';
-  $('#pod-searching').hidden = false; $('#pod-ok').hidden = true; err('#pod-err');
-  $('#pod-next').disabled = true;
-  let res;
-  try { res = await post('/api/setup/scan', url ? { url } : {}); } catch { res = { found: null }; }
-  $('#pod-searching').hidden = true;
-  if (res.found) {
-    S.pod = res.found;
-    const n = res.found.bots.length;
-    $('#pod-ok').hidden = false;
-    $('#pod-ok').textContent = `Found wire-pod at ${res.found.url} · ${n} robot${n === 1 ? '' : 's'}`;
-    $('#pod-manual').hidden = true;
-    if (!n) err('#pod-err', 'wire-pod is running but has no robots yet. Pair Vector in wire-pod first, then search again.');
-    $('#pod-next').disabled = !n;
-  } else {
-    S.pod = null;
-    $('#pod-manual').hidden = false;
-    err('#pod-err', url ? `Nothing answered at ${url}.` : "Couldn't find wire-pod automatically. Type its address.");
-    $('#pod-url').focus();
+/* 0 · find: the server configures itself; we only show what it still needs from you */
+let pollT = 0;
+async function auto() {
+  clearTimeout(pollT);
+  let r;
+  try { r = await post('/api/setup/auto'); } catch { r = { state: 'offline' }; }
+  if (r.pod) S.pod = { url: r.pod };
+  if (S.step === 0) show(r);
+  if (r.state === 'done') return wake(r);
+  pollT = setTimeout(auto, r.state === 'pick' ? 8000 : 3000);
+}
+function show(r) {
+  const t = $('#auto-title'), sub = $('#auto-sub'), wait = $('#auto-wait-text');
+  $('#pair').hidden = r.state !== 'no_bots';
+  $('#manual').hidden = r.state !== 'no_pod';
+  $('#pickbox').hidden = r.state !== 'pick';
+  $('#auto-wait').hidden = r.state === 'pick' || r.state === 'no_pod';
+  if (r.state === 'no_bots') {
+    t.textContent = 'Pair your Vector';
+    sub.textContent = 'wire-pod is running. Now introduce it to your robot. This is the only part Cloak can\'t do for you.';
+    wait.textContent = 'Waiting for Vector to show up in wire-pod…';
+    $('#pod-open').href = r.pod;
+  } else if (r.state === 'no_pod') {
+    t.textContent = 'Where\'s wire-pod?';
+    sub.textContent = 'Couldn\'t find it on this Mac or the network. Type its address.';
+  } else if (r.state === 'pick') {
+    t.textContent = 'Which Vector?';
+    sub.textContent = 'wire-pod knows more than one robot. Pick the one Cloak should live in.';
+    S.bots = r.bots;
+    renderBots();
+  } else if (r.state === 'offline') {
+    wait.textContent = 'Waiting for Cloak…';
   }
 }
-$('#pod-url').addEventListener('keydown', e => { if (e.key === 'Enter') scanPod(true); });
-
-/* 2 · robot */
 function renderBots() {
-  const bots = (S.pod && S.pod.bots) || [];
-  if (bots.length === 1 && !S.serial) S.serial = bots[0].serial;
-  $('#bots').innerHTML = bots.map(b => `<button class="${b.serial === S.serial ? 'on' : ''}" onclick="pickBot('${esc(b.serial)}')"><span class="sq"></span>Vector ${esc(b.serial)}<span class="sub">${esc(b.ip || '')}</span></button>`).join('');
-  err('#bot-err', bots.some(b => !b.ready) ? 'Some robots aren\'t authenticated in wire-pod yet. Finish them in wire-pod first.' : '');
+  $('#bots').innerHTML = (S.bots || []).map(b => `<button class="${b.serial === S.serial ? 'on' : ''}" onclick="pickBot('${esc(b.serial)}')"><span class="sq"></span>Vector ${esc(b.serial)}<span class="sub">${esc(b.ip || '')}</span></button>`).join('');
   $('#bot-next').disabled = !S.serial;
 }
 function pickBot(serial) { S.serial = serial; renderBots(); }
+async function useBot() { await post('/api/setup/save', { wirepod: S.pod.url, serial: S.serial }); waitForRestart(); }
+async function setPod() {
+  err('#auto-err');
+  const r = await post('/api/setup/pod', { url: $('#pod-url').value.trim() });
+  if (!r.ok) return err('#auto-err', r.error || 'Nothing answered there.');
+  $('#manual').hidden = true; $('#auto-wait').hidden = false;
+  auto();
+}
+$('#pod-url').addEventListener('keydown', e => { if (e.key === 'Enter') setPod(); });
+function wake(r) {
+  $('#restarting h2').textContent = r.serial ? `Found Vector ${r.serial}` : 'Waking up…';
+  $('#restarting').classList.add('on');
+  setTimeout(() => location.replace('/'), 1400);
+}
 
 /* 3 · voice */
 async function loadVoices() {
@@ -284,7 +295,7 @@ async function save() {
   const none = S.llm === 'none';
   try {
     await post('/api/setup/save', {
-      wirepod: S.pod.url, serial: S.serial, voice: S.voice,
+      wirepod: S.pod ? S.pod.url : undefined, serial: S.serial || undefined, voice: S.voice,
       llm_base_url: none ? '' : $('#llm-url').value.trim(), llm_model: none ? '' : $('#llm-model').value.trim(),
       llm_api_key: none ? '' : $('#llm-key').value.trim(),
     });
@@ -308,6 +319,7 @@ function waitForRestart() {
 
 loadVoices().catch(() => {});
 go(0);
+auto();
 </script>
 </body>
 </html>

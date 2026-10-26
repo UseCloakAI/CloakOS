@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..bus import Event
 from ..drives import DRIVES
-from .setup_api import make_router
+from .setup_api import autoconfigure_loop, make_router
 
 if TYPE_CHECKING:
     from ..app import Brain
@@ -84,6 +84,10 @@ def create_app(brain: "Brain") -> FastAPI:
             "drives": list(DRIVES),
             "sim_events": list(SIM_EVENTS),
         })
+
+    @app.get("/api/health")
+    async def health() -> dict[str, Any]:
+        return {"ok": True, "mode": brain.mode, "recording": brain.recorder.active, "connection": brain.link.state}
 
     @app.get("/eyes.png")
     async def eyes() -> Response:
@@ -177,8 +181,11 @@ async def serve(brain: "Brain") -> None:
     host, port = c.get("host", "127.0.0.1"), int(c.get("port", 8765))
     server = Server(uvicorn.Config(create_app(brain), host=host, port=port, log_level="warning", lifespan="off"))
     log.info("dashboard: http://%s:%d", host, port)
+    auto = asyncio.ensure_future(autoconfigure_loop(brain))
     try:
         await server.serve()
     except asyncio.CancelledError:
         server.should_exit = True
         raise
+    finally:
+        auto.cancel()

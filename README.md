@@ -18,19 +18,27 @@ A living-creature brain for an OEM Anki/DDL Vector, part of [Cloak](https://usec
 One command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/install.sh | bash
 ```
 
-It installs everything into `~/Library/Application Support/Cloak Vector`:
-- Python (via [uv](https://docs.astral.sh/uv/), no Homebrew needed), the app and the voice model
-- **Cloak Vector** in `~/Applications`
-- a `cloak-vector` command
+That's the only command. It installs into `~/Library/Application Support/Cloak Vector`:
+- Python (via [uv](https://docs.astral.sh/uv/), no Homebrew needed), the app and the voice model.
+- **wire-pod**, if there isn't one on your network yet. That's the official [WirePod](https://github.com/kercre123/WirePod) app, at the version pinned in `compat.json`. Its first-run questions are answered for you: it starts at login, and its speech language is picked from your Mac's language.
+- **Cloak Vector** in `~/Applications`, plus a `cloak-vector` command.
+- Background jobs: Cloak starts when you log in, and checks for updates every 6 hours.
 
-Then it opens a setup wizard in your browser. The wizard finds wire-pod, lets you pick your robot and a voice (with previews), connects an LLM, and drops you on the dashboard. Have wire-pod running with Vector paired first.
+Then it opens Cloak in your browser and configures itself. It finds wire-pod and your robot, and uses a local LLM if Ollama is running. The only thing it can't do for you is introduce Vector to wire-pod: that's a Bluetooth pairing in wire-pod's **Bot Setup** page. If that hasn't happened yet, Cloak shows the 3 steps and carries on by itself the moment Vector shows up. Voice and brain are optional ("Customize voice & brain").
 
-Run the same line again to update; your settings and recordings stay. Other commands: `cloak-vector open | stop | status | logs | update | uninstall`.
+What you might still see on a Mac: macOS asking once to allow "local network" access (click Allow), and, if your user isn't an admin, a password prompt to put WirePod in `/Applications`.
 
-To install from a branch: `curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/<branch>/install.sh | CLOAK_REF=<branch> bash`.
+### Updates
+- **Cloak** updates itself in the background (every 6 hours) from `main`. It never interrupts a recording, and you can turn it off in Settings → Updates or run `cloak-vector update` any time.
+- **wire-pod** only updates to a version we've deemed compatible. Every Monday, the `wire-pod compatibility` workflow checks the newest WirePod release against everything Cloak uses (`scripts/wirepod_contract.py`). If it passes, the workflow opens a PR bumping `compat.json`. Merging that PR rolls the new wire-pod out to every Mac on its next update. Cloak never touches a wire-pod it didn't install.
+- For the workflow to open PRs, enable *Settings → Actions → General → Allow GitHub Actions to create and approve pull requests* in the repo.
+
+Other commands: `cloak-vector open | stop | status | logs | update | uninstall`.
+
+To install from a branch: `curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/<branch>/install.sh | CLOAK_REF=<branch> bash`.
 
 The manual setup below is for development.
 
@@ -65,7 +73,9 @@ cloak_vector/
 config.yaml        all tuning
 .env.example       robot + LLM secrets
 install.sh         one-command macOS installer
-scripts/           cloakctl.sh (the cloak-vector command) · make_icon.py (app icon) · gen_proto.py
+compat.json        the wire-pod version Cloak installs/updates to (bumped by the compatibility workflow)
+scripts/           cloakctl.sh (cloak-vector command + updater) · wirepod.sh (install/update WirePod)
+                   wirepod_contract.py (compatibility check) · make_icon.py · gen_proto.py
 tests/             no robot needed (includes a fake Vector gRPC server over real TLS)
 ```
 

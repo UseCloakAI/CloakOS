@@ -83,3 +83,51 @@ wp_install() {       # wp_install v1.2.18 : download the DMG, put WirePod.app in
   echo "$ver" >"$HOME_DIR/wirepod.managed"
   open -g -a "$WP_APP"
 }
+
+wp_lang() {          # macOS locale -> a wire-pod speech language (falls back to en-US)
+  local loc; loc="$(defaults read -g AppleLocale 2>/dev/null || echo en_US)"
+  loc="${loc%%@*}"; loc="${loc/_/-}"
+  case " en-US it-IT es-ES fr-FR de-DE pt-BR pl-PL zh-CN tr-TR ru-RU uk-UA vi-VN ko-KR " in
+    *" $loc "*) echo "$loc" ;;
+    *) echo "en-US" ;;
+  esac
+}
+
+wp_autosetup() {     # finish wire-pod's first-run setup (speech language) so its web UI doesn't ask
+  local url="http://localhost:8080" lang done_ i
+  for i in $(seq 1 120); do curl -fsS -m 2 -o /dev/null "$url/api/is_running" 2>/dev/null && break; sleep 0.5; done
+  done_="$(curl -fsS -m 5 "$url/api/get_config" 2>/dev/null | "$HOME_DIR/venv/bin/python" -c \
+    'import json,sys; print(int(bool(json.load(sys.stdin).get("pastinitialsetup"))))' 2>/dev/null || echo 0)"
+  [[ "$done_" == "1" ]] && return 0
+  lang="$(wp_lang)"
+  for i in $(seq 1 3); do                     # first call may only start the language model download
+    if curl -fsS -m 10 -X POST -H 'Content-Type: application/json' -d "{\"language\":\"$lang\"}" \
+         "$url/api/set_stt_info" 2>/dev/null | grep -q "downloading"; then
+      for _ in $(seq 1 600); do               # up to ~5 min for the speech model
+        case "$(curl -fsS -m 5 "$url/api/get_download_status" 2>/dev/null)" in
+          *success*|*"not downloading"*) break ;;
+          *error*) return 1 ;;
+        esac
+        sleep 0.5
+      done
+    else
+      return 0
+    fi
+  done
+}
+
+wp_ensure() {        # installer/updater entry point: make sure a compatible wire-pod is there and running
+  local pinned; pinned="$(wp_pinned "$HOME_DIR/app/compat.json")"
+  if wp_managed; then
+    [[ "$(wp_installed_version)" == "$pinned" ]] || wp_install "$pinned"
+    wp_running || open -g -a "$WP_APP"
+    wp_autosetup
+  elif url="$(wp_reachable)"; then
+    echo "using existing wire-pod at $url"
+  elif [[ "$(uname -s)" == "Darwin" ]]; then
+    wp_install "$pinned"
+    wp_autosetup
+  else
+    echo "no wire-pod found; install it yourself on Linux (see README)"
+  fi
+}
