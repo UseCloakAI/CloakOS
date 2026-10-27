@@ -115,7 +115,15 @@ class Calibrator:
         if b.frozen:
             raise RuntimeError("Vector is frozen: unfreeze it first.")
         prev_mode = b.mode
-        await b.set_mode("idle")
+        await b.set_mode("idle")                          # nothing else drives it during the test...
+        await b.link.set_control(True)                    # ...but idle hands control back to Vector: take it
+        for _ in range(60):
+            if b.body.ready:
+                break
+            await asyncio.sleep(0.05)
+        if not b.body.ready:
+            await b.set_mode(prev_mode)
+            raise RuntimeError("couldn't get control of Vector (is it on the charger or busy?)")
         lags, stops, ratios = [], [], []
         try:
             for i in range(5):
@@ -154,7 +162,12 @@ class Calibrator:
                 await asyncio.sleep(0.05)
         finally:
             await body.stop()
-            await b.set_mode(prev_mode)
+            if prev_mode == "idle":
+                await b.link.set_control(False)
+            else:
+                await b.set_mode(prev_mode)
+        if not lags:
+            raise RuntimeError("Vector never moved: check it's on the floor, off the charger, and not frozen")
         med = lambda a: round(float(np.median(a)), 3) if a else None
         return {
             "command_to_motion_s": med(lags), "stop_s": med(stops), "wheel_speed_ratio": med(ratios),
