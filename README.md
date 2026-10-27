@@ -88,8 +88,13 @@ cloakos/
   datalog/         recorder.py  episodes for imitation learning
   teleop/          policy.py    keyboard/gamepad axes → Action, dead-man stop
   sim/             MuJoCo simulator: vector_model.py (Vector's body from its real measurements)
-                   rooms.py (procedural worlds) · engine.py (physics thread, sensors, degraded camera)
-                   client.py (SimClient: VectorClient's interface on the sim) · tester.py (scored scenarios)
+                   rooms.py (procedural worlds) · assets.py (scanned objects + generated materials)
+                   engine.py (physics thread, sensors, degraded camera, depth) · client.py (SimClient)
+                   tester.py (scored scenarios)
+  rl/              reinforcement learning: envs.py (Gymnasium tasks) · train.py (PPO) · manager.py (jobs)
+                   policy.py (LearnedPolicy: a trained model as the "learned" mode)
+  mapping/         3D map: voxels.py (occupancy + colour) · vision.py (camera geometry, depth, detector)
+                   mapper.py (pose + depth → map, object memory, per-origin persistence)
   web/             FastAPI server + static UI (vendored cloak.css from usecloakai/cloak) + first-run setup wizard
 config.yaml        all tuning
 .env.example       robot + LLM secrets
@@ -153,6 +158,8 @@ It's styled like Cloak chat: same sidebar, topbar, composer and themes (`cloak_d
 - **Simulator**: switch **Robot / Sim** and the whole brain drives a physics Vector instead (see below). Live 3D view you can orbit, Vector's camera and screen as insets, and buttons to knock it, pick it up or triple-tap its button. The **Tester** runs scored scenarios.
 - **Freeze**: triple-tap Vector's back button (or the ❄ button) and every motor stops and stays stopped, with calm still eyes. Same again to unfreeze. Behaviors, teleop and emotes are all blocked while frozen; control is kept so stock Vector doesn't wander off either.
 - **Recordings**: hover one in the sidebar and hit the bin to delete it.
+- **Map**: the 3D map Vector builds as it moves (coloured voxels), its path, and the objects it remembers. Type "mug" and **Go**, or hit Go on any remembered object, and a trained goto policy drives there.
+- **Training**: train skills with reinforcement learning in the sim, watch the reward curve live, then **Use** a policy and pick **Learned** mode.
 - **Drive lab**: fire fake senses, play any emote, drag drive values around, and watch the live behavior scores. Handy for tuning without the bot.
 - **Settings**: wire-pod and robot info, voice and LLM status, and every stock animation trigger your Vector has, with a test player.
 
@@ -226,6 +233,35 @@ A MuJoCo model of Vector built from its published measurements (~100×60×69 mm,
 - **Balancing** on two wheels can be trained in the sim. On the real robot it needs motor corrections every few ms, which Wi-Fi control can't do, so that one stays sim-only unless the controller runs on the robot itself.
 
 Runs on Apple Silicon (rendering via CGL). Start on the sim with `CLOAK_SIM=1` or the Robot / Sim switch.
+
+## Realistic worlds
+- **Objects**: photo-scanned household items from [Google Scanned Objects](https://arxiv.org/abs/2204.11918) (CC-BY 4.0) via the [MuJoCo conversion](https://github.com/kevinzakka/mujoco_scanned_objects): mugs, shoes, toys, bowls, baskets... Downloaded on demand (~1-2 MB each) into `data/sim_assets/` and rested on the floor by their real shape. Offline, plain shapes stand in.
+- **Materials**: wood floors, carpet, tile, concrete, painted walls and fabric, generated procedurally and cached.
+- **Furniture**: sofas, tables and chairs (Vector can drive under them), bookshelves with books, rugs, boxes.
+- **Lighting**: 1-4 lights at different colour temperatures and strengths per room.
+- **Vector**: rounded body and head, glossy head, rubber treads, metal lift, the backpack light, its eyes live on its screen.
+
+## Reinforcement learning
+PPO ([Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)) in the sim, one sim per CPU core, much faster than real time. Start a run from **Training**; it runs as its own process and saves to `data/policies/<task>-<sensors>-<time>/`. Or from a terminal: `python -m cloakos.rl.train --task goto --steps 300000 --out data/policies/mine`.
+
+| Skill | What it learns | Runs on the real robot |
+|---|---|---|
+| goto | drive to a point, avoid obstacles and table edges | yes, with robot sensors |
+| explore | cover the room without bumping | yes, with robot sensors |
+| recover | knocked onto its back or side: get back on its treads with wheels + lift | yes |
+
+**Sensors**: *robot* uses only what the real Vector reports (odometry, wheel speeds, the forward distance sensor, cliff, tilt), so the policy transfers. *rays* adds a fan of depth readings, a sim-only teacher for now.
+
+A two-wheel "wheelie" balance isn't on the list: Vector's body reaches past its rear axle, below the axle, so tipping back lands it on its rear before the treads can balance it. That's true of the real robot too (its stock wheelie leans on the lift).
+
+Test a goto policy with the **Trained policy: reach the goal** scenario, or double-click the floor in the Simulator to send it somewhere.
+
+## 3D map
+Vector's own pose (wheel odometry fused with its gyro) plus the head angle place the camera; depth turns each frame into 3D points; a 2.5 cm voxel map marks what it saw and carves the free space in between, with colour. Objects it recognises are pinned to the map with a label, and merged across sightings.
+- **Depth**: [Depth Anything V2 Small](https://huggingface.co/depth-anything/Depth-Anything-V2-Small-hf) (Apache-2.0), scaled to metres using the floor (the camera's height and tilt are known, so floor pixels have a true distance) and the distance sensor. In the sim, depth is rendered exactly.
+- **Objects**: [RT-DETR](https://huggingface.co/PekingU/rtdetr_r18vd_coco_o365) (Apache-2.0, COCO classes) plus the faces Vector itself detects. In the sim, ground truth.
+- **Memory**: each map belongs to a pose origin. Vector starts a new origin when it's picked up and loses track, and returns to the old one when it recognises where it is. Maps and objects are saved to `data/maps/` and reloaded.
+- Both models download on first use (~150 MB) and run on the Mac's GPU. Without the `ml` extra the map still builds from the distance sensor.
 
 ## Phase 2 hooks
 - **Vision (YOLO)**: a detector in `perception/` publishes `raw.face` / `raw.object` events on the bus. Senses, drives and behaviors don't change.

@@ -33,6 +33,18 @@ scene.add(sun);
 let bodies = [], version = -1, robotId = 1, follow = true, shown = false, screenTex = null;
 const world = new THREE.Group();
 scene.add(world);
+const goalMark = new THREE.Mesh(new THREE.RingGeometry(0.035, 0.05, 40), new THREE.MeshBasicMaterial({ color: 0x22c55e, side: THREE.DoubleSide }));
+goalMark.visible = false;
+scene.add(goalMark);
+canvas.addEventListener('dblclick', e => {        // double-click the floor: set a goal for goto policies
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hit = new THREE.Vector3();
+  if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lastFloorZ || 0)), hit)) post('/api/rl/goal', { x: hit.x, y: hit.y });
+});
+let lastFloorZ = 0;
 
 function bg() {
   const css = getComputedStyle(document.documentElement);
@@ -159,6 +171,7 @@ async function loadScene() {
   for (let i = 0; i < (sc.nbody || 0); i++) { const grp = new THREE.Group(); bodies.push(grp); world.add(grp); }
   for (const g of sc.geoms || []) { const m = mesh(g); if (m && bodies[g.body]) bodies[g.body].add(m); }
   robotId = sc.robot || 1;
+  lastFloorZ = sc.world === 'table' ? 0.38 : 0;
   version = sc.version;
   $('#sim-world').value = sc.world || 'room';
   $('#sim-seed').placeholder = sc.seed ? `seed ${sc.seed}` : 'seed';
@@ -179,6 +192,8 @@ function connect() {
       bodies[i].quaternion.set(p[o + 4], p[o + 5], p[o + 6], p[o + 3]);
     }
     badges(msg);
+    goalMark.visible = !!msg.goal;
+    if (msg.goal) goalMark.position.set(msg.goal[0], msg.goal[1], (lastFloorZ || 0) + 0.002);
     running(msg.test);
   };
   ws.onclose = () => setTimeout(connect, 1500);

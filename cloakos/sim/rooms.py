@@ -28,7 +28,7 @@ WORLDS = {
     "table": "Tabletop with edges (cliffs)",
     "person": "Room with a person sitting on the floor",
     "goal": "Room with a goal marker to reach",
-    "balance": "Flat floor, Vector starts tipped up on its back treads",
+    "balance": "Flat floor, Vector starts tipped back (recovery practice)",
 }
 
 # plain stand-ins when scanned objects aren't available: name -> (shape, size, rgba)

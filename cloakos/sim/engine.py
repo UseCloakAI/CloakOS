@@ -67,6 +67,7 @@ class Sim:
         self._run = False
         self._load_req: tuple[str, int | None] | None = None
         self._loaded = threading.Event()
+        self._req_id = self._done_id = 0       # a load() only returns once *its* world is in
         # commands (written from asyncio, read by the physics thread)
         self.wheels = (0.0, 0.0)            # target mm/s
         self.wheel_accel = 0.0              # mm/s^2, 0 = as fast as the motors go
@@ -85,6 +86,14 @@ class Sim:
         # Vector's firmware stops forward driving the moment a front cliff sensor trips
         # (unless the SDK holds override priority); emulate that so the brain sees what it would
         self.cliff_guard = bool(c.get("cliff_guard", True))
+        # an optional fast controller run inside the physics loop (sim-only skills like balancing)
+        self.controller = None
+        self.controller_hz = 50.0
+        # mapping: depth + camera pose + what's in view, rendered only when someone wants it
+        self.want_depth = False
+        self.depth_hz = 2.0
+        self.depth_frame: dict | None = None
+        self._next_depth = 0.0
         self._edge = False
         self._n = 0
 
@@ -95,7 +104,7 @@ class Sim:
             return
         self._run = True
         if self.scene_info is None:
-            self._load_req = (self.world, self.seed)
+            self._load_req = (self.world, self.seed, 0)
         self._thread = threading.Thread(target=self._loop, name="sim", daemon=True)
         self._thread.start()
         self._loaded.wait(10)
@@ -107,18 +116,23 @@ class Sim:
 
     def load(self, world: str | None = None, seed: int | None = None, wait: bool = True) -> rooms.Scene | None:
         """Swap in a new world (random seed if None). Happens on the physics thread."""
-        self._loaded.clear()
-        self._load_req = (world or self.world, seed)
+        with self._lock:
+            self._req_id += 1
+            me = self._req_id
+            self._load_req = (world or self.world, seed, me)
         if not (self._thread and self._thread.is_alive()):
             self._do_load()
         elif wait:
-            self._loaded.wait(10)
+            end = time.monotonic() + 90             # first use of new scanned objects downloads them
+            while self._done_id < me and time.monotonic() < end:
+                self._loaded.wait(0.2)
+                self._loaded.clear()
         return self.scene_info
 
     def _do_load(self) -> None:
         import mujoco
 
-        world, seed = self._load_req or (self.world, None)
+        world, seed, rid = self._load_req or (self.world, None, 0)
         self._load_req = None
         sc = rooms.build(world, seed, self.assets)
         m = mujoco.MjModel.from_xml_string(sc.xml)
@@ -138,6 +152,7 @@ class Sim:
             self._frames.clear()
             self.version += 1
         self._update_snapshot()
+        self._done_id = max(self._done_id, rid)
         self._loaded.set()
         log.info("sim world: %s (seed %d)", sc.world, sc.seed)
 
@@ -258,7 +273,8 @@ class Sim:
         """A shove at head height. direction: radians in the world frame (random if None)."""
         a = direction if direction is not None else np.random.uniform(-math.pi, math.pi)
         f = 2.2 * strength
-        self._push = (time.monotonic() + 0.05, np.array([f * math.cos(a), f * math.sin(a), 0.0, 0.0, 0.0, 0.0]))
+        t = self._d.time if self._d is not None else 0.0      # sim time: correct at any speed
+        self._push = (t + 0.05, np.array([f * math.cos(a), f * math.sin(a), 0.0, 0.0, 0.0, 0.0]))
 
     def tap_button(self, n: int = 1) -> None:
         t = time.monotonic()
@@ -283,7 +299,7 @@ class Sim:
         import mujoco
 
         renderer, rendered_for = None, None
-        next_frame = next_snap = 0.0
+        next_frame = next_snap = next_ctrl = 0.0
         last = time.monotonic()
         while self._run:
             if self._load_req is not None or self._m is None:
@@ -305,6 +321,15 @@ class Sim:
                 last += steps * m.opt.timestep
                 if now - last > 0.25:          # fell far behind (debugger, sleep): don't try to catch up
                     last = now
+            ctrl = self.controller
+            if ctrl is not None and now >= next_ctrl:
+                self._update_snapshot()
+                try:
+                    self.set_wheels(*ctrl(self.snapshot))
+                except Exception:
+                    log.exception("sim controller failed; removing it")
+                    self.controller = None
+                next_ctrl = now + 1 / self.controller_hz
             if now >= next_snap:
                 self._update_snapshot()
                 next_snap = now + 1 / 60
@@ -314,6 +339,9 @@ class Sim:
                     renderer, rendered_for = self._make_renderer(renderer), self.version
                 if renderer is not None:
                     self._capture(renderer, now)
+                    if self.want_depth and now >= self._next_depth:
+                        self._next_depth = now + 1 / self.depth_hz
+                        self._capture_depth(renderer)
             self._publish_frame(now)
             time.sleep(0.002)
         if renderer is not None:
@@ -374,11 +402,72 @@ class Sim:
                     d.qvel[v:v + 6] = 0
         if self._push is not None:
             until, f = self._push
-            d.xfrc_applied[self._bid] = f if now < until else 0
-            if now >= until:
+            d.xfrc_applied[self._bid] = f if d.time < until else 0
+            if d.time >= until:
                 self._push = None
         while self._taps and self._taps[0][0] <= now:
             self.button_pressed = self._taps.popleft()[1]
+
+    # ── direct stepping (RL: no thread, as fast as the CPU goes) ──
+
+    def step(self, seconds: float) -> None:
+        """Advance physics synchronously (only when the sim thread isn't running)."""
+        import mujoco
+
+        m, d = self._m, self._d
+        now = time.monotonic()
+        for _ in range(max(1, int(round(seconds / m.opt.timestep)))):
+            self._control(m, d, now)
+            mujoco.mj_step(m, d)
+        self._update_snapshot()
+
+    def place_robot(self, x: float, y: float, yaw: float, pitch: float = 0.0, tumble: tuple[float, float] | None = None) -> None:
+        """Teleport Vector (standing, tipped back by `pitch`, or dropped at a `tumble` (pitch, roll)
+        orientation from a few cm up so it lands however it lands) and zero its motion."""
+        import mujoco
+
+        m, d, sc = self._m, self._d, self.scene_info
+        a, v = self._qadr, self._vadr
+        d.qvel[:] = 0
+        sc.spawn = (x, y, sc.floor_z, yaw)
+        sc.start_pitch = pitch
+        if tumble:
+            tp, tr = tumble
+            q = np.zeros(4)
+            qy, qp, qr = (np.array([math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]),
+                          np.array([math.cos(-tp / 2), 0, math.sin(-tp / 2), 0]),
+                          np.array([math.cos(tr / 2), math.sin(tr / 2), 0, 0]))
+            mujoco.mju_mulQuat(q, qy, qp)
+            mujoco.mju_mulQuat(q, q.copy(), qr)
+            d.qpos[a:a + 3] = [x, y, sc.floor_z + 0.06]
+            d.qpos[a + 3:a + 7] = q
+        elif pitch:
+            self._tip_back(m, d, sc)
+        else:
+            d.qpos[a:a + 3] = [x, y, sc.floor_z + 0.0005]
+            d.qpos[a + 3:a + 7] = [math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]
+        self.wheels, self._wheel_cmd = (0.0, 0.0), np.zeros(2)
+        self.head_target, self.head_rate, self.lift_rate = 0.0, 0.0, 0.0
+        d.qpos[self._head_q] = 0.0
+        self._hold_pos, self._push, self._air_since, self._edge, self._n = None, None, None, False, 0
+        d.ctrl[:] = 0
+        d.act[:] = 0
+        d.xfrc_applied[:] = 0
+        mujoco.mj_forward(m, d)
+        self._update_snapshot()
+
+    def rays(self, n: int = 9, fov: float = math.radians(120), max_range: float = 1.0) -> np.ndarray:
+        """Distances (m) along a horizontal fan from the robot's nose: a stand-in for depth."""
+        m, d = self._m, self._d
+        R = d.xmat[self._bid].reshape(3, 3)
+        fwd, left = R[:, 0].copy(), R[:, 1].copy()
+        fwd[2] = left[2] = 0
+        fwd /= max(1e-6, np.linalg.norm(fwd))
+        left /= max(1e-6, np.linalg.norm(left))
+        out = np.empty(n, np.float32)
+        for i, a in enumerate(np.linspace(-fov / 2, fov / 2, n)):
+            out[i] = min(max_range, self._ray(m, d, self._sites["prox"], math.cos(a) * fwd + math.sin(a) * left))
+        return out
 
     # ── sensors ────────────────────────────────────────────────
 
@@ -400,13 +489,14 @@ class Sim:
             R = d.xmat[self._bid].reshape(3, 3)
             yaw = math.atan2(R[1, 0], R[0, 0])
             pitch = math.asin(max(-1.0, min(1.0, R[2, 0])))         # + = nose up
+            roll = math.atan2(R[2, 1], R[2, 2])
             up = float(R[2, 2])
             fwd = R[:, 0]
             prox = self._ray(m, d, self._sites["prox"], fwd)
             down = -R[:, 2]
             cliffs = {k: self._ray(m, d, self._sites[k], down) for k in ("cliff_fl", "cliff_fr", "cliff_bl", "cliff_br")}
             cliff = any(cliffs[k] > 0.02 for k in ("cliff_fl", "cliff_fr"))
-            wheel_ground = bump = False
+            wheel_ground = bump = body_ground = False
             for i in range(d.ncon):
                 c = d.contact[i]
                 g1, g2 = c.geom1, c.geom2
@@ -415,6 +505,7 @@ class Sim:
                     continue
                 if other in self._surface:
                     wheel_ground |= mine in self._wheel_geoms
+                    body_ground |= mine not in self._wheel_geoms
                 else:
                     bump = True
             now = time.monotonic()
@@ -431,14 +522,14 @@ class Sim:
             if self._face_site >= 0:
                 person = self._see_face(m, d)
             self.snapshot = {
-                "t": float(d.time), "pos": pos.tolist(), "quat": quat.tolist(), "yaw": yaw, "pitch": pitch,
+                "t": float(d.time), "pos": pos.tolist(), "quat": quat.tolist(), "yaw": yaw, "pitch": pitch, "roll": roll,
                 "upright": up, "speed": float(math.hypot(vel[0], vel[1])), "vz": float(vel[2]),
                 "left_mmps": float(wl), "right_mmps": float(wr),
                 "head_angle": float(d.qpos[self._head_q]), "lift_mm": lift_height_mm(float(d.qpos[self._lift_q])),
                 "prox_m": prox if prox < 0.4 else None, "cliff": cliff and not airborne,
                 "picked_up": held or (self._air_since is not None and now - self._air_since > 0.25),
                 "falling": airborne and vel[2] < -0.3 and not held,
-                "bump": bump, "wheel_ground": wheel_ground,
+                "bump": bump, "wheel_ground": wheel_ground, "body_ground": body_ground,
                 "accel": (d.sensordata[self._accel:self._accel + 3] * 1000).tolist(),
                 "gyro": d.sensordata[self._gyro:self._gyro + 3].tolist(),
                 "button": self.button_pressed, "face": person,
@@ -492,6 +583,51 @@ class Sim:
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=self.jpeg_q)
         self._frames.append((now, buf.getvalue()))
+
+    def _capture_depth(self, renderer) -> None:
+        """Exact depth + camera pose + visible labelled objects, for the 3D map."""
+        with self._lock:
+            m, d, sc = self._m, self._d, self.scene_info
+            renderer.update_scene(d, camera="eye")
+            rgb = renderer.render().copy()
+            renderer.enable_depth_rendering()
+            renderer.update_scene(d, camera="eye")
+            depth = renderer.render().copy()
+            renderer.disable_depth_rendering()
+            M = d.cam_xmat[self._cam].reshape(3, 3)
+            R = np.stack([-M[:, 2], -M[:, 0], M[:, 1]], 1)          # forward, left, up
+            pos = d.cam_xpos[self._cam].copy()
+            dets = self._visible_objects(m, d, sc, pos, R, depth.shape[1], depth.shape[0])
+        self.depth_frame = {"t": time.time(), "depth": depth.astype(np.float32), "rgb": rgb, "pos": pos, "R": R,
+                            "detections": dets, "floor_z": sc.floor_z, "key": f"sim-{sc.world}-{sc.seed}"}
+
+    def _visible_objects(self, m, d, sc, cam, R, w, h) -> list[dict]:
+        import mujoco
+
+        f = (h / 2) / math.tan(math.radians(m.cam_fovy[self._cam]) / 2)
+        things = [(name, sc.labels.get(name, name)) for name in sc.objects]
+        if sc.person:
+            things.append(("person", "person"))
+        out = []
+        gid = np.zeros(1, dtype=np.int32)
+        for body_name, label in things:
+            b = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            if b < 0:
+                continue
+            p = d.xpos[b] + (np.array([0, 0, 0.4]) if body_name == "person" else 0)
+            rel = R.T @ (p - cam)
+            if not 0.05 < rel[0] < 2.5:
+                continue
+            u, v = w / 2 - f * rel[1] / rel[0], h / 2 - f * rel[2] / rel[0]
+            if not (0 <= u < w and 0 <= v < h):
+                continue
+            dist = float(np.linalg.norm(p - cam))
+            hit = mujoco.mj_ray(m, d, cam, (p - cam) / dist, self._rays, 1, self._bid, gid)
+            if hit >= 0 and m.geom_bodyid[gid[0]] != b and hit < dist - 0.04:
+                continue
+            r = f * (0.25 if body_name == "person" else 0.06) / rel[0]
+            out.append({"label": label, "score": 1.0, "box": (u - r, v - r, u + r, v + r), "id": body_name})
+        return out
 
     def _publish_frame(self, now: float) -> None:
         latest = None

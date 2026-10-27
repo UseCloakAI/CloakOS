@@ -166,7 +166,7 @@ def vector_actuators() -> str:
     return f"""
   <actuator>{wheels}
     <position name="head" joint="head" kp="0.25" kv="0.01" forcerange="-0.08 0.08"/>
-    <position name="lift" joint="lift" kp="0.35" kv="0.01" forcerange="-0.12 0.12"/>
+    <position name="lift" joint="lift" kp="0.8" kv="0.012" forcerange="-0.3 0.3"/>
   </actuator>
   <sensor>
     <accelerometer name="accel" site="imu"/>

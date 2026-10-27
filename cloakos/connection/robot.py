@@ -46,7 +46,8 @@ class RobotLink:
         self.hint: str | None = None          # a known, fixable reason the last connect failed
         self.volume = max(0, min(100, int(self.cfg.get("volume", 80))))   # 0..100, 0 = Cloak's sounds muted
         self.control_gen = 0
-        self._button = False                  # bumps on every control grant; Body resyncs its motor state
+        self._button = False
+        self.pose: dict | None = None         # latest full pose for the mapper: pos (m), quat, head, origin                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
         self._stop = asyncio.Event()
         self._kick = asyncio.Event()          # set_target(): drop the current link and reconnect now
@@ -278,11 +279,17 @@ class RobotLink:
 
     def _on_event(self, kind: str, msg: Any) -> None:
         if kind == "robot_state":
+            q = msg.pose
+            self.pose = {"pos": (q.x / 1000, q.y / 1000, q.z / 1000), "quat": (q.q0, q.q1, q.q2, q.q3),
+                         "head": msg.head_angle_rad, "origin": int(q.origin_id), "t": time.time()}
             down = bool(msg.status & 0x10)
             if down and not self._button:
                 self.bus.emit("raw.button_press")
             self._button = down
         elif kind == "robot_observed_face":
+            if msg.pose.origin_id:                 # Vector also knows where the face is in the room
+                fp = msg.pose
+                self.bus.emit("raw.face_pose", pos=(fp.x / 1000, fp.y / 1000, fp.z / 1000), origin=int(fp.origin_id))
             r = msg.img_rect
             self.bus.emit("raw.face", face=Face(
                 id=int(msg.face_id),

@@ -131,7 +131,7 @@ class Assets:
 
                 d.mkdir(parents=True, exist_ok=True)
                 for f in ("model.obj", "texture.png"):
-                    r = httpx.get(f"{RAW}/{name}/{f}", timeout=30, follow_redirects=True)
+                    r = httpx.get(f"{RAW}/{name}/{f}", timeout=15, follow_redirects=True)
                     r.raise_for_status()
                     tmp = d / (f + ".part")
                     tmp.write_bytes(r.content)

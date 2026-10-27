@@ -264,6 +264,8 @@ function goPage(p) {
   $$('[data-nav]').forEach(b => { const on = b.dataset.nav === p; b.classList.toggle('on', on && b.closest('.sb-nav')); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (p === 'settings' || p === 'lab') loadInfo();
   if (window.simShown) window.simShown(p === 'sim');
+  if (window.trainShown) window.trainShown(p === 'train');
+  if (window.mapShown) window.mapShown(p === 'map');
   if (p === 'settings') loadUpdates();
   if (window.innerWidth <= 640) closeMobileSidebar();
 }

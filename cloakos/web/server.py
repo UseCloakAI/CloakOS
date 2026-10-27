@@ -24,6 +24,8 @@ from ..bus import Event
 from .. import FULL_NAME, __version__
 from ..drives import DRIVES
 from .setup_api import autoconfigure_loop, env_path, make_router, robot_ota_url, write_env
+from .map_api import make_map_router
+from .rl_api import make_rl_router
 from .sim_api import make_sim_router, sim_ws
 
 if TYPE_CHECKING:
@@ -71,6 +73,8 @@ def create_app(brain: "Brain") -> FastAPI:
 
     app.include_router(make_router(brain))
     app.include_router(make_sim_router(brain))
+    app.include_router(make_rl_router(brain))
+    app.include_router(make_map_router(brain))
 
     @app.get("/")
     async def index() -> FileResponse:

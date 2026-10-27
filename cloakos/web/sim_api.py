@@ -98,7 +98,7 @@ async def sim_ws(brain: "Brain", ws: WebSocket) -> None:
             t = brain.tester
             if sim is not None and sim.scene_info is not None:
                 snap = sim.snapshot or {}
-                msg = {"v": sim.version, "p": sim.poses(), "frozen": brain.frozen,
+                msg = {"v": sim.version, "p": sim.poses(), "frozen": brain.frozen, "goal": brain.learned.goal,
                        "s": {k: snap.get(k) for k in ("upright", "pitch", "speed", "picked_up", "cliff", "bump")},
                        "test": t.running if t else None}
                 await ws.send_text(json.dumps(msg))

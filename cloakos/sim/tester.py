@@ -79,6 +79,12 @@ SCENARIOS: dict[str, Scenario] = {s.id: s for s in [
         Check("didn't move while frozen", lambda r: r["frozen_dist"] <= 0.02, lambda r: f"moved {r['frozen_dist'] * 1000:.0f} mm while frozen"),
         Check("unfroze", lambda r: r["unfroze"], lambda r: "unfroze" if r["unfroze"] else "stayed frozen"),
     ]),
+    Scenario("learned_goto", "Trained policy: reach the goal", "The goto policy picked in Training drives to the "
+             "orange disc in a room it has never seen.", "goal", mode="learned", duration=60, checks=[
+        Check("reached the goal", lambda r: r["closest_goal"] <= 0.07, lambda r: f"closest {_m(r['closest_goal'])}"),
+        Check("few bumps", lambda r: r["bumps"] <= 2, lambda r: f"{r['bumps']} bumps"),
+        Check("stays upright", lambda r: r["min_upright"] > 0.5, lambda r: f"min upright {r['min_upright']:.2f}"),
+    ]),
     Scenario("drive", "Drive to the goal (you)", "Teleop: drive Vector onto the orange goal disc with the keyboard. "
              "Records an episode if recording is on.", "goal", mode="teleop", duration=120, checks=[
         Check("reached the goal", lambda r: r["closest_goal"] <= 0.07, lambda r: f"closest {_m(r['closest_goal'])}"),
@@ -125,11 +131,24 @@ class Tester:
             await b.set_frozen(False, source="tester")
         await link.set_target("sim")
         scene = await asyncio.to_thread(sim.load, sc.world, seed)
+        if scene is None or scene.world != sc.world or (seed is not None and scene.seed != seed):
+            log.warning("sim test %s: world didn't load in time", sc.id)
+            return
         for _ in range(100):                       # wait for the link to come up on the sim
             if link.connected and link.target == "sim":
                 break
             await asyncio.sleep(0.1)
         b.drives.reset()
+        if sc.mode == "learned":
+            lp = b.learned
+            if lp.spec is None or lp.spec.task != "goto":
+                result = {"scenario": sc.id, "title": sc.title, "seed": scene.seed, "status": "error", "passed": False,
+                          "checks": [{"name": "policy", "ok": False, "detail": "pick a trained goto policy in Training first"}],
+                          "t": time.time(), "duration": 0}
+                self.results = (self.results + [result])[-50:]
+                b.bus.emit("test.finished", **result)
+                return
+            lp.goal = scene.goal
         await b.set_mode(sc.mode)
         if record and not b.recorder.active:
             b.toggle_recording(True, note=f"sim test: {sc.id} seed {scene.seed}")
