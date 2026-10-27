@@ -96,6 +96,7 @@ class Sim:
         self._next_depth = 0.0
         self._interest = 0.0                # camera/depth rendering only runs while something is looking
         self._render_thread: threading.Thread | None = None
+        self._separate_render = False
         self._edge = False
         self._n = 0
 
@@ -107,9 +108,10 @@ class Sim:
         self._run = True
         if self.scene_info is None:
             self._load_req = (self.world, self.seed, 0)
+        self._separate_render = self.camera_on and os.environ.get("MUJOCO_GL") != "osmesa"   # software GL isn't safe across threads
         self._thread = threading.Thread(target=self._loop, name="sim", daemon=True)
         self._thread.start()
-        if self.camera_on:
+        if self._separate_render:
             self._render_thread = threading.Thread(target=self._render_loop, name="sim-render", daemon=True)
             self._render_thread.start()
         self._loaded.wait(10)
@@ -310,6 +312,8 @@ class Sim:
         import mujoco
 
         next_snap = next_ctrl = 0.0
+        inline = not self._separate_render
+        rst: dict = {}
         last = time.monotonic()
         while self._run:
             if self._load_req is not None or self._m is None:
@@ -343,47 +347,58 @@ class Sim:
             if now >= next_snap:
                 self._update_snapshot()
                 next_snap = now + 1 / 60
+            if inline:
+                self._render_once(rst)
             self._publish_frame(now)
             time.sleep(0.002)
+        if rst.get("renderer") is not None:
+            rst["renderer"].close()
 
     def _render_loop(self) -> None:
         """Camera + depth frames on their own thread, from a copy of the physics state, so rendering
         never stalls the physics (and so nothing renders while nobody is looking)."""
+        st: dict = {}
+        while self._run:
+            self._render_once(st)
+            time.sleep(0.02)
+        if st.get("renderer") is not None:
+            st["renderer"].close()
+
+    def _render_once(self, st: dict) -> None:
         import mujoco
 
-        renderer, rendered_for, rd = None, None, None
-        next_frame = 0.0
-        while self._run:
-            now = time.monotonic()
-            if not self.camera_on or self._m is None or now >= self._interest or now < next_frame:
-                time.sleep(0.02)
-                continue
-            next_frame = now + 1 / self.fps
-            try:
-                if rendered_for != self.version or rd is None:
-                    rd = mujoco.MjData(self._m)
-                    renderer, rendered_for = self._make_renderer(renderer), self.version
-                if renderer is None:
-                    continue
-                with self._lock:
-                    mujoco.mj_copyData(rd, self._m, self._d)
-                self._capture(renderer, now, rd)
-                if self.want_depth and now >= self._next_depth:
-                    self._next_depth = now + 1 / self.depth_hz
-                    self._capture_depth(renderer, rd)
-            except Exception:
-                log.exception("sim camera render failed")
-                time.sleep(0.5)
-        if renderer is not None:
-            renderer.close()
+        now = time.monotonic()
+        if not self.camera_on or self._m is None or now >= self._interest or now < st.get("next", 0.0):
+            return
+        st["next"] = now + 1 / self.fps
+        try:
+            with self._lock:
+                m, sc = self._m, self.scene_info
+            if st.get("rd") is None or st.get("m") is not m:
+                st["rd"] = mujoco.MjData(m)
+                st["renderer"], st["m"] = self._make_renderer(st.get("renderer"), m), m
+            renderer, rd = st["renderer"], st["rd"]
+            if renderer is None:
+                return
+            with self._lock:
+                if self._m is not m:                        # a new world loaded meanwhile: start over next pass
+                    return
+                mujoco.mj_copyData(rd, m, self._d)
+            self._capture(renderer, now, rd)
+            if self.want_depth and now >= self._next_depth:
+                self._next_depth = now + 1 / self.depth_hz
+                self._capture_depth(renderer, rd, m, sc)
+        except Exception:
+            log.exception("sim camera render failed")
+            st["next"] = now + 0.5
 
-    def _make_renderer(self, old):
+    def _make_renderer(self, old, m=None):
         import mujoco
 
         if old is not None:
             old.close()
         try:
-            r = mujoco.Renderer(self._m, self.render_h, self.render_w)
+            r = mujoco.Renderer(m or self._m, self.render_h, self.render_w)
             self.render_error = None
             return r
         except Exception as e:
@@ -608,8 +623,9 @@ class Sim:
         renderer.update_scene(d, camera="eye")
         px = renderer.render()
         img = px.astype(np.float32)
+        img = self._lens_and_exposure(img)
         if self.noise:
-            img += np.random.normal(0, self.noise, img.shape)
+            img += np.random.normal(0, self.noise * (1.0 + 0.8 * max(0.0, 1.0 - self._gain)), img.shape)   # dimmer = grainier
         im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
         if im.size != (CAM_W, CAM_H):
             im = im.resize((CAM_W, CAM_H), Image.BILINEAR)
@@ -618,9 +634,26 @@ class Sim:
         im.save(buf, "JPEG", quality=self.jpeg_q)
         self._frames.append((now, buf.getvalue()))
 
-    def _capture_depth(self, renderer, d) -> None:
+    def _lens_and_exposure(self, img: np.ndarray) -> np.ndarray:
+        """What a small real camera does on top of a clean render: vignetting, auto-exposure and
+        white-balance drift, and horizontal smear while the robot turns."""
+        h, w = img.shape[:2]
+        if getattr(self, "_vig", None) is None or self._vig.shape != (h, w, 1):
+            yy, xx = np.mgrid[0:h, 0:w]
+            r2 = ((xx - w / 2) / (w / 2)) ** 2 + ((yy - h / 2) / (h / 2)) ** 2
+            self._vig = (1.0 - 0.28 * r2 / 2)[..., None].astype(np.float32)
+            self._gain, self._tint = 1.0, np.ones(3, np.float32)
+        self._gain = float(np.clip(self._gain + np.random.normal(0, 0.02), 0.75, 1.25))
+        self._tint = np.clip(self._tint + np.random.normal(0, 0.004, 3), 0.94, 1.06).astype(np.float32)
+        img = img * self._vig * self._gain * self._tint
+        gz = abs(float(self.snapshot.get("gyro", (0, 0, 0))[2])) if self.snapshot else 0.0
+        k = int(min(9, gz * 3))
+        if k >= 2:
+            img = np.mean([np.roll(img, o, axis=1) for o in range(-(k // 2), k // 2 + 1)], axis=0)
+        return img
+
+    def _capture_depth(self, renderer, d, m, sc) -> None:
         """Exact depth + camera pose + visible labelled objects, for the 3D map."""
-        m, sc = self._m, self.scene_info
         renderer.update_scene(d, camera="eye")
         rgb = renderer.render().copy()
         renderer.enable_depth_rendering()

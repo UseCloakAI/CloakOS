@@ -1,0 +1,9 @@
+{
+ "baseline_mae_m": 0.29952487349510193,
+ "epoch": 39,
+ "mae_m": 0.11244353652000427,
+ "near_mae_m": 0.10775112360715866,
+ "missed_close": 0.04019404202699661,
+ "train_frames": 21600,
+ "heldout_frames": 2400
+}
