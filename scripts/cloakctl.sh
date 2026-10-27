@@ -58,10 +58,12 @@ write_status() {     # write_status <result> <latest sha>
   printf '{"checked_at": %s, "result": "%s", "installed": "%s", "latest": "%s", "channel": "%s"}\n' \
     "$(date +%s)" "$1" "$(cat "$HOME_DIR/app/.sha" 2>/dev/null || echo unknown)" "$2" "$(channel)" >"$STATUSF"
 }
+pyvar() { sed -n "s/^$1 *= *\"\([^\"]*\)\".*/\1/p" | head -n1; }     # pyvar NAME < __init__.py
+label() { local v="${1:-?}" n="${2:-}"; echo "v$v${n:+ (Nous v$n)}"; }
 channel() { cat "$HOME_DIR/channel" 2>/dev/null || echo main; }
 
 auto_update() {      # auto-update [--now]: install a newer Cloak (and with it any newly-pinned wire-pod)
-  local force="${1:-}" latest installed was_running=""
+  local force="${1:-}" latest installed was_running="" from_label to_label
   if [[ "$(envval CLOAK_AUTO_UPDATE)" == "0" && "$force" != "--now" ]]; then write_status "off" ""; return 0; fi
   if ! mkdir "$HOME_DIR/.updating" 2>/dev/null; then
     # a leftover lock from an interrupted update: clear it if it's over 10 minutes old
@@ -76,7 +78,7 @@ auto_update() {      # auto-update [--now]: install a newer Cloak (and with it a
     write_status "offline" ""; [[ "$force" == "--now" ]] && echo "Couldn't check for updates. Are you online?"; return 0
   fi
   if [[ "$latest" == "$installed" ]]; then
-    write_status "current" "$latest"; [[ "$force" == "--now" ]] && echo "CloakOS is up to date (${installed:0:7})."; return 0
+    write_status "current" "$latest"; [[ "$force" == "--now" ]] && echo "CloakOS is up to date: $(label "$(pyvar __version__ <"$HOME_DIR/app/cloakos/__init__.py" 2>/dev/null)" "$(pyvar NOUS_VERSION <"$HOME_DIR/app/cloakos/__init__.py" 2>/dev/null)") (${installed:0:7})."; return 0
   fi
   # never interrupt a recording; try again next time
   if running && curl -fsS -m 3 "$URL/api/health" 2>/dev/null | grep -q '"recording": *true'; then
@@ -84,11 +86,16 @@ auto_update() {      # auto-update [--now]: install a newer Cloak (and with it a
     [[ "$force" == "--now" ]] && echo "An update is ready, but CloakOS is recording. Stop the recording and run: cloakos update"
     return 0
   fi
-  echo "$(date '+%F %T') updating $installed -> $latest"
+  local init_old init_new
+  init_old="$(cat "$HOME_DIR/app/cloakos/__init__.py" 2>/dev/null || true)"
+  init_new="$(curl -fsSL -m 15 "https://raw.githubusercontent.com/$REPO/$latest/cloakos/__init__.py" 2>/dev/null || true)"
+  from_label="$(label "$(pyvar __version__ <<<"$init_old")" "$(pyvar NOUS_VERSION <<<"$init_old")")"
+  to_label="$(label "$(pyvar __version__ <<<"$init_new")" "$(pyvar NOUS_VERSION <<<"$init_new")")"
+  echo "$(date '+%F %T') updating CloakOS $from_label (${installed:0:7}) -> $to_label (${latest:0:7})"
   running && was_running=1
   if curl -fsSL "https://raw.githubusercontent.com/$REPO/$latest/install.sh" \
       | CLOAK_REF="$latest" CLOAK_CHANNEL="$(channel)" CLOAK_HOME="$HOME_DIR" CLOAK_NO_OPEN=1 CLOAK_FROM_UPDATER=1 bash; then
-    write_status "updated" "$latest"; [[ "$force" == "--now" ]] && echo "Updated to ${latest:0:7}."
+    write_status "updated" "$latest"; [[ "$force" == "--now" ]] && echo "Updated to CloakOS $to_label (${latest:0:7})."
   else
     write_status "failed" "$latest"; [[ "$force" == "--now" ]] && echo "Update failed. See: $HOME_DIR/logs/update.log"
   fi
