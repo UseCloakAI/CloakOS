@@ -100,3 +100,18 @@ def test_connect_error_hints():
     assert hint_for("can't reach wire-pod at http://escapepod.local:8080 (...)") == "no_wirepod"
     assert hint_for("wire-pod has no cert for 003091c9 yet; finish setting the bot up") == "not_paired"
     assert hint_for("heartbeat lost") is None
+
+
+async def test_discover_reads_cert_from_robot_when_wirepod_has_none(fake, tmp_path):
+    _, bot = fake                                     # a real TLS "robot" on 127.0.0.1
+    ip = bot.host                                     # "127.0.0.1:<port>"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api-sdk/get_sdk_info":
+            return httpx.Response(200, json={"robots": [{"esn": "003091c9", "ip_address": ip, "guid": "tok"}]})
+        return httpx.Response(404)                    # wire-pod knows the bot but has no session cert
+
+    found = await discover({"wirepod": {"url": "http://pod:8080"}, "robot": {}}, cert_dir=tmp_path,
+                           transport=httpx.MockTransport(handler))
+    assert found.cert.strip() == bot.cert.strip() and found.name == NAME
+    assert (tmp_path / "003091c9.pem").exists()       # cached for next time
