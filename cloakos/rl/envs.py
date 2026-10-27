@@ -216,7 +216,7 @@ if gym is not None:
                 self._prev_dist = dist
                 reward -= 0.01
                 if s["bump"]:
-                    reward -= 1.0                              # around things, never through them
+                    reward -= 2.0                              # around things, never through them
                     info["bump"] = True
                     self.bumps += 1
                 if dist < 0.06:
@@ -244,8 +244,11 @@ if gym is not None:
                 if self._upright_for >= 10:                  # a full second on its treads
                     reward += 5.0
                     done, info["success"] = True, True
+            if s.get("cliff") and spec.task != "recover":
+                reward -= 0.3                                  # the edge sensors fired: too close, turn earlier
+                info["cliff"] = True
             if fell:
-                reward -= 2.0
+                reward -= 8.0
                 done = True
                 info["fell"] = True
             truncated = self.t >= spec.episode_s * spec.control_hz
