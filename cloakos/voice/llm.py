@@ -61,14 +61,15 @@ class LineWriter:
         temp = self.temperature if temperature is None else temperature
         try:
             if self.provider == "cloak":
-                body = {"model": model or self.model, "message": user, "system_prompt": system,
-                        "temperature": temp, "effort": "low"}
+                # Cloak's native API: {model, messages, system, max_tokens, effort, imageBase64?} -> {response}
+                body = {"model": model or self.model, "messages": [{"role": "user", "content": user}],
+                        "system": system, "max_tokens": max_tokens, "effort": "low"}
                 if image_jpeg:
                     import base64
                     body["imageBase64"], body["mimeType"] = base64.b64encode(image_jpeg).decode(), "image/jpeg"
                 r = await self._http.post(f"{self.base_url}/v1/chat", json=body, timeout=timeout or self.timeout)
                 r.raise_for_status()
-                return (r.json().get("text") or "").strip() or None
+                return (r.json().get("response") or "").strip() or None
             body = {"model": model or self.model, "max_tokens": max_tokens, "temperature": temp,
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
             r = await self._http.post(f"{self.base_url}/chat/completions", json=body, timeout=timeout or self.timeout)
