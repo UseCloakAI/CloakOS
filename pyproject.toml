@@ -35,7 +35,7 @@ cloak-vector = "cloak_vector.__main__:main"
 include = ["cloak_vector*"]
 
 [tool.setuptools.package-data]
-cloak_vector = ["web/static/*", "vector/proto/*.proto"]
+cloak_vector = ["web/static/*", "web/static/pair/*", "vector/proto/*.proto"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

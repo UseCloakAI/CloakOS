@@ -1,0 +1,64 @@
+# Weekly: is there a new WirePod (macOS app) release, and does it still offer what Cloak needs?
+# If so, open a PR bumping compat.json. Merging that PR is the "deemed compatible" step:
+# every installed Mac picks it up on its next background update.
+name: wire-pod compatibility
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"     # Mondays 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Newest WirePod release vs. pinned
+        id: v
+        run: |
+          latest=$(git ls-remote --tags https://github.com/kercre123/WirePod | awk '{print $2}' \
+            | sed 's#refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          pinned=$(jq -r .wirepod.macos.pinned compat.json)
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "latest $latest, pinned $pinned"
+
+      - name: Skip if already proposed
+        id: open
+        if: steps.v.outputs.latest != steps.v.outputs.pinned
+        run: |
+          if git ls-remote --exit-code --heads origin "wirepod/${{ steps.v.outputs.latest }}" >/dev/null; then
+            echo "exists=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check it against what Cloak uses
+        if: steps.v.outputs.latest != steps.v.outputs.pinned && steps.open.outputs.exists != '1'
+        run: |
+          v=${{ steps.v.outputs.latest }}
+          git clone -q --depth 1 --branch "$v" --recurse-submodules --shallow-submodules https://github.com/kercre123/WirePod /tmp/wp
+          python3 scripts/wirepod_contract.py /tmp/wp/wire-pod | tee /tmp/contract.txt
+          curl -fsSIL -o /dev/null "https://github.com/kercre123/WirePod/releases/download/$v/WirePod-$v.dmg"
+          echo "macOS DMG: WirePod-$v.dmg is published" >> /tmp/contract.txt
+
+      - name: Open the bump PR
+        if: steps.v.outputs.latest != steps.v.outputs.pinned && steps.open.outputs.exists != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=${{ steps.v.outputs.latest }}
+          jq --arg v "$v" '.wirepod.macos.pinned = $v | .wirepod.macos.compatible = ((.wirepod.macos.compatible + [$v]) | unique)' \
+            compat.json > /tmp/compat.json && mv /tmp/compat.json compat.json
+          git config user.name "cloak-bot"
+          git config user.email "cloak-bot@users.noreply.github.com"
+          git checkout -b "wirepod/$v"
+          git commit -am "wire-pod $v: deemed compatible"
+          git push -u origin "wirepod/$v"
+          gh pr create --title "wire-pod $v is compatible" --body "$(printf '%s\n\n%s\n\n%s' \
+            "WirePod **$v** passed Cloak's compatibility check. Merging this pins it in \`compat.json\`, and every installed Mac moves to it on its next background update." \
+            "\`\`\`$(cat /tmp/contract.txt)\`\`\`" \
+            "Before merging, ideally pair a real Vector with $v once.")"

@@ -223,6 +223,7 @@ function goPage(p) {
   $$('.page').forEach(s => s.hidden = s.dataset.page !== p);
   $$('[data-nav]').forEach(b => { const on = b.dataset.nav === p; b.classList.toggle('on', on && b.closest('.sb-nav')); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (p === 'settings' || p === 'lab') loadInfo();
+  if (p === 'settings') loadUpdates();
   if (window.innerWidth <= 640) closeMobileSidebar();
 }
 function toggleSidebar() {
@@ -286,6 +287,31 @@ async function loadInfo() {
     return `<div class="conv-item" title="${esc(ep.name)}"><div class="conv-label"><svg class="conv-icon" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg><span>${esc(label)}</span><span class="ep-n">${ep.steps}</span></div></div>`;
   }).join('') || '<div class="ep-empty">No episodes yet.</div>';
 }
+let upd = null;
+async function loadUpdates() {
+  try { upd = await (await fetch('/api/setup/updates')).json(); } catch { return; }
+  if (!upd.managed) { $('#kv-updates').innerHTML = '<dt>Updates</dt><dd>Dev checkout: update with git.</dd>'; return; }
+  const st = upd.status || {}, wp = upd.wirepod || {};
+  const when = st.checked_at ? new Date(st.checked_at * 1000).toLocaleString() : 'not yet';
+  const short = x => (x || '').slice(0, 7) || '—';
+  const rows = [
+    ['Cloak', `${short(upd.installed)} · ${upd.channel}`],
+    ['Last check', `${when}${st.result ? ' · ' + st.result : ''}`],
+    ['wire-pod', wp.managed ? `${wp.installed || '?'} · pinned ${wp.pinned}` : `yours · Cloak won't touch it (compatible: ${wp.pinned})`],
+  ];
+  $('#kv-updates').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  $('#upd-actions').hidden = false;
+  $('#upd-toggle').textContent = `Auto-update: ${upd.auto ? 'on' : 'off'}`;
+}
+async function toggleAutoUpdate() {
+  await fetch('/api/setup/updates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ auto: !upd.auto }) });
+  loadUpdates();
+}
+async function checkUpdates() {
+  await fetch('/api/setup/updates/check', { method: 'POST' });
+  $('#kv-updates').insertAdjacentHTML('beforeend', '<dt>Now</dt><dd>Checking… If there\'s an update, Cloak restarts by itself.</dd>');
+}
+
 function playAnim() { const k = $('#anim-key').value.trim(); if (k) sendWS({ type: 'anim', key: k }); }
 
 /* ── teleop input: keyboard + Gamepad API, sent at 20 Hz while active ── */

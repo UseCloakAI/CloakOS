@@ -71,3 +71,11 @@ def test_setup_env_roundtrip(tmp_path):
     text = p.read_text()
     assert "# comment" in text and "OTHER=keep" in text
     assert read_env(p) == {"WIREPOD_URL": "http://b:8080", "LLM_MODEL": "llama3.2:3b", "OTHER": "keep", "VECTOR_SERIAL": "00e2"}
+
+
+def test_robot_ota_url_never_localhost(monkeypatch):
+    from cloak_vector.web import setup_api
+
+    monkeypatch.setattr(setup_api, "lan_ip", lambda: "192.168.1.20")
+    assert setup_api.robot_ota_url("http://localhost:8080") == "http://192.168.1.20:8080/api/get_ota/vicos-2.0.1.6076ep.ota"
+    assert setup_api.robot_ota_url("http://10.0.0.5:8090") == "http://10.0.0.5:8090/api/get_ota/vicos-2.0.1.6076ep.ota"

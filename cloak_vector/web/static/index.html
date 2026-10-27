@@ -240,6 +240,12 @@
           <dl class="kv" id="kv-robot"></dl>
           <h2>Voice</h2>
           <dl class="kv" id="kv-voice"></dl>
+          <h2>Updates</h2>
+          <dl class="kv" id="kv-updates"></dl>
+          <div class="chip-row" id="upd-actions" hidden>
+            <button class="chip" id="upd-toggle" onclick="toggleAutoUpdate()">Auto-update: on</button>
+            <button class="chip" onclick="checkUpdates()">Check now</button>
+          </div>
           <h2>Stock animations</h2>
           <p class="tele-note">Cloak plays its own emotes. These are Vector's built-ins, blended in at <code>expression.stock_blend</code>.</p>
           <div class="anim-form">

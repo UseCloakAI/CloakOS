@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # Cloak for Vector: one-command installer for macOS.
 #
-#   curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/install.sh | bash
 #
 # Installs everything into ~/Library/Application Support/Cloak Vector (Python via uv,
 # the app, the voice model), adds "Cloak Vector" to ~/Applications and a `cloak-vector`
 # command, then opens the setup wizard in your browser. Re-run it any time to update;
 # your settings and recordings are kept.
 #
-# Env knobs: CLOAK_REF (branch/tag, default main) · CLOAK_SOURCE (local checkout, for dev)
-#            CLOAK_HOME (install dir) · CLOAK_NO_OPEN=1 (don't start/open at the end)
+# It also installs wire-pod (the official WirePod app) if none is on your network, and
+# sets up background updates: Cloak follows its channel (main); wire-pod only ever moves
+# to the version pinned in compat.json, i.e. one we've deemed compatible.
+#
+# Env knobs: CLOAK_REF (branch/tag/sha, default main) · CLOAK_CHANNEL (what auto-update follows)
+#            CLOAK_SOURCE (local checkout, for dev) · CLOAK_HOME (install dir)
+#            CLOAK_NO_OPEN=1 (don't start/open at the end) · CLOAK_WIREPOD=skip
 set -euo pipefail
 
-REPO="UseCloakAI/CloakOS"
+REPO="UseCloakAI/CloakVOS"
 REF="${CLOAK_REF:-main}"
 PORT=8765
 OS="$(uname -s)"
@@ -46,7 +51,7 @@ banner() {
 }
 
 STEP=0
-TOTAL=7
+TOTAL=9
 # step "Label" cmd...   runs cmd quietly with a spinner; on failure shows the log tail
 step() {
   local label="$1"; shift
@@ -56,7 +61,7 @@ step() {
   ( "$@" ) >>"$LOG" 2>&1 &
   local pid=$! i=0 t0=$SECONDS
   local frames=('◰' '◳' '◲' '◱')
-  while kill -0 "$pid" 2>/dev/null; do
+  while [[ -t 1 ]] && kill -0 "$pid" 2>/dev/null; do     # spinner only on a real terminal
     printf '\r  %s%s%s  %s%-34s%s %s%s %ss%s' "$DIM" "$n/0$TOTAL" "$RST" "$INK" "$label" "$RST" "$ACC" "${frames[i++ % 4]}" "$((SECONDS - t0))" "$RST"
     sleep 0.12
   done
@@ -83,15 +88,26 @@ need_uv() {
 }
 uv_bin() { command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv"; }
 
+resolve_sha() {       # the exact commit we install, so the updater can tell when there's something new
+  if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then echo "$REF"; return; fi
+  curl -fsSL -m 10 -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null || true
+}
+
 get_app() {
-  local tmp; tmp="$(mktemp -d)"
+  local tmp sha; tmp="$(mktemp -d)"
   if [[ -n "${CLOAK_SOURCE:-}" ]]; then
     tar -C "$CLOAK_SOURCE" --exclude .git --exclude data --exclude models --exclude '.venv' --exclude '__pycache__' -cf - . | tar -C "$tmp" -xf -
+    sha="local"
   else
-    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xz -C "$tmp" --strip-components 1
+    sha="$(resolve_sha)"
+    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/${sha:-$REF}" | tar -xz -C "$tmp" --strip-components 1
   fi
+  echo "${sha:-unknown}" >"$tmp/.sha"
   rm -rf "$HOME_DIR/app"
   mv "$tmp" "$HOME_DIR/app"
+  # the channel auto-update follows: explicit, else the branch you installed from, else keep
+  if [[ -n "${CLOAK_CHANNEL:-}" ]]; then echo "$CLOAK_CHANNEL" >"$HOME_DIR/channel"
+  elif [[ ! "$REF" =~ ^[0-9a-f]{40}$ ]]; then echo "$REF" >"$HOME_DIR/channel"; fi
 }
 
 python_env() {
@@ -117,6 +133,47 @@ settings() {
   [[ -f "$HOME_DIR/.env" ]] || { cp "$HOME_DIR/app/.env.example" "$HOME_DIR/.env"; chmod 600 "$HOME_DIR/.env"; }
   mkdir -p "$HOME_DIR/data" "$HOME_DIR/bin"
   install -m 755 "$HOME_DIR/app/scripts/cloakctl.sh" "$HOME_DIR/bin/cloakctl"
+  install -m 644 "$HOME_DIR/app/scripts/wirepod.sh" "$HOME_DIR/bin/wirepod.sh"
+}
+
+wirepod() {
+  # shellcheck source=scripts/wirepod.sh
+  source "$HOME_DIR/bin/wirepod.sh"
+  wp_ensure
+}
+
+agent() {            # agent <label> <plist body>: write a LaunchAgent, (re)load it only if it changed
+  local label="$1" body="$2" plist="$HOME/Library/LaunchAgents/$1.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  if [[ -f "$plist" ]] && [[ "$(cat "$plist")" == "$body" ]]; then return 0; fi
+  printf '%s' "$body" >"$plist"
+  # never reload the updater from inside an update: that would kill the update that's running
+  [[ -n "${CLOAK_FROM_UPDATER:-}" ]] && return 0
+  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  [[ "${3:-}" == "load" ]] && launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null || true
+}
+
+background() {
+  [[ "$OS" == "Darwin" ]] || return 0
+  local head='<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>'
+  # Cloak wakes up when you log in
+  agent org.usecloak.vector "$head
+  <key>Label</key><string>org.usecloak.vector</string>
+  <key>ProgramArguments</key><array><string>$HOME_DIR/bin/cloakctl</string><string>start</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>AbandonProcessGroup</key><true/>
+</dict></plist>"
+  # checks for updates every 6 hours (Cloak, and wire-pod once a new version is deemed compatible)
+  agent org.usecloak.vector.update "$head
+  <key>Label</key><string>org.usecloak.vector.update</string>
+  <key>ProgramArguments</key><array><string>$HOME_DIR/bin/cloakctl</string><string>auto-update</string></array>
+  <key>StartInterval</key><integer>21600</integer>
+  <key>AbandonProcessGroup</key><true/>
+  <key>StandardOutPath</key><string>$HOME_DIR/logs/update.log</string>
+  <key>StandardErrorPath</key><string>$HOME_DIR/logs/update.log</string>
+</dict></plist>" load
 }
 
 launchers() {
@@ -169,7 +226,11 @@ step "Download Cloak for Vector"   get_app
 step "Install the brain"           python_env
 step "Voice model (~120 MB)"       voice_model
 step "Settings"                    settings
+if [[ "${CLOAK_WIREPOD:-}" == "skip" ]]; then STEP=$((STEP + 1)); else
+step "wire-pod"                    wirepod
+fi
 step "App + cloak-vector command"  launchers
+step "Auto-start + auto-update"    background
 if [[ -z "${CLOAK_NO_OPEN:-}" ]]; then
   step "Wake it up"                "$HOME_DIR/bin/cloakctl" start
 else
@@ -184,6 +245,7 @@ else
   printf '\n\n'
 fi
 note "Open it any time:   Cloak Vector in Applications, or  cloak-vector open"
+note "Updates install themselves in the background. Turn off in Settings."
 note "Other commands:     cloak-vector stop | status | logs | update | uninstall"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) note "Add ~/.local/bin to your PATH to use cloak-vector from any terminal." ;; esac
 printf '\n'

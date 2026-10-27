@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  Cloak's pairing page. The Bluetooth + robot logic is Digital Dream Labs' vector-web-setup
+  (MIT, via kercre123's fork), patched for wire-pod and bundled into /static/pair/rts.js.
+  Element ids below are what that code drives; keep them when restyling.
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#131110">
+<title>Pair Vector · Cloak</title>
+<link rel="icon" type="image/svg+xml" href="/static/orb.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/cloak.css">
+<link rel="stylesheet" href="/static/vector.css">
+<script>
+  if(localStorage.getItem('cloak_dark')!=='0') document.documentElement.classList.add('dark');
+  document.documentElement.setAttribute('data-theme',localStorage.getItem('cloak_theme')||'default');
+</script>
+<style>
+[hidden],.vec-hidden{display:none!important}
+.wiz{width:100%;max-width:480px}
+.wiz .auth-card{max-width:none;width:100%}
+
+/* the upstream page model: one .vec-container is .vec-current at a time */
+.vec-container{display:none;opacity:0;transition:opacity .35s var(--ease-out)}
+.vec-container.vec-current{display:flex;flex-direction:column;gap:14px;opacity:1;animation:rvUp .45s var(--ease-out) backwards}
+.vec-container h2{margin:0;font-family:var(--fd);font-size:22px;font-weight:800;text-transform:uppercase;letter-spacing:-.2px;line-height:1.05}
+.vec-container p,.lead{margin:0;font-size:13px;line-height:1.65;opacity:.65}
+.kicker{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--acc)}
+
+/* progress: Bluetooth · Wi-Fi · Firmware · Activate · Finish */
+.vec-status{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:24px}
+.vec-status .vec-icon{display:block;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink);opacity:.45;text-align:center;transition:opacity .2s}
+.vec-status .vec-icon::before{content:"";display:block;height:6px;margin-bottom:7px;border:1.5px solid var(--ink);background:var(--p2);transition:background .3s var(--ease-out)}
+.vec-status .vec-icon.vec-icon-active{opacity:1}
+.vec-status .vec-icon.vec-icon-active::before{background:var(--yel)}
+.vec-status .vec-icon.vec-icon-done{opacity:.8}
+.vec-status .vec-icon.vec-icon-done::before{background:var(--acc)}
+#iconEnv{display:none}
+
+.steps-list{border:var(--bd);background:var(--p2);padding:2px 14px}
+.steps-list .onboard-item:last-child{border-bottom:0}
+.onboard-text{font-size:13px;line-height:1.55}
+
+.vec-btn,.vec-field[type=button]{width:100%;height:46px;padding:0 16px;background:var(--acc);border:var(--bd);box-shadow:var(--sh);color:#fff;
+  font-family:var(--fu);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;cursor:pointer;
+  transition:box-shadow var(--lift),transform var(--lift)}
+.vec-btn:hover,.vec-field[type=button]:hover{box-shadow:var(--shlg);transform:translate(-2px,-2px)}
+.vec-btn:active,.vec-field[type=button]:active{box-shadow:none;transform:translate(4px,4px);transition-duration:var(--tp)}
+.btn-quiet{background:var(--surf)!important;color:var(--ink)!important;box-shadow:var(--shsm)!important}
+input.vec-field[type=text],input.vec-field[type=password],select.vec-field{width:100%;height:46px;padding:0 14px;background:var(--paper);border:var(--bd);
+  color:var(--ink);font-family:var(--fu);font-size:14px;font-weight:500;outline:none}
+#txtPin{height:64px;font-family:var(--fd);font-size:30px;font-weight:800;letter-spacing:.35em;text-align:center}
+.field-label{margin-bottom:-8px}
+
+.vec-error{font-size:12px;font-weight:700;color:#fff;padding:10px 13px;background:var(--acc);border:var(--bd)}
+.vec-link{font-size:12px;font-weight:700;color:var(--acc);cursor:pointer;text-align:center}
+
+.vec-table{display:flex;flex-direction:column;border:var(--bd);background:var(--surf);max-height:280px;overflow:auto}
+.vec-wifi-row,.vec-ota-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:var(--bdt);cursor:pointer;font-size:13px;font-weight:600}
+.vec-wifi-row:last-child{border-bottom:0}
+.vec-wifi-row:hover,.vec-ota-row:hover{background:var(--p3)}
+.vec-wifi-row::before{content:"";width:10px;height:10px;border:1.5px solid var(--ink);flex-shrink:0}
+.vec-wifi-signal,.vec-ota-type{display:none}
+
+.vec-progress-bar{position:relative;height:16px;border:var(--bd);background:var(--p2);overflow:hidden}
+.vec-progress-bar-fill{position:absolute;inset:0;background:var(--acc)}
+.vec-progress-bar-mask{position:absolute;top:0;right:0;bottom:0;width:100%;background:var(--p2);transition:width .3s linear}
+.vec-progress-bar-border{display:none}
+
+.vec-spinner-container{display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px 0}
+.vec-spinner{width:52px;height:52px}
+.vec-spinner-inner{width:100%;height:100%;border-radius:50%;background:var(--acc);border:2.5px solid var(--ink);animation:pdot 1.2s infinite}
+.vec-spinner-container span{font-size:12px;font-weight:600;opacity:.6}
+
+.check{display:flex;align-items:center;gap:10px;font-size:13px}
+.check input{accent-color:var(--acc);width:16px;height:16px}
+
+/* robot card while connected */
+.vec-vector-status{margin-top:20px}
+.vec-info-box{border:var(--bd);background:var(--p2);padding:10px 14px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12px}
+.vec-info-title{grid-column:1/-1;font-family:var(--fd);font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.vec-info-title img,.vec-info-row img,.vec-status-icon{display:none}
+.vec-info-row{grid-column:1/-1;font-family:var(--fm)}
+#vecInfoEsn::before{content:"Serial  ";opacity:.5}
+#vecInfoBuild::before{content:"Firmware  ";opacity:.5}
+#vecInfoWifi::before{content:"Wi-Fi  ";opacity:.5}
+#boxVectorEnv,#boxStatusLogs{display:none!important}
+
+.done-orb{width:64px;height:64px;margin:0 auto}
+.done-orb .cs-shape{fill:var(--acc);stroke:var(--ink);stroke-width:2.5;vector-effect:non-scaling-stroke}
+.legal{margin-top:18px;font-size:10px;line-height:1.5;opacity:.4;text-align:center}
+.legal a{color:inherit}
+.vec-shell{display:none}
+</style>
+</head>
+<body>
+<div class="screen active">
+  <div class="wiz">
+    <div class="auth-card">
+      <div class="brand">
+        <div class="brand-name">Cloak</div>
+        <div class="brand-tag">Pair Vector</div>
+      </div>
+
+      <div class="vec-status" aria-hidden="true">
+        <span id="iconEnv" class="vec-icon vec-icon-active">Env</span>
+        <span id="iconBle" class="vec-icon">Bluetooth</span>
+        <span id="iconWifi" class="vec-icon">Wi-Fi</span>
+        <span id="iconOta" class="vec-icon">Firmware</span>
+        <span id="iconAccount" class="vec-icon">Activate</span>
+        <span id="iconSettings" class="vec-icon">Finish</span>
+      </div>
+
+      <!-- no Web Bluetooth (Safari / Firefox) -->
+      <div id="containerIncompatible" class="vec-container vec-current">
+        <div class="kicker">One thing first</div>
+        <h2>Open this in Chrome</h2>
+        <p>Pairing talks to Vector over Bluetooth from the browser. Only Chrome and Edge can do that. Copy this address into Chrome:</p>
+        <div class="ok-msg" id="pairUrl" style="font-family:var(--fm);word-break:break-all"></div>
+      </div>
+
+      <!-- only one stack, so upstream skips this automatically -->
+      <div id="containerEnvironment" class="vec-container">
+        <select id="envOptions" class="vec-field"></select>
+        <button class="vec-btn vec-env-select-btn">Continue</button>
+      </div>
+      <div id="containerEnvironmentError" class="vec-container">
+        <h2>Something's off</h2>
+        <p>Cloak couldn't load its pairing settings. Restart Cloak and try again.</p>
+      </div>
+
+      <div id="containerDiscover" class="vec-container" icon="iconBle">
+        <div class="kicker">Step 1 · Bluetooth</div>
+        <div id="discoverFirstTime">
+          <h2>Wake Vector's Bluetooth</h2>
+          <div class="steps-list" style="margin-top:14px">
+            <div class="onboard-item" style="--k:0"><span class="onboard-num">1</span><div class="onboard-text">Put Vector on his charger, near this Mac.</div></div>
+            <div class="onboard-item" style="--k:1"><span class="onboard-num">2</span><div class="onboard-text">Double-press his back button. He'll show a name on his face.</div></div>
+            <div class="onboard-item" style="--k:2"><span class="onboard-num">3</span><div class="onboard-text">Click <b>Pair with Vector</b> and pick that name.</div></div>
+          </div>
+        </div>
+        <div id="discoverReconnect" class="vec-hidden">
+          <h2>He's restarting</h2>
+          <p>Wait until Vector finishes restarting, then pair again. If he doesn't show up, double-press his back button.</p>
+        </div>
+        <input type="button" id="btnDiscoverVector" value="Pair with Vector" class="vec-btn">
+      </div>
+
+      <div id="containerLoading" class="vec-container">
+        <div class="vec-spinner-container">
+          <div class="vec-spinner"><div class="vec-spinner-inner"></div></div>
+          <span>Talking to Vector…</span>
+        </div>
+      </div>
+
+      <div id="containerEnterPin" class="vec-container">
+        <div class="kicker">Step 1 · Bluetooth</div>
+        <h2>Type the code on his face</h2>
+        <p>Vector is showing a 6-digit code. Type it here.</p>
+        <input type="text" id="txtPin" class="vec-field" placeholder="000000" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+        <label class="check" hidden><input type="checkbox" id="checkboxEnableAutoFlow" name="enableAutoFlow" value="autoFlow" checked> Auto-setup</label>
+        <input type="button" id="btnEnterPin" value="Connect" class="vec-field">
+      </div>
+
+      <div id="containerWifi" class="vec-container" icon="iconWifi">
+        <div class="kicker">Step 2 · Wi-Fi</div>
+        <h2>Which Wi-Fi?</h2>
+        <p>Pick the same network as this Mac, so Cloak and wire-pod can reach him.</p>
+        <div id="wifiConnectErrorLabel" class="vec-error vec-hidden">Vector couldn't join that network. Check the password and try again.</div>
+        <div id="wifiScanTable" class="vec-table"></div>
+        <span id="btnCustomWifi" class="vec-link">Network not listed? Type it in</span>
+      </div>
+
+      <div id="containerWifiConfig" class="vec-container">
+        <div class="kicker">Step 2 · Wi-Fi</div>
+        <h2>Wi-Fi password</h2>
+        <label class="field-label" for="txtWifiSsid">Network</label>
+        <input type="text" id="txtWifiSsid" class="vec-field vec-default" placeholder="Network name">
+        <label class="field-label" for="txtWifiPw">Password</label>
+        <input type="password" id="txtWifiPw" class="vec-field vec-default" placeholder="Password">
+        <input type="button" id="btnConnectWifi" value="Connect Vector" class="vec-field">
+      </div>
+
+      <div id="containerOta" class="vec-container" icon="iconOta">
+        <div class="kicker">Step 3 · Firmware</div>
+        <div id="containerOtaSelection">
+          <div id="otaSelection" class="vec-table vec-ota-table"></div>
+        </div>
+        <div id="containerOtaNoImage" class="vec-error vec-hidden">No firmware to install. Make sure wire-pod is running, then try again.</div>
+        <div id="otaUpdate" class="vec-hidden" style="display:flex;flex-direction:column;gap:14px">
+          <h2>Installing wire-pod firmware</h2>
+          <p>One time only. Vector downloads it from wire-pod and restarts. Keep him on the charger. This takes a few minutes.</p>
+          <div id="otaErrorLabel" class="vec-error vec-hidden">The update didn't go through. Check that wire-pod is running and try again.</div>
+          <div id="progressBarOta" class="vec-progress-bar">
+            <div class="vec-progress-bar-fill"></div>
+            <div class="vec-progress-bar-mask"></div>
+            <div class="vec-progress-bar-border"></div>
+          </div>
+          <input type="button" id="btnTryAgain" value="Try again" class="vec-field vec-hidden">
+        </div>
+      </div>
+
+      <div id="containerOtaComplete" class="vec-container">
+        <div class="kicker">Step 3 · Firmware</div>
+        <h2>Firmware's on</h2>
+        <p>Vector is restarting. When he's back on his face, double-press his button and pair once more.</p>
+        <input type="button" id="btnDiscoverVectorAgain" value="Pair with Vector" class="vec-btn">
+      </div>
+
+      <div id="containerAccount" class="vec-container" icon="iconAccount">
+        <div class="kicker">Step 4 · Activate</div>
+        <div id="accountAuth" style="display:flex;flex-direction:column;gap:14px">
+          <h2>Introduce him to wire-pod</h2>
+          <p>This links Vector to your wire-pod. No account needed. If it fails, wait 20 seconds and press it again.</p>
+          <div id="accountErrorLabel" class="vec-error vec-hidden"></div>
+          <div hidden>
+            <input type="text" id="txtAccountUsername" class="vec-field vec-default">
+            <div class="vec-password-block"><input type="password" id="txtAccountPw" class="vec-field vec-default">
+              <div id="txtAccountPwEye" class="vec-eye-toggle" target="txtAccountPw" state="visible"><img class="vec-eyecon" alt=""></div></div>
+            <a id="passwordReset" class="vec-action"></a><a id="createAccount" class="vec-action"></a>
+          </div>
+          <input type="button" id="btnConnectCloud" value="Activate" class="vec-field">
+        </div>
+        <div id="newAccount" class="vec-container" hidden>
+          <div id="accountCreationErrorLabel" class="vec-error vec-hidden"></div>
+          <input type="email" id="txtNewAccountEmail" class="vec-field vec-default">
+          <input type="text" id="txtNewAccountDob" class="vec-field vec-default">
+          <div class="vec-password-block"><input type="password" id="txtNewAccountPw" class="vec-field vec-default"></div>
+          <input type="button" id="btnCreateAccount" class="vec-field"><input type="button" id="btnCancelAccountCreation" class="vec-field">
+        </div>
+      </div>
+
+      <div id="containerSettings" class="vec-container" icon="iconSettings">
+        <div class="kicker">Step 5 · Finish</div>
+        <h2>Last bits</h2>
+        <label class="field-label" for="selectTimeZone">Time zone</label>
+        <select id="selectTimeZone" class="vec-field">
+          <option value="Pacific/Honolulu">Pacific/Honolulu</option><option value="America/Juneau">America/Juneau</option>
+          <option value="America/Los_Angeles">America/Los_Angeles</option><option value="America/Phoenix">America/Phoenix</option>
+          <option value="America/Denver">America/Denver</option><option value="America/Lima">America/Lima</option>
+          <option value="America/Chicago">America/Chicago</option><option value="America/Bogota">America/Bogota</option>
+          <option value="America/New_York">America/New_York</option><option value="America/Argentina/Buenos_Aires">America/Argentina/Buenos_Aires</option>
+          <option value="America/Santiago">America/Santiago</option><option value="America/Sao_Paolo">America/Sao_Paolo</option>
+          <option value="America/St_Johns">America/St_Johns</option><option value="GMT">GMT</option>
+          <option value="Europe/Lisbon">Europe/Lisbon</option><option value="Europe/London">Europe/London</option>
+          <option value="Europe/Paris">Europe/Paris</option><option value="Europe/Athens">Europe/Athens</option>
+          <option value="Europe/Istanbul">Europe/Istanbul</option><option value="Europe/Moscow">Europe/Moscow</option>
+          <option value="Africa/Lagos">Africa/Lagos</option><option value="Africa/Harare">Africa/Harare</option>
+          <option value="Africa/Addis_Ababa">Africa/Addis_Ababa</option><option value="Asia/Dubai">Asia/Dubai</option>
+          <option value="Asia/Tehran">Asia/Tehran</option><option value="Asia/Karachi">Asia/Karachi</option>
+          <option value="Asia/Kolkata">Asia/Kolkata</option><option value="Asia/Dhaka">Asia/Dhaka</option>
+          <option value="Asia/Bangkok">Asia/Bangkok</option><option value="Asia/Jakarta">Asia/Jakarta</option>
+          <option value="Asia/Hong_Kong">Asia/Hong_Kong</option><option value="Asia/Singapore">Asia/Singapore</option>
+          <option value="Asia/Manila">Asia/Manila</option><option value="Asia/Seoul">Asia/Seoul</option>
+          <option value="Asia/Tokyo">Asia/Tokyo</option><option value="Australia/Perth">Australia/Perth</option>
+          <option value="Australia/Darwin">Australia/Darwin</option><option value="Australia/Adelaide">Australia/Adelaide</option>
+          <option value="Australia/Brisbane">Australia/Brisbane</option><option value="Australia/Sydney">Australia/Sydney</option>
+          <option value="Australia/Auckland">Australia/Auckland</option>
+        </select>
+        <div class="row2" style="display:flex;gap:10px">
+          <div style="flex:1;display:flex;flex-direction:column;gap:14px">
+            <label class="field-label" for="selectTemperature">Temperature</label>
+            <select id="selectTemperature" class="vec-field"><option value="fahrenheit">Fahrenheit</option><option value="celsius">Celsius</option></select>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:14px">
+            <label class="field-label" for="selectDistance">Distance</label>
+            <select id="selectDistance" class="vec-field"><option value="imperial">Imperial</option><option value="metric">Metric</option></select>
+          </div>
+        </div>
+        <div hidden>
+          <input type="checkbox" id="checkboxEnableAlexa" name="enableAlexa" value="ankiAlexa">
+          <input type="checkbox" id="checkboxDataAnalytics" name="dataAnalytics" value="ankiLog">
+        </div>
+        <input type="button" id="btnFinishSetup" value="Finish" class="vec-field">
+      </div>
+
+      <div id="containerComplete" class="vec-container">
+        <svg class="done-orb" viewBox="-52 -52 104 104" aria-hidden="true"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg>
+        <h2 style="text-align:center">Vector is paired.</h2>
+        <p style="text-align:center">Cloak picks him up on its own in a few seconds.</p>
+        <a class="btn-primary" href="/" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Back to Cloak</a>
+      </div>
+
+      <div class="vec-vector-status">
+        <div id="boxVectorEnv" class="vec-hidden"><span id="vecEnv"></span></div>
+        <div id="boxVectorStatus" class="vec-hidden">
+          <div class="vec-info-box">
+            <div class="vec-info-title"><span id="vecStatusTitle"></span></div>
+            <div id="vecInfoWifi" class="vec-info-row"><span id="vecStatusSsid"></span></div>
+            <div id="vecInfoBuild" class="vec-info-row"></div>
+            <div id="vecInfoEsn" class="vec-info-row"></div>
+          </div>
+          <div id="boxStatusLogs" class="vec-hidden">
+            <div id="btnDownloadLogs" class="vec-link"></div>
+            <div id="panelLogs" class="vec-hidden"><div id="progressBarLogs" class="vec-progress-bar"><div class="vec-progress-bar-fill"></div><div class="vec-progress-bar-mask"></div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="legal">Pairing uses Digital Dream Labs' open-source <a href="https://github.com/kercre123/vector-web-setup" target="_blank" rel="noopener">vector-web-setup</a> (MIT), adapted for wire-pod.</div>
+    </div>
+  </div>
+</div>
+
+<!-- what upstream reads at startup (its server templated these in) -->
+<div id="serverIp" class="vec-hidden">127.0.0.1</div>
+<div id="networkIp" class="vec-hidden">127.0.0.1</div>
+<div id="serverPort" class="vec-hidden">8765</div>
+<!-- upstream's dev terminal: kept so its code runs, never shown -->
+<div class="vec-shell vec-panel"><div class="pterm-main"><div class="pterm-line"><div class="pterm-prompt">$</div>
+  <div class="pterm-row pterm-current"><span class="pterm-text"></span><div class="pterm-cursor"></div></div></div></div></div>
+
+<script>document.getElementById('pairUrl').textContent = location.href;</script>
+<script src="/static/pair/jquery.min.3.3.1.js"></script>
+<script src="/static/pair/pterm.js"></script>
+<script src="/static/pair/rts.js"></script>
+<script src="/static/pair/sodium.js" async></script>
+</body>
+</html>

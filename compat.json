@@ -1,0 +1,12 @@
+{
+  "_comment": "What Cloak installs and auto-updates to. Bump wirepod.macos.pinned only after a version is deemed compatible (the wirepod-compat workflow opens that PR; merging it ships the update to every Mac).",
+  "cloak": {
+    "channel": "main"
+  },
+  "wirepod": {
+    "macos": {
+      "pinned": "v1.2.18",
+      "compatible": ["v1.2.18"]
+    }
+  }
+}
