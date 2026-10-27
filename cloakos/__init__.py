@@ -5,3 +5,6 @@ EDITION = "Vector Edition"
 FULL_NAME = f"{PRODUCT} {EDITION}"        # the technical name
 
 __version__ = "0.1.0"
+
+NOUS = "Nous v0.0.1"                  # the mind: Kinesis (movement skills) + Opsis (vision) + Cloak language models
+NOUS_VERSION = "0.0.1"

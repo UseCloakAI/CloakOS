@@ -288,3 +288,14 @@ Protos: `cloakos/vector/proto/` holds Anki's Vector external-interface protos (A
 ## Notes
 - Vector's external interface doesn't stream its microphone, so loud sounds come from the PC mic (`senses.ears.enabled: true`, `pip install -e ".[ears]"`). The "Hey Vector" wake word arrives on the event stream as a sense event.
 - In Auto and Teleop, Cloak holds behavior control at `robot.control_priority: default`. Vector's own safety reactions, like the tuck when it's falling, still win. `override` disables those too, so be careful.
+
+## Nous v0.0.1
+
+The mind of CloakOS Vector Edition. First shipped build.
+
+- **Kinesis** (movement): trained in the simulator, exam-scored on rooms it never saw.
+  - `goto` passes: 95% reach the target, 0.15 bumps per run, no falls.
+  - `wander` is a first pass: no falls, 74 cells per minute, but 3.2 bumps per minute (target 1.5).
+- **Opsis** (vision): live 3D map, object memory, depth, detector.
+- **Language**: Cloak models (pneuma, logos, kairos, linus) at api.usecloak.org.
+- Table edges: sensor reflex only on the real robot for now.
