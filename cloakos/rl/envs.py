@@ -136,9 +136,27 @@ if gym is not None:
             if self.spec_.sensors != "map":
                 return None
             r = self.sim.rays(self.spec_.n_rays, RAY_FOV, RAY_MAX)
+            sc = self.sim.scene_info
+            if sc.world == "table":                    # a drop-off reads as a wall, like the real map's edge of floor
+                r = np.minimum(r, self._edge_rays(sc.room))
             r = r * self.rng.normal(1.0, 0.05, r.shape)
             r[self.rng.random(r.shape) < 0.12] = RAY_MAX
             return np.clip(r, 0.0, RAY_MAX).astype(np.float32)
+
+        def _edge_rays(self, room) -> np.ndarray:
+            sn = self.sim.snapshot
+            hx, hy = room
+            x0, y0 = sn["pos"][0] + 0.04 * math.cos(sn["yaw"]), sn["pos"][1] + 0.04 * math.sin(sn["yaw"])
+            out = np.full(self.spec_.n_rays, RAY_MAX, np.float32)
+            for i, a in enumerate(np.linspace(-RAY_FOV / 2, RAY_FOV / 2, self.spec_.n_rays)):
+                dx, dy = math.cos(sn["yaw"] + a), math.sin(sn["yaw"] + a)
+                t = RAY_MAX
+                if dx > 1e-6: t = min(t, (hx - x0) / dx)
+                elif dx < -1e-6: t = min(t, (-hx - x0) / dx)
+                if dy > 1e-6: t = min(t, (hy - y0) / dy)
+                elif dy < -1e-6: t = min(t, (-hy - y0) / dy)
+                out[i] = max(0.0, t - 0.03)
+            return out
 
         def _obs(self):
             o = observe(self.spec_, self.sim.snapshot, self.goal, self._rays(), self.last_action)
