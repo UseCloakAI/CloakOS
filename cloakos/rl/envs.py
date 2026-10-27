@@ -35,7 +35,7 @@ from ..sim.engine import Sim
 TASKS = {
     "goto": "Drive to a point, avoid obstacles and edges",
     "explore": "Cover the room, don't bump into things",
-    "recover": "Get back on its treads after being knocked over",
+    "recover": "Get back on its treads after a fall (experimental: train long)",
 }
 SENSORS = {"robot": "Real-robot sensors (deployable)", "rays": "Plus depth rays (sim teacher)"}
 
@@ -141,8 +141,11 @@ if gym is not None:
                 # on its back or on its nose (on its side the real Vector can't right itself either)
                 tumble = [(math.radians(self.rng.uniform(70, 110)), math.radians(self.rng.uniform(-25, 25))),
                           (math.radians(self.rng.uniform(-110, -70)), math.radians(self.rng.uniform(-25, 25)))][int(self.rng.integers(2))]
-                self.sim.place_robot(0.0, 0.0, float(self.rng.uniform(-math.pi, math.pi)), tumble=tumble)
-                self.sim.step(0.6)
+                for _ in range(6):                    # re-drop lucky landings: every episode is a real recovery
+                    self.sim.place_robot(0.0, 0.0, float(self.rng.uniform(-math.pi, math.pi)), tumble=tumble)
+                    self.sim.step(0.6)
+                    if self.sim.snapshot["upright"] < 0.5:
+                        break
             elif sc.world == "table":
                 self.sim.place_robot(float(self.rng.uniform(-0.1, 0.1)), float(self.rng.uniform(-0.05, 0.05)),
                                      float(self.rng.uniform(-math.pi, math.pi)))

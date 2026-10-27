@@ -248,7 +248,7 @@ PPO ([Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)) in the si
 |---|---|---|
 | goto | drive to a point, avoid obstacles and table edges | yes, with robot sensors |
 | explore | cover the room without bumping | yes, with robot sensors |
-| recover | knocked onto its back or side: get back on its treads with wheels + lift | yes |
+| recover | knocked onto its back or nose: get back on its treads with wheels + lift (experimental: needs a long run; a short run only learns to wait) | yes |
 
 **Sensors**: *robot* uses only what the real Vector reports (odometry, wheel speeds, the forward distance sensor, cliff, tilt), so the policy transfers. *rays* adds a fan of depth readings, a sim-only teacher for now.
 
