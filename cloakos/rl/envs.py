@@ -257,7 +257,7 @@ if gym is not None:
                 fwd = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
                 reward += 0.02 * max(0.0, fwd)                 # rolling forward beats spinning
                 if s["bump"]:
-                    reward -= 2.5
+                    reward -= 4.0
                     info["bump"] = True
                     self.bumps += 1
                 if float(sim.rays(5, math.radians(90), 0.3).min()) < 0.05:
