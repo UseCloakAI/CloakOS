@@ -11,7 +11,7 @@ while [[ -L "$SELF" ]]; do
 done
 HOME_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
 export HOME_DIR
-REPO="UseCloakAI/CloakVOS"
+REPO="UseCloakAI/CloakOS"
 PORT="${CLOAK_PORT:-8765}"
 URL="http://127.0.0.1:$PORT"
 PIDF="$HOME_DIR/cloak.pid"

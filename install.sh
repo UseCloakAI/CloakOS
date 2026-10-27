@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # CloakOS (Vector Edition): one-command installer for macOS.
 #
-#   curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/install.sh | bash
 #
 # Installs everything into ~/Library/Application Support/CloakOS (Python via uv, the app,
 # the voice model), adds CloakOS to ~/Applications and a `cloakos` command, then opens
 # CloakOS in your browser. Re-run it any time to update; your settings and recordings are
 # kept. Older "Cloak Vector" installs are moved over automatically.
 #
-# Remove it with:  curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/uninstall.sh | bash
+# Remove it with:  curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/uninstall.sh | bash
 #
 # It also installs wire-pod (the official WirePod app) if none is on your network, and
 # sets up background updates: CloakOS follows its channel (main); wire-pod only ever moves
@@ -19,7 +19,7 @@
 #            CLOAK_NO_OPEN=1 (don't start/open at the end) · CLOAK_WIREPOD=skip
 set -euo pipefail
 
-REPO="UseCloakAI/CloakVOS"
+REPO="UseCloakAI/CloakOS"
 REF="${CLOAK_REF:-main}"
 PORT=8765
 OS="$(uname -s)"

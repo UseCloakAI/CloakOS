@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CloakOS (Vector Edition): uninstaller for macOS.
 #
-#   curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/uninstall.sh | bash
 #   cloakos uninstall                       (same thing, from an installed copy)
 #
 # Removes everything CloakOS installed: the app, the cloakos command, the background jobs
@@ -158,5 +158,5 @@ if [[ -n "$uv_managed" ]]; then
 fi
 
 printf '\n  %s■%s %sCloakOS is uninstalled.%s\n' "$ACC" "$RST" "$INK" "$RST"
-note "To install again:  curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/install.sh | bash"
+note "To install again:  curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/install.sh | bash"
 printf '\n'
