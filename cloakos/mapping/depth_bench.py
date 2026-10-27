@@ -18,28 +18,32 @@ import numpy as np
 NEAR, FAR = 0.08, 1.5          # what matters for driving
 
 
-def make(frames: int, out: str, seed: int) -> None:
+def make(frames: int, out: str, seed: int, assets: bool = False, size: tuple[int, int] = (640, 360), per_room: int = 15) -> None:
     from PIL import Image
 
     from ..sim.engine import Sim
 
     rng = np.random.default_rng(seed)
-    sim = Sim({"sim": {"assets": False, "camera_fps": 60, "camera_latency_s": 0.0}})
+    sim = Sim({"sim": {"assets": assets, "camera_fps": 60, "camera_latency_s": 0.0}})
     sim.touch(86400)
     sim.want_depth = True
     rst: dict = {}
     rgb, depth, pos, R, fz = [], [], [], [], []
     while len(rgb) < frames:
-        world = str(rng.choice(["room", "room", "table", "person"]))
+        world = str(rng.choice(["room", "room", "room", "table", "person", "empty"]))
         sc = sim.load(world, int(rng.integers(1, 1_000_000)))
         hx, hy = sc.room
-        for _ in range(15):
+        for _ in range(per_room):
             for _try in range(50):
                 x, y = rng.uniform(-hx + 0.1, hx - 0.1), rng.uniform(-hy + 0.1, hy - 0.1)
                 if world == "table" or all(math.hypot(x - ox, y - oy) > r + 0.12 for ox, oy, r in sc.obstacles):
                     break
-            sim.place_robot(float(x), float(y), float(rng.uniform(-math.pi, math.pi)))
-            sim.set_head(math.radians(float(rng.uniform(0, 25))))
+            yaw = float(rng.uniform(-math.pi, math.pi))
+            if sc.obstacles and rng.random() < 0.7:          # mostly look at things: real rooms are cluttered
+                ox, oy, _r = sc.obstacles[int(rng.integers(len(sc.obstacles)))]
+                yaw = math.atan2(oy - y, ox - x) + float(rng.normal(0, 0.35))
+            sim.place_robot(float(x), float(y), yaw)
+            sim.set_head(math.radians(float(rng.uniform(-10, 35))))
             sim.step(0.3)
             rst["next"], sim._next_depth = 0.0, 0.0
             sim._render_once(rst)
@@ -47,9 +51,9 @@ def make(frames: int, out: str, seed: int) -> None:
             f = sim.depth_frame
             if f is None or sim.frame is None:
                 continue
-            rgb.append(np.asarray(Image.open(io.BytesIO(sim.frame)).convert("RGB")))
+            rgb.append(np.asarray(Image.open(io.BytesIO(sim.frame)).convert("RGB").resize(size, Image.BILINEAR)))
             d = f["depth"]
-            depth.append(np.asarray(Image.fromarray(d).resize((640, 360), Image.NEAREST), np.float32))
+            depth.append(np.asarray(Image.fromarray(d).resize(size, Image.NEAREST), np.float16 if size != (640, 360) else np.float32))
             pos.append(f["pos"]); R.append(f["R"]); fz.append(f["floor_z"])
         print(f"{len(rgb)}/{frames}", flush=True)
     np.savez_compressed(out, rgb=np.stack(rgb[:frames]), depth=np.stack(depth[:frames]),
@@ -101,10 +105,12 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="cloakos.mapping.depth_bench")
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("make"); m.add_argument("--frames", type=int, default=150); m.add_argument("--out", default="data/vision/depth_bench.npz"); m.add_argument("--seed", type=int, default=7)
+    m.add_argument("--assets", action="store_true"); m.add_argument("--size", default="640x360"); m.add_argument("--per-room", type=int, default=15)
     s = sub.add_parser("score"); s.add_argument("path"); s.add_argument("--models", nargs="+")
     a = ap.parse_args(argv)
     if a.cmd == "make":
-        make(a.frames, a.out, a.seed)
+        w, h = (int(v) for v in a.size.split("x"))
+        make(a.frames, a.out, a.seed, a.assets, (w, h), a.per_room)
     else:
         from .vision import DepthModel
         score(a.path, a.models or [DepthModel.NAME])
