@@ -245,7 +245,8 @@ if gym is not None:
                     reward += 5.0
                     done, info["success"] = True, True
             if s.get("cliff") and spec.task != "recover":
-                reward -= 0.3                                  # the edge sensors fired: too close, turn earlier
+                fw = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
+                reward += 0.4 * max(0.0, -fw) - 0.15           # edge sensors fired: back off, don't sit and push
                 info["cliff"] = True
             if fell:
                 reward -= 8.0
