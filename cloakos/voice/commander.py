@@ -98,12 +98,14 @@ def fallback(text: str, objects: list[dict]) -> Decision:
 
 
 async def decide(llm, text: str, objects: list[dict], here: tuple[float, float] | None) -> Decision:
+    quick = fallback(text, objects)
+    if quick.action != "none":                  # clear commands act instantly, no round trip
+        return quick
     reply = await llm.ask(text, SYSTEM.format(objects=_objects_text(objects, here)),
-                          model=getattr(llm, "chat_model", None), temperature=0.4, timeout=8.0)
+                          model=getattr(llm, "chat_model", None), temperature=0.4, timeout=6.0)
     d = parse(reply, objects) if reply else None
     if d is None:
-        quick = fallback(text, objects)
-        if quick.action != "none" or quick.say:
+        if quick.say:
             return quick
         if reply:                               # it answered, just not in JSON: treat it as talk
             return Decision(reply.strip().splitlines()[0][:120], "none", source="llm")

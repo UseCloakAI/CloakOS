@@ -7,7 +7,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const DRIVES = ['energy', 'curiosity', 'boredom', 'attachment', 'fear'];
 const ORB = '<span class="bot-dot cloak-orb" aria-hidden="true"><svg viewBox="-52 -52 104 104"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg></span>';
 
-let ws = null, S = null, info = null, sayMode = 'say', page = 'live';
+let ws = null, S = null, info = null, sayMode = 'talk', page = 'live';
 
 /* ── socket ─────────────────────────────────────────────── */
 function connect() {
@@ -227,8 +227,8 @@ function togglePlusMenu(e) { e.stopPropagation(); $('#plus-menu').classList.togg
 function setSayMode(m) {
   sayMode = m;
   $$('#plus-menu .plus-item').forEach(b => b.classList.toggle('on', b.dataset.m === m));
-  const chip = $('.say-mode'); chip.dataset.m = m; chip.textContent = m === 'say' ? 'Say it' : 'Talk to it';
-  input.placeholder = m === 'say' ? 'Make Vector say…' : 'Talk to Vector…';
+  const chip = $('.say-mode'); chip.dataset.m = m; chip.textContent = m === 'say' ? 'Say it' : 'Tell it';
+  input.placeholder = m === 'say' ? 'Make Vector say…' : 'Tell Vector what to do… “go to the mug”';
   $('#plus-menu').classList.remove('open'); $('#plus-btn').classList.remove('open');
   input.focus();
 }
@@ -323,7 +323,13 @@ async function loadInfo() {
   if (info.wirepod) $('#wp-link').href = info.wirepod;
   if (info.product) kv('#kv-about', [['Product', info.product.name], ['Version', info.product.version]]);
   $('#emote-row').innerHTML = (info.emotes || []).map(e => `<button class="chip" onclick="sendWS({type:'emote',name:'${e}'})">${esc(e)}</button>`).join('');
-  kv('#kv-voice', [['TTS', info.tts], ...(info.tts_error ? [['TTS error', info.tts_error, 'err']] : []), ['LLM endpoint', info.llm.base_url], ['LLM model', info.llm.model]]);
+  kv('#kv-voice', [['TTS', info.tts], ...(info.tts_error ? [['TTS error', info.tts_error, 'err']] : [])]);
+  const sk = info.skills || {}, ex = t => { const e = (sk[t] || {}).exam || {}; return !sk[t] ? 'not installed (rule-based fallback)' :
+    t === 'goto' ? `trained · exam: reaches ${Math.round((e.success || 0) * 100)}%, ${e.bumps_per_run ?? '?'} bumps/run` :
+    `trained · exam: ${e.cells_per_min ?? '?'} new cells/min, ${e.bumps_per_min ?? '?'} bumps/min`; };
+  const L = info.llm || {};
+  kv('#kv-brain', [['Wander', ex('wander')], ['Go to', ex('goto')],
+    ['LLM', !L.enabled ? 'off' : L.provider === 'cloak' ? `Cloak · ${L.chat_model} (commands) · ${L.model} (lines)` : `${L.base_url} · ${L.model}`]]);
   const trigs = info.anim_triggers || [];
   $('#anim-list').innerHTML = trigs.map(t => `<option value="${esc(t)}">`).join('');
   $('#trig-list').textContent = trigs.length ? trigs.join('\n') : "Connect to load Vector's animation triggers.";

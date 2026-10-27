@@ -40,7 +40,7 @@ class FakeLLM:
 
 async def test_decide_uses_llm_then_rules():
     llm = FakeLLM('{"say": "Mug time!", "action": "go_to", "target": "mug-1"}')
-    d = await decide(llm, "can you get to your mug", OBJS, (0.0, 0.0))
+    d = await decide(llm, "can you fetch yourself over by your mug", OBJS, (0.0, 0.0))   # fuzzy: needs the LLM
     assert d.target == "mug-1" and "mug-1: mug" in llm.seen[1] and llm.seen[2]["model"] == "logos"
     d = await decide(FakeLLM(None), "go to the shoe", OBJS, None)          # offline
     assert d.target == "shoe-2" and d.source == "rules"

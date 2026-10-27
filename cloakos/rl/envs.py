@@ -178,6 +178,7 @@ if gym is not None:
                             break
             self.last_action = np.zeros(2, np.float32)
             self.t = 0
+            self.bumps = 0
             self.visited = set()
             # latency like the real robot over Wi-Fi: commands land 0-200 ms late, readings 0-100 ms stale
             from collections import deque
@@ -215,8 +216,9 @@ if gym is not None:
                 self._prev_dist = dist
                 reward -= 0.01
                 if s["bump"]:
-                    reward -= 0.3
+                    reward -= 1.0                              # around things, never through them
                     info["bump"] = True
+                    self.bumps += 1
                 if dist < 0.06:
                     reward += 3.0
                     done, info["success"] = True, True
@@ -228,8 +230,9 @@ if gym is not None:
                 fwd = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
                 reward += 0.02 * max(0.0, fwd)                 # rolling forward beats spinning
                 if s["bump"]:
-                    reward -= 0.3
+                    reward -= 1.0
                     info["bump"] = True
+                    self.bumps += 1
                 if float(sim.rays(5, math.radians(90), 0.3).min()) < 0.05:
                     reward -= 0.02                             # don't scrape along things
                 info["cells"] = len(self.visited)
@@ -246,4 +249,5 @@ if gym is not None:
                 done = True
                 info["fell"] = True
             truncated = self.t >= spec.episode_s * spec.control_hz
+            info["bumps"] = self.bumps
             return self._obs(), float(reward), done, truncated, info
