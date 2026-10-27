@@ -25,6 +25,7 @@ from .. import FULL_NAME, NOUS, __version__
 from ..drives import DRIVES
 from .setup_api import autoconfigure_loop, env_path, make_router, robot_ota_url, write_env
 from .map_api import make_map_router
+from .nous_api import make_nous_router
 from .rl_api import make_rl_router
 from .sim_api import make_sim_router, sim_ws
 
@@ -75,6 +76,7 @@ def create_app(brain: "Brain") -> FastAPI:
     app.include_router(make_sim_router(brain))
     app.include_router(make_rl_router(brain))
     app.include_router(make_map_router(brain))
+    app.include_router(make_nous_router(brain))
 
     @app.get("/")
     async def index() -> FileResponse:

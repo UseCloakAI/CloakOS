@@ -45,8 +45,15 @@ class Skills:
     def __init__(self, link: "RobotLink", world: "World", mapper: "Mapper | None" = None) -> None:
         self.link, self.world, self.mapper = link, world, mapper
         self.skills: dict[str, Skill] = {}
-        for d in sorted(PRETRAINED.glob("*")) if PRETRAINED.exists() else []:
-            if (d / "policy.npz").exists():
+        self.reload()
+
+    def reload(self) -> None:
+        """(Re)load the shipped policies: a downloaded Nous update if there is one, else the packaged set."""
+        from ..nous import active_dir
+        root = active_dir()
+        self.skills = {}
+        for d in sorted(root.glob("*")) if root.exists() else []:
+            if d.is_dir() and (d / "policy.npz").exists():
                 try:
                     s = Skill(d)
                     self.skills[s.spec.task] = s
