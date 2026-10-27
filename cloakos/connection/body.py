@@ -146,6 +146,8 @@ class Body:
 
     async def play_pcm(self, pcm: bytes, volume: int = 75, text: str = "", rate: int = 16000) -> None:
         self._mark("say" if text else "sound", text=text)
+        if text:                                     # sound effects wait while it talks
+            self.speaking_until = time.time() + len(pcm) / 2 / rate + 0.2
         master = self.link.volume
         if master > 0:
             await self._do("play_pcm", pcm, rate, round(volume * master / 100))

@@ -19,6 +19,7 @@ async def test_brain_end_to_end(tmp_path):
     cfg["datalog"]["dir"] = str(tmp_path)
     cfg["voice"]["enabled"] = False
     cfg["expression"]["stock_blend"] = 0.0
+    cfg["map"]["models"] = False            # no depth/detector downloads in tests
     # serial + ip + guid + cached cert: discovery skips wire-pod's HTTP API entirely
     cfg["robot"].update(serial=SERIAL, ip=f"127.0.0.1:{port}", guid=GUID, cert_dir=str(tmp_path / "certs"), heartbeat_s=0.2)
     brain = Brain(cfg)

@@ -85,9 +85,11 @@ senses:
 # Cloak's own face: square rust eyes with a hard shadow, synthesized chirps, motion emotes.
 expression:
   eyes: true
-  eye_fps: 8
-  eye_color: "#D44D2A"
-  eye_shadow: "#5A1F10"
+  eye_fps: 20           # smooth: the eyes tween every frame
+  eye_color: "#FFFFFF"
+  eye_glow: true
+  sfx: true             # reactive sound effects (picked up, petted, edges, found something, got there...)
+  sfx_volume: 60
   chirps: true
   chirp_volume: 70
   chirp_pitch: 1.0
