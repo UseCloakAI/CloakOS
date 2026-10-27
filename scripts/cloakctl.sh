@@ -63,7 +63,11 @@ channel() { cat "$HOME_DIR/channel" 2>/dev/null || echo main; }
 auto_update() {      # auto-update [--now]: install a newer Cloak (and with it any newly-pinned wire-pod)
   local force="${1:-}" latest installed was_running=""
   if [[ "$(envval CLOAK_AUTO_UPDATE)" == "0" && "$force" != "--now" ]]; then write_status "off" ""; return 0; fi
-  mkdir "$HOME_DIR/.updating" 2>/dev/null || { echo "update already running"; return 0; }
+  if ! mkdir "$HOME_DIR/.updating" 2>/dev/null; then
+    # a leftover lock from an interrupted update: clear it if it's over 10 minutes old
+    if [[ -n "$(find "$HOME_DIR/.updating" -maxdepth 0 -mmin +10 2>/dev/null)" ]]; then rmdir "$HOME_DIR/.updating" 2>/dev/null || true; mkdir "$HOME_DIR/.updating" 2>/dev/null || true
+    else echo "An update is already running."; return 0; fi
+  fi
   trap 'rmdir "$HOME_DIR/.updating" 2>/dev/null || true' RETURN
   installed="$(cat "$HOME_DIR/app/.sha" 2>/dev/null || echo unknown)"
   latest="$(curl -fsSL -m 15 -H 'Accept: application/vnd.github.sha' \
@@ -76,15 +80,17 @@ auto_update() {      # auto-update [--now]: install a newer Cloak (and with it a
   fi
   # never interrupt a recording; try again next time
   if running && curl -fsS -m 3 "$URL/api/health" 2>/dev/null | grep -q '"recording": *true'; then
-    write_status "postponed (recording)" "$latest"; return 0
+    write_status "postponed (recording)" "$latest"
+    [[ "$force" == "--now" ]] && echo "An update is ready, but CloakOS is recording. Stop the recording and run: cloakos update"
+    return 0
   fi
   echo "$(date '+%F %T') updating $installed -> $latest"
   running && was_running=1
   if curl -fsSL "https://raw.githubusercontent.com/$REPO/$latest/install.sh" \
       | CLOAK_REF="$latest" CLOAK_CHANNEL="$(channel)" CLOAK_HOME="$HOME_DIR" CLOAK_NO_OPEN=1 CLOAK_FROM_UPDATER=1 bash; then
-    write_status "updated" "$latest"
+    write_status "updated" "$latest"; [[ "$force" == "--now" ]] && echo "Updated to ${latest:0:7}."
   else
-    write_status "failed" "$latest"
+    write_status "failed" "$latest"; [[ "$force" == "--now" ]] && echo "Update failed. See: $HOME_DIR/logs/update.log"
   fi
   if [[ -n "$was_running" ]]; then
     # an update can move an old "Cloak Vector" install to its CloakOS home; start it from there

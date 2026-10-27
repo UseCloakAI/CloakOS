@@ -269,7 +269,7 @@ function goPage(p) {
   if (window.simShown) window.simShown(p === 'sim');
   if (window.trainShown) window.trainShown(p === 'train');
   if (window.mapShown) window.mapShown(p === 'map');
-  if (p === 'settings') loadUpdates();
+  if (p === 'settings') { loadUpdates(); loadNous(); }
   if (window.innerWidth <= 640) closeMobileSidebar();
 }
 function toggleSidebar() {
@@ -437,3 +437,29 @@ loadInfo();
     try { draw(await (await fetch('/api/map/live')).json()); } catch { /* offline */ }
   }, 400);
 })();
+
+/* Nous model: shows the loaded version, Update Nous checks and installs the newest shipped one */
+async function loadNous(info) {
+  try { info = info || await (await fetch('/api/nous')).json(); } catch { return; }
+  const sk = Object.entries(info.skills || {}).map(([t, v]) => `${t}${v.exam && v.exam.passed ? ' ✓' : ''}`).join(' · ') || 'no skills loaded';
+  const rows = [['Nous', `v${info.installed}`], ['Skills', sk]];
+  if (info.latest) rows.push(['Latest', `v${info.latest}`]);
+  if (info.message) rows.push(['Now', info.message]);
+  $('#kv-nous').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+}
+async function updateNous() {
+  const b = $('#nous-btn');
+  b.disabled = true; b.textContent = 'Checking…';
+  try {
+    let info = await (await fetch('/api/nous/check', { method: 'POST' })).json();
+    if (info.error) info.message = info.error;
+    else if (info.needs_app_update) info.message = `v${info.latest} needs a newer CloakOS. Update the app first (Updates above).`;
+    else if (info.update) {
+      b.textContent = 'Downloading…';
+      info = await (await fetch('/api/nous/update', { method: 'POST' })).json();
+      info.message = info.error || (info.updated ? `Updated to v${info.installed}. Active now.` : 'Already current.');
+    } else info.message = 'You have the latest Nous.';
+    loadNous(info);
+  } catch { loadNous({ installed: '?', message: 'Update failed. Try again.' }); }
+  b.disabled = false; b.textContent = 'Update Nous';
+}
