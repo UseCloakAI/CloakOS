@@ -27,7 +27,24 @@ if TYPE_CHECKING:
     from ..world import World
 
 log = logging.getLogger(__name__)
-MERGE_M = 0.3          # sightings of the same label closer than this are the same object
+MERGE_M = 0.5          # sightings of the same label closer than this are the same object
+CONFIRM = 3            # camera sightings before an object counts (one-frame guesses are usually wrong)
+MAX_RANGE_M = 1.5      # camera depth past this is too unreliable to map
+
+
+def clean_depth(depth: np.ndarray, max_range: float = MAX_RANGE_M, jump: float = 0.08) -> np.ndarray:
+    """Drop what a camera depth model gets wrong most: far away, and the smeared pixels along object
+    edges (they land halfway between the object and the wall and show up as floating junk)."""
+    d = np.array(depth, np.float32, copy=True)
+    d[~np.isfinite(d) | (d > max_range)] = np.nan
+    pad = np.pad(d, 1, mode="edge")
+    rel = np.zeros_like(d)
+    for dy, dx in ((0, 1), (2, 1), (1, 0), (1, 2)):
+        nb = pad[dy:dy + d.shape[0], dx:dx + d.shape[1]]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            rel = np.fmax(rel, np.abs(nb - d) / d)
+    d[rel > jump] = np.nan
+    return d
 
 
 class Mapper:
@@ -46,7 +63,7 @@ class Mapper:
         self.trail: deque[tuple[float, float, float]] = deque(maxlen=2000)
         self.status = "waiting for the robot"
         self.depth_model = DepthModel()
-        self.detector = Detector(float(c.get("detect_threshold", 0.55)))
+        self.detector = Detector(float(c.get("detect_threshold", 0.6)))
         self._last_frame = -1
         self._last_sim_t = 0.0
         self._frames = 0
@@ -195,6 +212,7 @@ class Mapper:
         self.status = "mapping (camera AI" + (", simulator)" if sim is not None else ")")
 
     def _integrate(self, depth: np.ndarray, cam: CameraPose, rgb: np.ndarray, dets: list[dict], stride: int) -> None:
+        depth = clean_depth(depth)
         pts, px = backproject(depth, cam, stride)
         cols = rgb[px[:, 0], px[:, 1]] if rgb is not None and len(px) else None
         self.map.integrate(cam.pos, pts, cols)
@@ -221,6 +239,10 @@ class Mapper:
         p = ev.data.get("pos")
         if p is not None and self.map is not None:
             self.remember("person", np.asarray(p), 1.0, "face")
+
+    def known(self) -> list[dict]:
+        """Objects it's sure of: seen several times, or told about (faces, the robot's own reports)."""
+        return [o for o in self.objects if o["seen"] >= CONFIRM or o["source"] != "camera"]
 
     def remember(self, label: str, pos: np.ndarray, score: float, source: str) -> dict:
         now = time.time()
@@ -263,7 +285,7 @@ class Mapper:
     def find(self, query: str) -> dict | None:
         """The best remembered object matching a word ("mug", "shoe", "person")."""
         q = query.lower().strip()
-        hits = [o for o in self.objects if q in o["label"].lower()]
+        hits = [o for o in self.known() if q in o["label"].lower()]
         return max(hits, key=lambda o: (o["seen"], o["last_seen"])) if hits else None
 
     # ── for the UI ─────────────────────────────────────────────
@@ -271,7 +293,7 @@ class Mapper:
     def summary(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "key": self.key, "status": self.status,
                 "stats": self.map.stats() if self.map else None,
-                "objects": sorted(self.objects, key=lambda o: -o["last_seen"]),
+                "objects": sorted(self.known(), key=lambda o: -o["last_seen"]),
                 "trail": list(self.trail)[-600:],
                 "models": {"depth": self.depth_model.available(), "error": self.depth_model.error}}
 

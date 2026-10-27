@@ -260,6 +260,8 @@ async function refresh() {
   results(status.results);
   running(status.running);
   if (status.render_error) $('#sim-empty').textContent = status.render_error;
+  const camMsg = $('#page-sim .sim-cam .cam-empty');            // why the camera inset is blank, if we know
+  if (camMsg) camMsg.textContent = status.render_error || 'No camera yet';
 }
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 

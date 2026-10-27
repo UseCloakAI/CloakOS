@@ -123,16 +123,33 @@ function drawFace(f) {
 }
 
 /* ── camera ─────────────────────────────────────────────── */
+// One live stream at a time: the browser only allows ~6 connections to a site, and a stream per
+// page (Live, Teleop, Simulator, Map) starved the rest. Only the visible page's camera streams.
 function startCamera() {
   $$('[data-cam]').forEach(cam => {
     const img = new Image();
     img.alt = 'Vector camera';
     const inset = $('.eyes-inset', cam);
+    cam._img = img;
     img.onload = () => { $('.cam-empty', cam).hidden = true; $('.cam-tag', cam).hidden = false; if (inset) inset.hidden = false; if (!img.isConnected) cam.prepend(img); };
-    img.onerror = () => { img.remove(); $('.cam-empty', cam).hidden = false; $('.cam-tag', cam).hidden = true; if (inset) inset.hidden = true; setTimeout(() => { img.src = '/camera.mjpg?' + Date.now(); }, 3000); };
-    img.src = '/camera.mjpg';
+    img.onerror = () => {
+      if (!img.getAttribute('src')) return;                    // we stopped it on purpose
+      img.remove(); $('.cam-empty', cam).hidden = false; $('.cam-tag', cam).hidden = true; if (inset) inset.hidden = true;
+      setTimeout(() => { if (cam._on) img.src = '/camera.mjpg?' + Date.now(); }, 3000);
+    };
+  });
+  syncCamera();
+}
+function syncCamera() {
+  $$('[data-cam]').forEach(cam => {
+    const on = !!cam.closest('.page') && !cam.closest('.page').hidden && !document.hidden;
+    if (on === !!cam._on || !cam._img) return;
+    cam._on = on;
+    if (on) cam._img.src = '/camera.mjpg?' + Date.now();
+    else cam._img.removeAttribute('src');                       // closes the connection
   });
 }
+document.addEventListener('visibilitychange', syncCamera);
 
 /* the eyes Cloak is drawing on Vector's screen, mirrored here (works offline too) */
 let eyeN = 0;
@@ -270,6 +287,7 @@ function goPage(p) {
   if (window.trainShown) window.trainShown(p === 'train');
   if (window.mapShown) window.mapShown(p === 'map');
   if (p === 'settings') { loadUpdates(); loadNous(); }
+  syncCamera();
   if (window.innerWidth <= 640) closeMobileSidebar();
 }
 function toggleSidebar() {

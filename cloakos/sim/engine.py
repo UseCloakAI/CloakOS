@@ -312,7 +312,6 @@ class Sim:
         import mujoco
 
         next_snap = next_ctrl = 0.0
-        inline = not self._separate_render
         rst: dict = {}
         last = time.monotonic()
         while self._run:
@@ -347,7 +346,7 @@ class Sim:
             if now >= next_snap:
                 self._update_snapshot()
                 next_snap = now + 1 / 60
-            if inline:
+            if not self._separate_render:          # software GL, or the camera thread gave up
                 self._render_once(rst)
             self._publish_frame(now)
             time.sleep(0.002)
@@ -357,12 +356,18 @@ class Sim:
     def _render_loop(self) -> None:
         """Camera + depth frames on their own thread, from a copy of the physics state, so rendering
         never stalls the physics (and so nothing renders while nobody is looking)."""
-        st: dict = {}
-        while self._run:
+        st: dict = {"thread": True}
+        while self._run and self._separate_render:
             self._render_once(st)
             time.sleep(0.02)
         if st.get("renderer") is not None:
             st["renderer"].close()
+
+    def _render_fallback(self, why: str) -> None:
+        """The camera thread can't render here (some GL setups only allow it on one thread):
+        go back to rendering on the physics thread."""
+        log.warning("sim camera: %s; rendering on the physics thread instead", why)
+        self._separate_render = False
 
     def _render_once(self, st: dict) -> None:
         import mujoco
@@ -379,6 +384,9 @@ class Sim:
                 st["renderer"], st["m"] = self._make_renderer(st.get("renderer"), m), m
             renderer, rd = st["renderer"], st["rd"]
             if renderer is None:
+                if st.get("thread"):
+                    st["rd"] = None
+                    self._render_fallback(self.render_error or "no renderer")
                 return
             with self._lock:
                 if self._m is not m:                        # a new world loaded meanwhile: start over next pass
@@ -388,9 +396,15 @@ class Sim:
             if self.want_depth and now >= self._next_depth:
                 self._next_depth = now + 1 / self.depth_hz
                 self._capture_depth(renderer, rd, m, sc)
-        except Exception:
+            st["fails"] = 0
+            self.render_error = None
+        except Exception as e:
             log.exception("sim camera render failed")
+            self.render_error = f"camera render failed: {type(e).__name__}: {e}"[:200]
             st["next"] = now + 0.5
+            st["fails"] = st.get("fails", 0) + 1
+            if st.get("thread") and st["fails"] >= 3:
+                self._render_fallback(self.render_error)
 
     def _make_renderer(self, old, m=None):
         import mujoco
@@ -404,7 +418,8 @@ class Sim:
         except Exception as e:
             self.render_error = f"camera rendering unavailable: {e}"
             log.warning(self.render_error)
-            self.camera_on = False
+            if not self._separate_render:               # the physics thread can't render either: give up
+                self.camera_on = False
             return None
 
     def _control(self, m, d, now: float) -> None:
