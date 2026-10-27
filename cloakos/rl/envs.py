@@ -66,6 +66,14 @@ def make_spec(task: str, sensors: str = "map") -> Spec:
     return Spec(task, sensors if sensors in SENSORS else "map", episode_s=40.0 if task == "wander" else 30.0)
 
 
+def reflex(spec: Spec, s: dict, a: np.ndarray) -> np.ndarray:
+    """Edge reflex, like the firmware's: when a front cliff sensor fires, back up and swing away
+    whatever the policy asked for. Runs on the robot side, after Wi-Fi, in training and on the real thing."""
+    if spec.task != "recover" and s.get("cliff"):
+        return np.array([-0.6, -0.25], np.float32)
+    return a
+
+
 def observe(spec: Spec, s: dict, goal: tuple[float, float] | None, rays: np.ndarray | None,
             last_action: np.ndarray) -> np.ndarray:
     """Observation vector from a sensor snapshot. Shared by training (sim) and the robot
@@ -196,6 +204,7 @@ if gym is not None:
             a = np.clip(np.asarray(action, np.float32), -1, 1)
             self._act_q.append(np.pad(a, (0, 3 - len(a))))
             a = self._act_q.popleft()[:len(a)]          # what actually reaches the robot this step
+            a = reflex(spec, sim.snapshot, a)
             if spec.task == "recover":
                 sim.set_lift(None, float(a[2]) * 3.0)
                 left, right = float(a[0]) * spec.max_speed, float(a[1]) * spec.max_speed

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .envs import RAY_FOV, RAY_MAX, Spec, make_spec, observe
+from .envs import RAY_FOV, RAY_MAX, Spec, make_spec, observe, reflex
 from .policy import NumpyPolicy
 
 if TYPE_CHECKING:
@@ -92,6 +92,7 @@ class Skills:
         a, _ = sk.model.predict(o)
         a = np.clip(np.asarray(a, np.float32), -1, 1)
         sk.last_action = a[:2]
+        a = reflex(sk.spec, s, a)
         info: dict[str, Any] = {}
         if goal is not None:
             info["dist"] = math.dist(s["pos"][:2], goal)
