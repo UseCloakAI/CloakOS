@@ -431,6 +431,16 @@
           <h2>Driving now</h2>
           <dl class="kv" id="kv-rl-active"></dl>
           <p class="tele-note">Goto policies drive to a goal: double-click the floor in the Simulator to set one.</p>
+          <h2>Calibrate to the real thing</h2>
+          <p class="tele-note">Measures how the real pipeline differs from the training sim, so training can match it. Takes a few minutes. Then copy the numbers and paste them to Claude.</p>
+          <div class="chip-row">
+            <button class="chip" onclick="calRun('map')">Camera AI vs truth (simulator, 3 min)</button>
+            <button class="chip" onclick="calRun('robot')">Robot lag and sensors (about 20 s)</button>
+            <button class="chip" onclick="calStop()">Stop</button>
+            <button class="chip" onclick="calCopy()">Copy results</button>
+          </div>
+          <p class="tele-note" id="cal-status"></p>
+          <pre class="tele-note" id="cal-out" style="white-space:pre-wrap"></pre>
           <h2>Trained policies</h2>
           <div id="rl-policies"><p class="tele-note">None yet.</p></div>
         </div></div>

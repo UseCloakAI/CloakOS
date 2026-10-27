@@ -78,6 +78,8 @@ class Brain:
         self._tick_events: list[dict[str, Any]] = []
         self._stop = asyncio.Event()
         self.frozen = False
+        from .calibrate import Calibrator
+        self.calibrator = Calibrator(self)
         self.tester = None                       # sim.tester.Tester, made on first use
         fz = cfg.get("freeze", {}) or {}
         self.freeze_taps = int(fz.get("taps", 3))

@@ -26,6 +26,22 @@ def make_rl_router(brain: "Brain") -> APIRouter:
                 "active": {"name": lp.policy_name, "task": lp.spec.task if lp.spec else None, "goal": lp.goal,
                            "status": lp.status, "on": brain.mode == "learned", "blocked": lp.deployable()}}
 
+    @r.get("/calibration")
+    async def calibration() -> dict[str, Any]:
+        c = brain.calibrator
+        return {"running": c.running, "kind": c.kind, "progress": c.progress, "result": c.result}
+
+    @r.post("/calibration")
+    async def calibrate(body: dict = Body(...)) -> dict[str, Any]:
+        why = brain.calibrator.start(str(body.get("kind")), float(body.get("seconds", 180)))
+        return {"ok": why is None, "error": why}
+
+    @r.post("/calibration/stop")
+    async def calibration_stop() -> dict[str, Any]:
+        if brain.calibrator.task:
+            brain.calibrator.task.cancel()
+        return {"ok": True}
+
     @r.post("/train")
     async def train(body: dict = Body(...)) -> JSONResponse:
         try:
