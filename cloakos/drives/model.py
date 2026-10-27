@@ -53,6 +53,12 @@ class DriveModel:
         self.values = {n: _clamp(s.init) for n, s in self.specs.items()}
         self._armed = {(n, edge): False for n in DRIVES for edge in ("high", "low")}
 
+    def reset(self) -> None:
+        """Back to the configured starting values (in place: policies hold this dict)."""
+        for n, s in self.specs.items():
+            self.values[n] = _clamp(s.init)
+        self._armed = dict.fromkeys(self._armed, False)
+
     def __getitem__(self, name: str) -> float:
         return self.values[name]
 

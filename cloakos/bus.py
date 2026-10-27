@@ -39,9 +39,11 @@ class Bus:
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
-    def on(self, pattern: str, fn: Handler) -> None:
-        """Subscribe. `pattern` is an exact topic, a prefix ending in '*' ('sense.*'), or '*'."""
+    def on(self, pattern: str, fn: Handler) -> Callable[[], None]:
+        """Subscribe. `pattern` is an exact topic, a prefix ending in '*' ('sense.*'), or '*'.
+        Returns a function that unsubscribes."""
         self._subs[pattern].append(fn)
+        return lambda: fn in self._subs[pattern] and self._subs[pattern].remove(fn)
 
     def emit(self, topic: str, **data: Any) -> Event:
         ev = Event(topic, data)

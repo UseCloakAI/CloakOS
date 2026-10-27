@@ -17,6 +17,10 @@ from ..world import CAMERA_H, CAMERA_W, Face, World
 log = logging.getLogger(__name__)
 
 
+class _Retarget(Exception):
+    """Internal: switch between robot and sim."""
+
+
 def hint_for(error: str) -> str | None:
     """Turn a connect error into something the UI can explain."""
     e = error.lower()
@@ -41,9 +45,14 @@ class RobotLink:
         self.anim_triggers: list[str] = []
         self.hint: str | None = None          # a known, fixable reason the last connect failed
         self.volume = max(0, min(100, int(self.cfg.get("volume", 80))))   # 0..100, 0 = Cloak's sounds muted
-        self.control_gen = 0                  # bumps on every control grant; Body resyncs its motor state
+        self.control_gen = 0
+        self._button = False                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
         self._stop = asyncio.Event()
+        self._kick = asyncio.Event()          # set_target(): drop the current link and reconnect now
+        sim_cfg = cfg.get("sim", {}) or {}
+        self.target = "sim" if sim_cfg.get("enabled") else "real"
+        self.sim = None                       # cloakos.sim.Sim, created the first time it's used
 
     @property
     def connected(self) -> bool:
@@ -65,6 +74,8 @@ class RobotLink:
                 await self._watch()
             except asyncio.CancelledError:
                 raise
+            except _Retarget:
+                backoff = 0.0
             except Exception as e:
                 msg = " ".join(str(e).split()) or type(e).__name__
                 self.hint = hint_for(msg)
@@ -73,25 +84,52 @@ class RobotLink:
                 await self._disconnect()
             if self._stop.is_set():
                 break
-            self._set_state("waiting", retry_in=backoff)
-            try:
-                await asyncio.wait_for(self._stop.wait(), backoff)
-            except asyncio.TimeoutError:
-                pass
-            backoff = min(backoff * 2, float(self.cfg.get("max_backoff_s", 30)))
+            if backoff:
+                self._set_state("waiting", retry_in=backoff)
+                await self._nap(backoff)
+            backoff = min(max(1.0, backoff * 2), float(self.cfg.get("max_backoff_s", 30)))
 
     async def stop(self) -> None:
         self._stop.set()
+        self._kick.set()
+
+    async def _nap(self, seconds: float) -> None:
+        """Sleep, but wake early for stop() or set_target()."""
+        try:
+            await asyncio.wait_for(self._kick.wait(), seconds)
+        except asyncio.TimeoutError:
+            pass
+
+    async def set_target(self, target: str) -> None:
+        """Switch between the real Vector and the simulator; reconnects right away."""
+        target = "sim" if target == "sim" else "real"
+        if target != self.target:
+            self.target = target
+            self._kick.set()
+
+    def get_sim(self):
+        if self.sim is None:
+            from ..sim.engine import Sim
+            self.sim = Sim(self.full_cfg)
+        return self.sim
 
     async def _connect(self) -> None:
+        self._kick.clear()
         self._set_state("connecting")
-        bot = await discover(self.full_cfg, cert_dir=self.cfg.get("cert_dir", "data/certs"))
-        client = VectorClient(bot)
+        if self.target == "sim":
+            from ..sim.client import SimClient
+            client: VectorClient = SimClient(self.get_sim())
+            bot = client.bot
+        else:
+            if self.sim is not None:              # don't burn CPU on physics nobody is watching
+                await asyncio.to_thread(self.sim.stop)
+            bot = await discover(self.full_cfg, cert_dir=self.cfg.get("cert_dir", "data/certs"))
+            client = VectorClient(bot)
         self.client = client
         await client.connect(float(self.cfg.get("connect_timeout_s", 10)))
         client.spawn(client.control_loop(), "control")
         client.spawn(client.events(self._on_event), "events")
-        client.spawn(client.camera(self._on_frame), "camera")
+        client.spawn(self._camera(client), "camera")
         try:
             await client.face_detection(True)
         except Exception as e:
@@ -102,7 +140,7 @@ class RobotLink:
         except Exception as e:
             log.warning("could not list animation triggers: %s", e)
         self.hint = None
-        self._set_state("connected", name=bot.name, serial=bot.serial, host=bot.host)
+        self._set_state("connected", name=bot.name, serial=bot.serial, host=bot.host, target=self.target)
         log.info("connected to %s (%d anim triggers)", bot.name, len(self.anim_triggers))
         if self._want_control:
             await self._request_control()
@@ -126,11 +164,11 @@ class RobotLink:
                 if misses >= 2:
                     raise ConnectionError("heartbeat lost") from e
             if self._want_control and not self.has_control:
+                log.info("behavior control lost; asking again")
                 await self._request_control()
-            try:
-                await asyncio.wait_for(self._stop.wait(), interval)
-            except asyncio.TimeoutError:
-                pass
+            await self._nap(interval)
+            if self._kick.is_set() and not self._stop.is_set():
+                raise _Retarget()
 
     async def _disconnect(self) -> None:
         client, self.client = self.client, None
@@ -154,6 +192,22 @@ class RobotLink:
         self.state = state
         self.world.connected = state == "connected"
         self.bus.emit("robot.connection", state=state, **extra)
+
+    async def _camera(self, client: VectorClient) -> None:
+        """Camera feed that restarts itself: a dropped feed never takes the whole link down."""
+        warned = False
+        while True:
+            try:
+                await client.camera(self._on_frame)
+                err = "feed ended"
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                err = " ".join(str(e).split()) or type(e).__name__
+            if not warned:
+                log.warning("camera: %s; retrying", err)
+                warned = True
+            await asyncio.sleep(2)
 
     # ── volume ─────────────────────────────────────────────────
 
@@ -223,7 +277,12 @@ class RobotLink:
         w.pose = (round(q.x, 1), round(q.y, 1), round(st.pose_angle_rad, 4))
 
     def _on_event(self, kind: str, msg: Any) -> None:
-        if kind == "robot_observed_face":
+        if kind == "robot_state":
+            down = bool(msg.status & 0x10)
+            if down and not self._button:
+                self.bus.emit("raw.button_press")
+            self._button = down
+        elif kind == "robot_observed_face":
             r = msg.img_rect
             self.bus.emit("raw.face", face=Face(
                 id=int(msg.face_id),

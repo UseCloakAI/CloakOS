@@ -87,6 +87,9 @@ cloakos/
   voice/           llm.py (OpenAI-compatible) · tts/ (kokoro, piper) · audio.py (16 kHz) · speaker.py (cache, triggers)
   datalog/         recorder.py  episodes for imitation learning
   teleop/          policy.py    keyboard/gamepad axes → Action, dead-man stop
+  sim/             MuJoCo simulator: vector_model.py (Vector's body from its real measurements)
+                   rooms.py (procedural worlds) · engine.py (physics thread, sensors, degraded camera)
+                   client.py (SimClient: VectorClient's interface on the sim) · tester.py (scored scenarios)
   web/             FastAPI server + static UI (vendored cloak.css from usecloakai/cloak) + first-run setup wizard
 config.yaml        all tuning
 .env.example       robot + LLM secrets
@@ -147,6 +150,9 @@ It's styled like Cloak chat: same sidebar, topbar, composer and themes (`cloak_d
 - **Live**: camera with a face box and an inset of the eyes Cloak is drawing on Vector's screen (with no camera, the eyes fill the box, so you can watch them offline too), drive meters, behavior / battery / proximity / body tiles. Below that, the stream: what Vector says shows up as Cloak messages, and senses, drive crossings and behavior switches show up as event rows.
 - **Composer**: **Say it** makes Vector speak your text as written. **Talk to it** sends your text to the LLM, and Vector answers in character.
 - **Teleop**: `W A S D` to drive, `↑ ↓` head, `R F` lift, `Shift` boost, `Space` stop. Gamepads work too (left stick drives, right stick moves the head, triggers move the lift, A is boost). Input stops if the tab goes quiet for 0.5s (dead-man).
+- **Simulator**: switch **Robot / Sim** and the whole brain drives a physics Vector instead (see below). Live 3D view you can orbit, Vector's camera and screen as insets, and buttons to knock it, pick it up or triple-tap its button. The **Tester** runs scored scenarios.
+- **Freeze**: triple-tap Vector's back button (or the ❄ button) and every motor stops and stays stopped, with calm still eyes. Same again to unfreeze. Behaviors, teleop and emotes are all blocked while frozen; control is kept so stock Vector doesn't wander off either.
+- **Recordings**: hover one in the sidebar and hit the bin to delete it.
 - **Drive lab**: fire fake senses, play any emote, drag drive values around, and watch the live behavior scores. Handy for tuning without the bot.
 - **Settings**: wire-pod and robot info, voice and LLM status, and every stock animation trigger your Vector has, with a test player.
 
@@ -211,6 +217,16 @@ Kokoro int8 takes roughly 0.5s per short line on a plain CPU. Cached lines skip 
 
 `action` is the continuous action space, the same one teleop produces and a learned policy will output. High-level moves (turns, emotes, speech) are logged as discrete `events`. Each recording is one episode. Teleop records automatically, and the record button covers everything else.
 
+## Simulator
+A MuJoCo model of Vector built from its published measurements (~100×60×69 mm, ~159 g, head −22°…45°, lift 32–92 mm). It has tread wheels, a tilting head with the camera, a lift, the forward distance sensor, four cliff sensors and an IMU. Treads carry the weight on their middle wheels and the end wheels only bite when it rocks or tips, so it spins in place like the real thing and can tip back onto its rear treads.
+
+- **Worlds** are generated from a seed (same seed, same room): random cluttered rooms (furniture, posts, findable objects like a red mug or blue ball, random floor/wall colours and lighting), a tabletop with edges, a person sitting on the floor (their face is "detected" like Vector's face detector: in view, unblocked, facing it), a goal disc, and `balance` (starts tipped up on its back treads).
+- **Camera** is rendered at 640×360, then degraded on purpose to match the real feed: noise, blur, heavy JPEG, 15 fps, ~100 ms lag. Tune it in `config.yaml → sim`.
+- **Tester** scenarios: wander safely, don't fall off the table, picked-up reflex, shoved around, find and approach a person, triple-tap freeze, and drive to the goal yourself (teleop). Each run reports pass/fail per check and is logged to `data/sim_tests.jsonl`; tick **Record** to save runs as training episodes in the same format as real ones.
+- **Balancing** on two wheels can be trained in the sim. On the real robot it needs motor corrections every few ms, which Wi-Fi control can't do, so that one stays sim-only unless the controller runs on the robot itself.
+
+Runs on Apple Silicon (rendering via CGL). Start on the sim with `CLOAK_SIM=1` or the Robot / Sim switch.
+
 ## Phase 2 hooks
 - **Vision (YOLO)**: a detector in `perception/` publishes `raw.face` / `raw.object` events on the bus. Senses, drives and behaviors don't change.
 - **Learned policy (ACT / diffusion)**: subclass `behaviors.base.Policy`, read the `Obs`, and send `body.apply(Action(...))` each step. Then register it in `Brain.policies` as a new mode. Write an exporter that turns `data/episodes` into LeRobot or HDF5.
@@ -221,7 +237,7 @@ Kokoro int8 takes roughly 0.5s per short line on a plain CPU. Cached lines skip 
 ```bash
 pip install -e ".[dev]" && pytest
 ```
-The tests cover drive math, behavior selection, teleop mapping, audio, the recorder, eyes and chirps, wire-pod discovery (mocked HTTP) and our gRPC client against a fake Vector server over real TLS with token auth. There's also a full brain run against that fake robot: connect, control grant, events, camera, eyes on the screen, auto, teleop with recording, idle, shutdown.
+The tests cover drive math, behavior selection, teleop mapping, audio, the recorder, eyes and chirps, wire-pod discovery (mocked HTTP) and our gRPC client against a fake Vector server over real TLS with token auth. There's also a full brain run against that fake robot: connect, control grant, events, camera, eyes on the screen, auto, teleop with recording, idle, shutdown. The sim tests check the physics (speed, turning, head, lift, pickup, table cliffs) and run the whole brain on the sim, including teleop and triple-tap freeze.
 
 Protos: `cloakos/vector/proto/` holds Anki's Vector external-interface protos (Apache-2.0, via vector-go-sdk) with the REST annotations stripped. The generated stubs are committed. If you edit a proto, run `pip install -e ".[proto]" && python scripts/gen_proto.py`.
 

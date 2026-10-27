@@ -122,6 +122,16 @@ class Recorder:
                         rel = None
                 f.write(json.dumps({"i": i, **step, "frame": rel}, default=str) + "\n")
 
+    def delete(self, name: str) -> bool:
+        """Delete one saved episode by folder name. Never the one being recorded."""
+        import shutil
+
+        d = (self.root / name).resolve()
+        if d.parent != self.root.resolve() or not d.is_dir() or (self.active and self.dir and d == self.dir.resolve()):
+            return False
+        shutil.rmtree(d)
+        return True
+
     def list_episodes(self, limit: int = 30) -> list[dict[str, Any]]:
         if not self.root.exists():
             return []
