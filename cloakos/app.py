@@ -48,10 +48,12 @@ class Brain:
         ex = cfg.get("expression", {}) or {}
         self.eyes = Eyes(cfg)
         self.eyes_on = bool(ex.get("eyes", True))
-        self.eye_fps = float(ex.get("eye_fps", 8))
+        self.eye_fps = float(ex.get("eye_fps", 20))
         self.eye_frame = None                    # latest rendered eyes (PIL), for the dashboard too
         self.reactions: dict[str, str] = ex.get("reactions", {}) or {}
         self.body.emotes = Emotes(cfg, self.eyes)
+        from .expression.sfx import Sfx
+        self.sfx = Sfx(cfg, self.bus, self.body, self.drives)
         self._emote_task: asyncio.Task | None = None
         self.recorder = Recorder(cfg)
         self.policies: dict[str, Policy] = {
@@ -174,6 +176,7 @@ class Brain:
         how = ev.topic.split(".", 1)[1]
         if how in ("arrived", "failed"):
             self.react("happy" if how == "arrived" else "sad")
+            self.eyes.flash("Got there!" if how == "arrived" else "Couldn't reach it", 2.0)
             asyncio.get_running_loop().call_later(2.0, lambda: asyncio.ensure_future(self.set_mode(self._goto_return)))
 
     def react(self, emote: str) -> None:
@@ -261,10 +264,33 @@ class Brain:
             face = self.world.face
             gaze = (face.cx, face.cy) if face is not None and self.world.face_visible(1.0) else None
             behavior = self.policy.current if self.policy else "-"
-            self.eye_frame = self.eyes.render(self.eyes.shape(self.drives.values, behavior, gaze))
+            self.eyes.status = self.activity()
+            self.eye_frame = self.eyes.frame(self.eyes.shape(self.drives.values, behavior, gaze))
             if self.eyes_on and self.body.ready:
                 await self.body.face(rgb565(self.eye_frame), int(3000 * period))
             await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
+
+    ACTIVITY = {"wander": "Wandering", "look_around": "Looking around", "approach_face": "Coming to say hi"}
+
+    def activity(self) -> str | None:
+        """What it's doing, in a few words, for the screen. None = just eyes."""
+        w = self.world
+        if self.frozen:
+            return "Frozen"
+        if w.on_charger and (abs(w.left_mmps or 0) > 5 or abs(w.right_mmps or 0) > 5):
+            return "Undocking"
+        if self.calibrator.running:
+            return "Calibrating"
+        if self.tester is not None and self.tester.running:
+            return "Running a test"
+        if self.mode == "goto":
+            gp = self.policies["goto"]
+            return f"Going to the {gp.target['label']}" if gp.target and gp.status == "driving" else None
+        if self.mode == "teleop":
+            return "Remote control" if self.body.cmd.left or self.body.cmd.right else None
+        if self.mode in ("auto", "learned") and self.policy is not None:
+            return self.ACTIVITY.get(self.policy.current)
+        return None
 
     def _record(self, obs: Obs) -> None:
         events, self._tick_events = self._tick_events, []

@@ -57,7 +57,7 @@ def test_chirps_and_eyes():
     assert happy.happy > 0.3 and happy.gaze_x > 0.5
     nap = eyes.shape(d, "nap", None, now=1.0)
     assert nap.open < 0.1
-    img = eyes.render(happy)
+    img = eyes.render(happy)   # white rounded eyes on black
     assert img.size == (184, 96)
     assert img.getpixel((92, 2)) == (0, 0, 0)                 # background stays black
 
