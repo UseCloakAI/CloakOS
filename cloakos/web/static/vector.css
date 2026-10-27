@@ -274,3 +274,11 @@ body.is-frozen .live-dot{background:#3B82F6!important}
 .rl-chart-legend{font-size:11px;font-weight:700;display:flex;gap:12px;align-items:center}
 .sc-card.sel{outline:2px solid var(--acc);outline-offset:-2px}
 .err{color:var(--acc)}
+
+/* FSD-style map */
+.det-layer{position:absolute;inset:0;pointer-events:none}
+.det-box{position:absolute;border:2px solid #FF8A3D;box-shadow:0 0 6px rgba(255,138,61,.6)}
+.det-box span{position:absolute;left:-2px;top:-17px;background:#FF8A3D;color:#111;font-size:9px;font-weight:800;padding:1px 4px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.map-hud{width:min(280px,34%)}
+.map-status{margin-left:12px;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#map-cone.on,#map-look.on,#map-chase.on{background:var(--ink);color:var(--paper)}

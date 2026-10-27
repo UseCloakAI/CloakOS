@@ -51,6 +51,10 @@ class Mapper:
         self._frames = 0
         self._saved = time.time()
         self._dirty = False
+        self.cam: CameraPose | None = None          # where the camera was for the latest frame
+        self.dets: list[dict] = []                  # what it recognised in the latest frame (image coords)
+        self.det_size = (640, 360)
+        self.floor_z = 0.0
         bus.on("raw.face_pose", self._on_face)
 
     # ── map selection / persistence ───────────────────────────
@@ -125,6 +129,8 @@ class Mapper:
         self._use(f["key"], tuple(f["pos"][:2]))
         cam = CameraPose(f["pos"], f["R"])
         depth = f["depth"]
+        self.cam, self.floor_z = cam, f.get("floor_z", 0.0)
+        self.dets, self.det_size = f["detections"], (depth.shape[1], depth.shape[0])
         await asyncio.to_thread(self._integrate, depth, cam, f["rgb"], f["detections"], 2)
         snap = sim.snapshot
         self.trail.append((round(snap["pos"][0], 3), round(snap["pos"][1], 3), round(snap["pos"][2], 3)))
@@ -172,6 +178,7 @@ class Mapper:
                 self.detector.error = f"{type(e).__name__}: {e}"[:200]
                 log.warning("object detector unavailable: %s", self.detector.error)
         await asyncio.to_thread(self._integrate, depth, cam, np.asarray(img), dets, 4)
+        self.cam, self.dets, self.det_size = cam, dets, img.size
         self.status = "mapping (camera depth)"
 
     def _integrate(self, depth: np.ndarray, cam: CameraPose, rgb: np.ndarray, dets: list[dict], stride: int) -> None:
@@ -234,9 +241,34 @@ class Mapper:
                 "trail": list(self.trail)[-600:],
                 "models": {"depth": self.depth_model.available(), "error": self.depth_model.error}}
 
+    def live(self) -> dict[str, Any]:
+        """What the FSD-style view needs every update: camera cone, current detections, object boxes."""
+        out: dict[str, Any] = {"key": self.key, "version": self.map.version if self.map else 0, "status": self.status}
+        if self.cam is not None:
+            R = self.cam.R
+            out["cam"] = {"pos": [round(float(v), 3) for v in self.cam.pos], "fwd": R[:, 0].round(4).tolist(),
+                          "left": R[:, 1].round(4).tolist(), "up": R[:, 2].round(4).tolist()}
+        out["dets"] = [{"label": d["label"], "box": [round(float(v), 1) for v in d["box"]], "score": round(d.get("score", 1), 2)}
+                       for d in self.dets]
+        out["frame_size"] = list(self.det_size)
+        out["floor_z"] = self.floor_z
+        boxes = []
+        if self.map is not None:
+            for o in self.objects:
+                ext = self.map.extent(o["pos"])
+                boxes.append({"id": o["id"], "label": o["label"], "pos": o["pos"], "box": ext,
+                              "fresh": time.time() - o["last_seen"] < 3})
+        out["objects"] = boxes
+        return out
+
     def voxels_bin(self) -> bytes:
+        """u32 n, f32 origin xyz + voxel, then n x (u16 i,j,k), n x rgb, n x age (u8),
+        then u32 m, m x (u16 i,j) drivable floor cells."""
         if self.map is None:
-            return np.array([0], np.uint32).tobytes()
+            return np.array([0], np.uint32).tobytes() + np.zeros(4, np.float32).tobytes() + np.array([0], np.uint32).tobytes()
         ijk, col = self.map.occupied()
+        age = np.minimum(self.map.age(ijk), 255).astype(np.uint8)
+        floor = self.map.drivable(self.floor_z)[:150_000]
         head = np.array([len(ijk)], np.uint32).tobytes() + np.array([*self.map.origin, self.map.voxel], np.float32).tobytes()
-        return head + ijk.astype(np.uint16).tobytes() + col.astype(np.uint8).tobytes()
+        return (head + ijk.astype(np.uint16).tobytes() + col.astype(np.uint8).tobytes() + age.tobytes()
+                + np.array([len(floor)], np.uint32).tobytes() + floor.astype(np.uint16).tobytes())
