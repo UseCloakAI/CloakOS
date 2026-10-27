@@ -26,9 +26,9 @@ from .vector_model import HEAD_RANGE, LIFT_RANGE, MAX_WHEEL_MMPS, WHEEL_R, lift_
 log = logging.getLogger(__name__)
 
 CAM_W, CAM_H = 640, 360           # what Vector's camera reports (rendering can be smaller)
-SURFACES = ("floor", "table")
+SURFACES = ("floor", "table", "rug")
 WHEELS = ("lf", "lm", "lb", "rf", "rm", "rb")
-GEOM_TYPES = {0: "plane", 2: "sphere", 3: "capsule", 5: "cylinder", 6: "box"}
+GEOM_TYPES = {0: "plane", 2: "sphere", 3: "capsule", 4: "ellipsoid", 5: "cylinder", 6: "box", 7: "mesh"}
 
 
 def _gl_backend() -> None:
@@ -50,6 +50,10 @@ class Sim:
         self.latency = float(c.get("camera_latency_s", 0.1))
         self.camera_on = bool(c.get("camera", True))
         self.world = c.get("world", "room")
+        self.assets = None
+        if c.get("assets", True):
+            from .assets import Assets
+            self.assets = Assets(c.get("asset_dir", "data/sim_assets"), online=bool(c.get("download", True)))
         self.seed: int | None = c.get("seed")
         self.version = 0
         self.scene_info: rooms.Scene | None = None
@@ -116,11 +120,12 @@ class Sim:
 
         world, seed = self._load_req or (self.world, None)
         self._load_req = None
-        sc = rooms.build(world, seed)
+        sc = rooms.build(world, seed, self.assets)
         m = mujoco.MjModel.from_xml_string(sc.xml)
         d = mujoco.MjData(m)
         if sc.start_pitch:
             self._tip_back(m, d, sc)
+        self._settle_objects(m, d, sc)
         mujoco.mj_forward(m, d)
         with self._lock:
             self._m, self._d, self.scene_info = m, d, sc
@@ -135,6 +140,35 @@ class Sim:
         self._update_snapshot()
         self._loaded.set()
         log.info("sim world: %s (seed %d)", sc.world, sc.seed)
+
+    @staticmethod
+    def _settle_objects(m, d, sc: rooms.Scene) -> None:
+        """Rest every loose object on the floor by its real (mesh) bounds, then let physics settle it."""
+        import mujoco
+
+        if not sc.objects:
+            return
+        mujoco.mj_forward(m, d)
+        for name in sc.objects:
+            b = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, name)
+            if b < 0 or m.body_jntnum[b] == 0:
+                continue
+            lowest = math.inf
+            for g in range(m.body_geomadr[b], m.body_geomadr[b] + m.body_geomnum[b]):
+                c, h = m.geom_aabb[g][:3], m.geom_aabb[g][3:]
+                R = d.geom_xmat[g].reshape(3, 3)
+                for corner in np.array(np.meshgrid([-1, 1], [-1, 1], [-1, 1])).T.reshape(-1, 3):
+                    z = (d.geom_xpos[g] + R @ (c + corner * h))[2]
+                    lowest = min(lowest, z)
+            a = m.jnt_qposadr[m.body_jntadr[b]]
+            d.qpos[a + 2] += sc.floor_z + 0.001 - lowest
+        robot = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "vector")
+        keep = d.qpos[m.jnt_qposadr[robot]:m.jnt_qposadr[robot] + 7].copy()
+        for _ in range(150):                                  # 0.3 s: objects come to rest
+            mujoco.mj_step(m, d)
+            d.qpos[m.jnt_qposadr[robot]:m.jnt_qposadr[robot] + 7] = keep
+            d.qvel[m.jnt_dofadr[robot]:m.jnt_dofadr[robot] + 6] = 0
+        d.time = 0.0
 
     @staticmethod
     def _tip_back(m, d, sc: rooms.Scene) -> None:
@@ -470,7 +504,8 @@ class Sim:
     # ── viewer ─────────────────────────────────────────────────
 
     def scene(self) -> dict[str, Any]:
-        """Static description for the 3D viewer: bodies and their primitive geoms."""
+        """Static description for the 3D viewer: bodies, their geoms, materials (meshes and
+        textures are fetched separately via mesh_data() / texture_png())."""
         import mujoco
 
         with self._lock:
@@ -482,17 +517,60 @@ class Sim:
                 t = GEOM_TYPES.get(int(m.geom_type[g]))
                 if t is None or m.geom_rgba[g][3] == 0:
                     continue
-                geoms.append({
+                mat = int(m.geom_matid[g])
+                info = {
                     "name": mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or "",
                     "body": int(m.geom_bodyid[g]), "type": t,
                     "size": [round(float(x), 5) for x in m.geom_size[g]],
                     "pos": [round(float(x), 5) for x in m.geom_pos[g]],
                     "quat": [round(float(x), 5) for x in m.geom_quat[g]],
-                    "rgba": [round(float(x), 3) for x in m.geom_rgba[g]],
-                })
+                    "rgba": [round(float(x), 3) for x in (m.mat_rgba[mat] if mat >= 0 else m.geom_rgba[g])],
+                }
+                if t == "mesh":
+                    info["mesh"] = int(m.geom_dataid[g])
+                if mat >= 0:
+                    tex = int(m.mat_texid[mat][1]) if m.mat_texid.ndim == 2 else int(m.mat_texid[mat])
+                    if tex < 0 and m.mat_texid.ndim == 2:
+                        tex = int(max(m.mat_texid[mat]))
+                    info["mat"] = {"tex": tex, "repeat": [float(x) for x in m.mat_texrepeat[mat]],
+                                   "uniform": bool(m.mat_texuniform[mat]), "emission": float(m.mat_emission[mat]),
+                                   "specular": float(m.mat_specular[mat]), "shininess": float(m.mat_shininess[mat]),
+                                   "reflectance": float(m.mat_reflectance[mat])}
+                geoms.append(info)
             return {"version": self.version, "world": sc.world, "seed": sc.seed, "room": sc.room,
                     "nbody": int(m.nbody), "robot": int(self._bid), "geoms": geoms,
-                    "objects": sc.objects, "person": sc.person, "goal": sc.goal}
+                    "objects": sc.objects, "labels": sc.labels, "person": sc.person, "goal": sc.goal}
+
+    def mesh_data(self, mesh: int) -> bytes | None:
+        """One mesh as flat triangles for three.js: u32 count, then positions, normals, uvs (f32)."""
+        with self._lock:
+            m = self._m
+            if m is None or not 0 <= mesh < m.nmesh:
+                return None
+            va, fa, fn = m.mesh_vertadr[mesh], m.mesh_faceadr[mesh], m.mesh_facenum[mesh]
+            faces = m.mesh_face[fa:fa + fn]
+            pos = m.mesh_vert[va:va + m.mesh_vertnum[mesh]][faces].reshape(-1, 3)
+            na = m.mesh_normaladr[mesh]
+            nrm = m.mesh_normal[na:na + m.mesh_normalnum[mesh]][m.mesh_facenormal[fa:fa + fn]].reshape(-1, 3) \
+                if m.mesh_normalnum[mesh] else np.zeros_like(pos)
+            ta, tn = m.mesh_texcoordadr[mesh], m.mesh_texcoordnum[mesh]
+            uv = m.mesh_texcoord[ta:ta + tn][m.mesh_facetexcoord[fa:fa + fn]].reshape(-1, 2) if ta >= 0 and tn else np.zeros((0, 2))
+        head = np.array([len(pos), len(uv)], dtype=np.uint32).tobytes()
+        return head + pos.astype(np.float32).tobytes() + nrm.astype(np.float32).tobytes() + uv.astype(np.float32).tobytes()
+
+    def texture_png(self, tex: int) -> bytes | None:
+        from PIL import Image
+
+        with self._lock:
+            m = self._m
+            if m is None or not 0 <= tex < m.ntex:
+                return None
+            w, h, c = int(m.tex_width[tex]), int(m.tex_height[tex]), int(m.tex_nchannel[tex])
+            a = m.tex_adr[tex]
+            px = np.array(m.tex_data[a:a + w * h * c]).reshape(h, w, c)
+        buf = io.BytesIO()
+        Image.fromarray(px[..., :3] if c >= 3 else px[..., 0]).save(buf, "PNG")
+        return buf.getvalue()
 
     def poses(self) -> list[float]:
         """xpos + xquat for every body, flat: [x, y, z, qw, qx, qy, qz] * nbody."""

@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Body, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Response, WebSocket, WebSocketDisconnect
 
 from ..sim.rooms import WORLDS
 from .setup_api import env_path, write_env
@@ -68,6 +68,18 @@ def make_sim_router(brain: "Brain") -> APIRouter:
     async def stop_test() -> dict[str, Any]:
         tester().stop()
         return {"ok": True}
+
+    @r.get("/mesh/{mesh}")
+    async def mesh(mesh: int) -> Response:
+        sim = brain.link.sim
+        data = await asyncio.to_thread(sim.mesh_data, mesh) if sim else None
+        return Response(data, media_type="application/octet-stream") if data else Response(status_code=404)
+
+    @r.get("/texture/{tex}")
+    async def texture(tex: int) -> Response:
+        sim = brain.link.sim
+        data = await asyncio.to_thread(sim.texture_png, tex) if sim else None
+        return Response(data, media_type="image/png") if data else Response(status_code=404)
 
     @r.get("/scene")
     async def scene() -> dict[str, Any]:
