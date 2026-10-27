@@ -162,6 +162,9 @@ function onEvent(m, quiet) {
   else if (t === 'behavior.changed') text = `→ ${d.name.replace('_', ' ')}`;
   else if (t === 'mode.changed') text = `Mode: ${d.mode}`;
   else if (t === 'freeze.changed') text = FREEZE_TEXT(d.on);
+  else if (t === 'command') text = (d.say ? `“${d.say}”` : 'Heard you') + (d.action === 'go_to' ? ` · going to ${d.target}` : d.action !== 'none' ? ` · ${d.action}` : '');
+  else if (t === 'goto.arrived') text = `Got to the ${d.target}`;
+  else if (t === 'goto.failed') text = `Couldn't reach the ${d.target}`;
   else if (t === 'test.finished') text = `Sim test ${d.title}: ${d.passed ? 'pass' : d.status === 'stopped' ? 'stopped' : 'fail'}`;
   else if (t === 'robot.connection' && d.state === 'connected' && d.name) text = `Connected to ${d.name}`;
   else if (t === 'robot.connection') text = d.state === 'connected' ? 'Connected to Vector' : 'Disconnected';

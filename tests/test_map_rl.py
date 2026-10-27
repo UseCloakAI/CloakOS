@@ -165,5 +165,6 @@ def test_exported_policy_matches_sb3(tmp_path):
                 policy_kwargs={"net_arch": [32, 32]})
     export_numpy(model, Path(tmp_path / "policy.npz"))
     np_pol = NumpyPolicy(tmp_path / "policy.npz")
-    for o in np.random.default_rng(1).normal(size=(20, 9)).astype(np.float32):
+    n = model.observation_space.shape[0]
+    for o in np.random.default_rng(1).normal(size=(20, n)).astype(np.float32):
         assert np.allclose(model.predict(o, deterministic=True)[0], np_pol.predict(o)[0], atol=1e-5)

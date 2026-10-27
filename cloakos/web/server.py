@@ -198,7 +198,7 @@ def create_app(brain: "Brain") -> FastAPI:
             brain.bus.emit(f"sense.{msg['event']}", simulated=True)
 
     async def _talk(text: str) -> None:
-        reply = await brain.voice.reply(text)
+        reply = (await brain.command(text)).get("say")
         if not reply:
             brain.bus.emit("voice.failed", text=text, reason="no reply from LLM" if brain.voice.llm.enabled else "LLM not configured")
 

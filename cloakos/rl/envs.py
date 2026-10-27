@@ -1,8 +1,8 @@
 """Gymnasium environments on the MuJoCo Vector: what reinforcement learning trains in.
 
 Tasks
-  goto     drive to a random point in a cluttered room without bumping or falling
-  explore  cover as much floor as possible without bumping
+  goto     drive to a point in a cluttered room, around obstacles, without bumping or falling
+  wander   roam the room, covering new ground, without bumping into things
   recover  knocked onto its back or nose: get back on its treads with the wheels and lift
 
 (A two-wheel "wheelie" balance isn't in the list: Vector's body reaches past its rear axle,
@@ -11,9 +11,10 @@ That's true of the real robot too.)
 
 Sensors (obs) come in two flavours:
   robot    only what the real Vector reports: odometry-relative goal, wheel speeds, the single
-           forward distance sensor, cliff, tilt. A policy trained on these runs on the real robot.
-  rays     adds a fan of range readings (a stand-in for camera depth). Sim-only until the
-           live depth map feeds the same rays on the real robot.
+           forward distance sensor, cliff, tilt.
+  map      adds 11 range readings around the robot (180°): how far to the nearest obstacle in
+           each direction. In training they come from the sim's geometry, with noise and gaps;
+           on the real robot they're read from the live 3D map. Both run on the real robot.
 
 Actions are wheel speeds in -1..1 (x max speed), the same as Body.drive().
 """
@@ -34,10 +35,13 @@ from ..sim.engine import Sim
 
 TASKS = {
     "goto": "Drive to a point, avoid obstacles and edges",
-    "explore": "Cover the room, don't bump into things",
+    "wander": "Roam the room without bumping into things",
     "recover": "Get back on its treads after a fall (experimental: train long)",
 }
-SENSORS = {"robot": "Real-robot sensors (deployable)", "rays": "Plus depth rays (sim teacher)"}
+SENSORS = {"map": "Map ranges + robot sensors (recommended)", "robot": "Robot sensors only"}
+ALIASES = {"explore": "wander", "rays": "map"}       # names used by older policies
+RAY_FOV = math.radians(180)
+RAY_MAX = 1.0
 
 
 @dataclass
@@ -47,18 +51,19 @@ class Spec:
     control_hz: float = 10.0
     max_speed: float = 150.0          # mm/s at action 1.0
     episode_s: float = 30.0
-    n_rays: int = 9
+    n_rays: int = 11
 
     @property
     def obs_size(self) -> int:
-        base = {"goto": 9, "explore": 7, "recover": 12}[self.task]
-        return base + (self.n_rays if self.sensors == "rays" else 0)
+        base = {"goto": 9, "wander": 7, "recover": 12}[self.task]
+        return base + (self.n_rays if self.sensors == "map" else 0)
 
 
-def make_spec(task: str, sensors: str = "robot") -> Spec:
+def make_spec(task: str, sensors: str = "map") -> Spec:
+    task, sensors = ALIASES.get(task, task), ALIASES.get(sensors, sensors)
     if task == "recover":
         return Spec("recover", "robot", control_hz=10.0, max_speed=200.0, episode_s=10.0)
-    return Spec(task, sensors if sensors in SENSORS else "robot")
+    return Spec(task, sensors if sensors in SENSORS else "map", episode_s=40.0 if task == "wander" else 30.0)
 
 
 def observe(spec: Spec, s: dict, goal: tuple[float, float] | None, rays: np.ndarray | None,
@@ -74,15 +79,15 @@ def observe(spec: Spec, s: dict, goal: tuple[float, float] | None, rays: np.ndar
         dist = math.hypot(dx, dy)
         ang = math.atan2(dy, dx) - s["yaw"]
         o = [min(dist, 3.0) / 3.0, math.sin(ang), math.cos(ang), *common, *last_action]
-    elif spec.task == "explore":
+    elif spec.task == "wander":
         o = [*common, s["upright"], *last_action]
     else:   # recover: which way it's lying, how it's moving, where the lift is
         roll = s.get("roll", 0.0)
         o = [s["upright"], math.sin(s["pitch"]), math.cos(s["pitch"]), math.sin(roll), math.cos(roll),
              *(np.asarray(s["gyro"]) / 5.0), (s["lift_mm"] - 32) / 60, s["left_mmps"] / v, s["right_mmps"] / v,
              1.0 if s.get("body_ground") else 0.0]
-    if spec.sensors == "rays" and rays is not None:
-        o += list(rays)
+    if spec.sensors == "map":
+        o += list(np.clip(rays, 0, RAY_MAX) / RAY_MAX) if rays is not None else [1.0] * spec.n_rays
     return np.asarray(o, dtype=np.float32)
 
 
@@ -91,7 +96,7 @@ if gym is not None:
     class VectorEnv(gym.Env):
         metadata = {"render_modes": []}
 
-        def __init__(self, task: str = "goto", sensors: str = "robot", seed: int | None = None,
+        def __init__(self, task: str = "goto", sensors: str = "map", seed: int | None = None,
                      worlds_per_reload: int = 8) -> None:
             super().__init__()
             self.spec_ = make_spec(task, sensors)
@@ -119,10 +124,19 @@ if gym is not None:
             return 0.0, 0.0
 
         def _rays(self):
-            return self.sim.rays(self.spec_.n_rays) if self.spec_.sensors == "rays" else None
+            """Sim ranges made to look like a real map: a little noise, and some gaps (never seen = far)."""
+            if self.spec_.sensors != "map":
+                return None
+            r = self.sim.rays(self.spec_.n_rays, RAY_FOV, RAY_MAX)
+            r = r * self.rng.normal(1.0, 0.05, r.shape)
+            r[self.rng.random(r.shape) < 0.12] = RAY_MAX
+            return np.clip(r, 0.0, RAY_MAX).astype(np.float32)
 
         def _obs(self):
-            return observe(self.spec_, self.sim.snapshot, self.goal, self._rays(), self.last_action)
+            o = observe(self.spec_, self.sim.snapshot, self.goal, self._rays(), self.last_action)
+            # Wi-Fi + camera lag: sometimes the brain only has the previous reading
+            self._obs_q.append(o)
+            return (self._obs_q[0] if len(self._obs_q) > self.obs_delay else o).copy()
 
         # ── gym API ────────────────────────────────────────────
 
@@ -157,10 +171,20 @@ if gym is not None:
                     hx, hy = sc.room
                     self.goal = (float(self.rng.uniform(-hx + 0.08, hx - 0.08)), float(self.rng.uniform(-hy + 0.08, hy - 0.08)))
                 else:
-                    self.goal = self._free_point(0.12)
+                    p0 = self.sim.snapshot["pos"]
+                    for _ in range(20):                      # not trivially close
+                        self.goal = self._free_point(0.12)
+                        if math.dist(self.goal, p0[:2]) > 0.25:
+                            break
             self.last_action = np.zeros(2, np.float32)
             self.t = 0
             self.visited = set()
+            # latency like the real robot over Wi-Fi: commands land 0-200 ms late, readings 0-100 ms stale
+            from collections import deque
+            self.act_delay = int(self.rng.integers(0, 3))
+            self.obs_delay = int(self.rng.integers(0, 2))
+            self._act_q = deque([np.zeros(3, np.float32)] * self.act_delay)
+            self._obs_q = deque(maxlen=self.obs_delay + 1)
             s = self.sim.snapshot
             self._prev_dist = math.dist(s["pos"][:2], self.goal) if self.goal else 0.0
             self._prev_up, self._upright_for = s["upright"], 0
@@ -169,6 +193,8 @@ if gym is not None:
         def step(self, action):
             spec, sim = self.spec_, self.sim
             a = np.clip(np.asarray(action, np.float32), -1, 1)
+            self._act_q.append(np.pad(a, (0, 3 - len(a))))
+            a = self._act_q.popleft()[:len(a)]          # what actually reaches the robot this step
             if spec.task == "recover":
                 sim.set_lift(None, float(a[2]) * 3.0)
                 left, right = float(a[0]) * spec.max_speed, float(a[1]) * spec.max_speed
@@ -176,7 +202,7 @@ if gym is not None:
             else:
                 left, right = float(a[0]) * spec.max_speed, float(a[1]) * spec.max_speed
                 self.last_action = a.astype(np.float32)
-            sim.set_wheels(left, right)
+            sim.set_wheels(left, right, 400.0 if spec.task != "recover" else 0.0)   # same ramp as Body.apply
             sim.step(1.0 / spec.control_hz)
             self.t += 1
             s = sim.snapshot
@@ -189,17 +215,23 @@ if gym is not None:
                 self._prev_dist = dist
                 reward -= 0.01
                 if s["bump"]:
-                    reward -= 0.05
+                    reward -= 0.3
+                    info["bump"] = True
                 if dist < 0.06:
                     reward += 3.0
                     done, info["success"] = True, True
-            elif spec.task == "explore":
+            elif spec.task == "wander":
                 cell = (int(s["pos"][0] // 0.1), int(s["pos"][1] // 0.1))
                 if cell not in self.visited:
                     self.visited.add(cell)
                     reward += 0.1
+                fwd = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
+                reward += 0.02 * max(0.0, fwd)                 # rolling forward beats spinning
                 if s["bump"]:
-                    reward -= 0.05
+                    reward -= 0.3
+                    info["bump"] = True
+                if float(sim.rays(5, math.radians(90), 0.3).min()) < 0.05:
+                    reward -= 0.02                             # don't scrape along things
                 info["cells"] = len(self.visited)
             else:   # recover: get upright and stay there
                 up = s["upright"]

@@ -226,6 +226,27 @@ class Mapper:
         self.bus.emit("map.object", label=label, pos=o["pos"], id=o["id"])
         return o
 
+    def rays(self, pos, yaw: float, n: int, fov: float, max_range: float) -> "np.ndarray":
+        """Distance to the nearest mapped obstacle in n directions around the robot (at its
+        height). Space the map hasn't seen counts as clear, like the gaps it trained with."""
+        m = self.map
+        out = np.full(n, max_range, np.float32)
+        if m is None:
+            return out
+        k0 = max(0, int((self.floor_z + 0.015 - m.z0) / m.voxel))
+        k1 = min(m.n_z, int((self.floor_z + 0.10 - m.z0) / m.voxel) + 1)
+        steps = np.arange(0.03, max_range, m.voxel * 0.8)
+        for i, a in enumerate(np.linspace(-fov / 2, fov / 2, n)):
+            d = np.array([math.cos(yaw + a), math.sin(yaw + a)])
+            pts = np.asarray(pos[:2]) + steps[:, None] * d
+            ij = np.floor((pts - m.origin[:2]) / m.voxel).astype(int)
+            ok = (ij >= 0).all(1) & (ij < m.n_xy).all(1)
+            hit = np.zeros(len(steps), bool)
+            hit[ok] = (m.logodds[ij[ok, 0], ij[ok, 1], k0:k1] > 6).any(1)
+            if hit.any():
+                out[i] = float(steps[np.argmax(hit)])
+        return out
+
     def find(self, query: str) -> dict | None:
         """The best remembered object matching a word ("mug", "shoe", "person")."""
         q = query.lower().strip()

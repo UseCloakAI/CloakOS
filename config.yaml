@@ -135,11 +135,13 @@ voice:
     attachment.high:  {hint: "you feel close and happy with your human", cooldown_s: 120, lines: ["I like you.", "Stay here."]}
     energy.low:       {hint: "you are getting sleepy", cooldown_s: 120, lines: ["Sleepy...", "Nap time."]}
 
-llm:                  # any OpenAI-compatible endpoint; base_url/api_key/model usually from .env
+llm:                  # Cloak by default (api.usecloak.org, no key needed); or any OpenAI-compatible endpoint
   enabled: true
-  base_url: null      # e.g. http://localhost:11434/v1 (Ollama) or your Cloak endpoint
+  provider: null      # auto: cloak, unless base_url points at another server (then openai-compatible)
+  base_url: null      # cloak: https://api.usecloak.org · openai: e.g. http://localhost:11434/v1 (Ollama)
   api_key: null
-  model: null
+  model: null         # cloak: pneuma (fast lines) · openai: your model name
+  chat_model: null    # cloak: logos (understands commands like "go to the mug")
   timeout_s: 2.5
   temperature: 1.0
   max_words: 6

@@ -27,7 +27,7 @@ from .world import World
 
 log = logging.getLogger(__name__)
 
-MODES = ("auto", "teleop", "idle", "learned")
+MODES = ("auto", "teleop", "idle", "learned", "goto")
 # sense events that count as "something happened" for boredom
 NON_STIMULI = {"face_lost", "put_down"}
 
@@ -63,6 +63,13 @@ class Brain:
         self.trainer = Trainer((cfg.get("datalog", {}) or {}).get("dir", "data"))
         from .mapping.mapper import Mapper
         self.mapper = Mapper(cfg, self.link, self.world, self.bus)
+        from .behaviors.goto import GoToPolicy
+        from .rl.skills import Skills
+        self.skills = Skills(self.link, self.world, self.mapper)
+        self.body.skills = self.skills
+        self.policies["goto"] = GoToPolicy(self.body, self.skills, self.bus)
+        self._goto_return = "auto"
+        self.bus.on("goto.*", self._on_goto)
         self.mode = "idle"
         self.policy: Policy | None = None
         self._auto_rec = False
@@ -118,6 +125,50 @@ class Brain:
             await self.policy.start()
         log.info("freeze %s (%s)", "on" if on else "off", source)
         self.bus.emit("freeze.changed", on=on, source=source)
+
+    # ── talking + going places ─────────────────────────────────
+
+    async def command(self, text: str) -> dict:
+        """You said something: the LLM (or simple rules) decides what to say and do."""
+        from .voice.commander import decide
+
+        here = tuple(self.policies["goto"].skills.snapshot()["pos"][:2]) if self.link.connected else None
+        d = await decide(self.voice.llm, text, self.mapper.objects, here)
+        if d.action == "go_to" and d.target:
+            ok = await self.go_to(d.target)
+            if not ok:
+                d.say = d.say or "I can't get there right now."
+        elif d.action == "stop":
+            await self.set_frozen(True, source="voice")
+        elif d.action == "wander":
+            if self.frozen:
+                await self.set_frozen(False, source="voice")
+            await self.set_mode("auto")
+        if d.say:
+            asyncio.ensure_future(self.voice.say(d.say, trigger="reply", source=d.source))
+        self.bus.emit("command", text=text, say=d.say, action=d.action, target=d.target, source=d.source)
+        return {"say": d.say, "action": d.action, "target": d.target, "source": d.source}
+
+    async def go_to(self, object_id: str) -> bool:
+        obj = next((o for o in self.mapper.objects if o["id"] == object_id), None) or self.mapper.find(object_id)
+        if obj is None or not self.link.connected:
+            return False
+        if self.frozen:
+            await self.set_frozen(False, source="go_to")
+        gp = self.policies["goto"]
+        gp.set_target(obj, tuple(self.skills.snapshot()["pos"][:2]))
+        if self.mode != "goto":
+            self._goto_return = self.mode if self.mode in ("auto", "idle") else "auto"
+            await self.set_mode("goto")
+        else:
+            await gp.start()
+        return True
+
+    def _on_goto(self, ev: Event) -> None:
+        how = ev.topic.split(".", 1)[1]
+        if how in ("arrived", "failed"):
+            self.react("happy" if how == "arrived" else "sad")
+            asyncio.get_running_loop().call_later(2.0, lambda: asyncio.ensure_future(self.set_mode(self._goto_return)))
 
     def react(self, emote: str) -> None:
         """Fire-and-forget emote on top of whatever's running; skipped if one is already playing."""
