@@ -32,9 +32,9 @@ sim:
   world: room           # room | empty | table | person | goal | balance
   seed: null            # null = new random room each reset
   camera: true
-  render_width: 640     # rendered size; the feed is always delivered at 640x360 like the real one
-  render_height: 360
-  camera_fps: 15
+  render_width: 480     # rendered size; the feed is always delivered at 640x360 like the real one
+  render_height: 270
+  camera_fps: 10
   camera_latency_s: 0.1
   camera_noise: 4.0     # sensor noise (0-255 scale)
   jpeg_quality: 40      # Vector's feed is heavily compressed

@@ -1,6 +1,7 @@
 /* Simulator page: live 3D view of the MuJoCo world (three.js), world controls, tester. */
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import { adaptive } from './perf.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -12,9 +13,9 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);   // MuJoCo is z-up
 const canvas = $('#sim-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });   // never let the canvas size its own box
-renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+const tune = adaptive(renderer, { max: 1.5 });
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.005, 50);
 camera.position.set(0.55, -0.55, 0.45);
@@ -26,7 +27,7 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x444033, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(1.2, -0.8, 2.5);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -2, right: 2, top: 2, bottom: -2, near: 0.1, far: 6 });
 scene.add(sun);
 
@@ -180,6 +181,7 @@ async function loadScene() {
 /* poses over a websocket, ~30 Hz */
 let ws = null, last = null;
 function connect() {
+  if (!shown) return;
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/sim`);
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
@@ -196,7 +198,7 @@ function connect() {
     if (msg.goal) goalMark.position.set(msg.goal[0], msg.goal[1], (lastFloorZ || 0) + 0.002);
     running(msg.test);
   };
-  ws.onclose = () => setTimeout(connect, 1500);
+  ws.onclose = () => { ws = null; if (shown) setTimeout(connect, 1500); };
 }
 
 function badges(msg) {
@@ -233,6 +235,7 @@ function frame() {
   controls.update();
   fadeWalls();
   renderer.render(scene, camera);
+  tune();
 }
 frame();
 
@@ -315,6 +318,6 @@ function results(list) {
 }
 
 /* the app shell calls these when the page is shown/hidden; tests finishing refresh the list */
-window.simShown = on => { shown = on; if (on) { bg(); resize(); refresh(); if (!ws) connect(); } };
+window.simShown = on => { shown = on; if (!on && ws) ws.close(); if (on) { bg(); resize(); refresh(); if (!ws) connect(); } };
 window.simEvent = topic => { if (topic.startsWith('test.')) refresh(); };
 new MutationObserver(bg).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });

@@ -63,6 +63,7 @@ class Brain:
         self.trainer = Trainer((cfg.get("datalog", {}) or {}).get("dir", "data"))
         from .mapping.mapper import Mapper
         self.mapper = Mapper(cfg, self.link, self.world, self.bus)
+        self.mapper.vision_needed = lambda: self.mode in ("auto", "goto", "learned") or bool(self.tester and self.tester.running)
         from .behaviors.goto import GoToPolicy
         from .rl.skills import Skills
         self.skills = Skills(self.link, self.world, self.mapper)

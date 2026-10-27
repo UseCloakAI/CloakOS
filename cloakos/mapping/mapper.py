@@ -49,6 +49,7 @@ class Mapper:
         self._last_frame = -1
         self._last_sim_t = 0.0
         self._frames = 0
+        self.vision_needed = lambda: True       # the brain says when the sim camera must keep running
         self._saved = time.time()
         self._dirty = False
         self.cam: CameraPose | None = None          # where the camera was for the latest frame
@@ -104,6 +105,8 @@ class Mapper:
             try:
                 if self.enabled and self.link.connected:
                     if self.link.target == "sim" and self.link.sim is not None:
+                        if self.vision_needed():
+                            self.link.sim.touch()
                         await self._from_sim()
                     else:
                         await self._from_robot()

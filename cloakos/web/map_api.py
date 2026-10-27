@@ -35,6 +35,8 @@ def make_map_router(brain: "Brain") -> APIRouter:
     async def live() -> dict[str, Any]:
         out = mp.live()
         sim = brain.link.sim
+        if sim is not None:
+            sim.touch()
         if brain.link.target == "sim" and sim is not None and sim.snapshot:
             out["robot"] = {"pos": sim.snapshot["pos"], "yaw": sim.snapshot["yaw"]}
         elif brain.link.pose:
