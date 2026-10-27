@@ -195,6 +195,7 @@ class Brain:
         return {
             "t": time.time(),
             "connection": self.link.state,
+            "link_hint": self.link.hint,
             "has_control": self.link.has_control,
             "mode": self.mode,
             "behavior": p.current if p else "-",

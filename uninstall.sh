@@ -44,6 +44,7 @@ else
   ACC=""; YEL=""; INK=""; DIM=""; OK=""; RST=""
 fi
 
+tilde() { case "$1" in "$HOME"*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }   # bash 3.2-safe ~/path
 say()  { printf '  %s■%s %s\n' "$ACC" "$RST" "$1"; }
 done_() { printf '    %s%s%s\n' "$OK" "$1" "$RST"; }
 note() { printf '    %s%s%s\n' "$DIM" "$1" "$RST"; }
@@ -75,7 +76,7 @@ if [[ ${#found[@]} -eq 0 && $leftovers -eq 0 ]]; then
   printf '\n'; exit 0
 fi
 
-for h in "${found[@]+"${found[@]}"}"; do note "Found: ${h/#"$HOME"/\~}"; done
+for h in "${found[@]+"${found[@]}"}"; do note "Found: $(tilde "$h")"; done
 wp_managed="" uv_managed=""
 for h in "${found[@]+"${found[@]}"}"; do
   [[ -f "$h/wirepod.managed" ]] && wp_managed=1
@@ -126,7 +127,7 @@ for h in "${found[@]+"${found[@]}"}"; do
   done
   kept_to="$KEEP_DIR"
 done
-[[ -n "$kept_to" ]] && { say "Recordings kept"; done_ "${kept_to/#"$HOME"/\~}"; }
+[[ -n "$kept_to" ]] && { say "Recordings kept"; done_ "$(tilde "$kept_to")"; }
 
 # 5 · WirePod, if CloakOS installed it (a wire-pod you set up yourself is left alone)
 if [[ -n "$wp_managed" && "$OS" == "Darwin" ]]; then
@@ -146,7 +147,7 @@ fi
 # 6 · the install folder(s)
 say "Removing the install folder"
 for h in "${found[@]+"${found[@]}"}"; do
-  is_install "$h" && rm -rf "$h" && done_ "${h/#"$HOME"/\~}"
+  is_install "$h" && rm -rf "$h" && done_ "$(tilde "$h")"
 done
 
 # 7 · uv + the Python it downloaded, if CloakOS installed uv

@@ -89,3 +89,14 @@ async def test_discover_from_wirepod(tmp_path):
     with pytest.raises(LookupError, match="00e2aaaa"):
         await discover({"wirepod": {"url": "http://pod:8080"}, "robot": {"serial": "00e2bbbb"}},
                        cert_dir=tmp_path, transport=httpx.MockTransport(handler))
+
+
+def test_connect_error_hints():
+    from cloakos.connection.robot import hint_for
+
+    grpc_msg = ("failed to connect to all addresses; last error: UNKNOWN: ipv4:192.168.1.67:443: "
+                "Failed to connect to remote host: No route to host")
+    assert hint_for(grpc_msg) == "local_network"
+    assert hint_for("can't reach wire-pod at http://escapepod.local:8080 (...)") == "no_wirepod"
+    assert hint_for("wire-pod has no cert for 003091c9 yet; finish setting the bot up") == "not_paired"
+    assert hint_for("heartbeat lost") is None

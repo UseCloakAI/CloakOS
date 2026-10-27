@@ -45,9 +45,20 @@ function setConn(state) {
   else setConn.t = setTimeout(() => { $('#pair-cta').hidden = false; }, 8000);
 }
 
+const HINTS = {
+  local_network: ['<b>macOS is blocking CloakOS from reaching Vector.</b> System Settings → Privacy &amp; Security → Local Network: turn on CloakOS, Terminal and WirePod, then restart CloakOS.', 'Open settings', 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork'],
+  no_wirepod: ['<b>Can\'t find wire-pod.</b> Make sure WirePod is running (menu bar), on the same network as this Mac.', 'Set up', '/setup'],
+  not_paired: ['<b>wire-pod doesn\'t know this Vector yet.</b> Pair him once and CloakOS picks him up.', 'Pair Vector', '/pair'],
+};
+function renderHint(hint) {
+  const h = HINTS[hint] || ['<b>Vector isn\'t connected.</b> New robot, or not paired with wire-pod yet?', 'Pair Vector', '/pair'];
+  $('#pair-cta-text').innerHTML = h[0]; $('#pair-cta-btn').textContent = h[1]; $('#pair-cta-btn').href = h[2];
+}
+
 function render(s) {
   S = s;
   setConn(s.connection);
+  renderHint(s.link_hint);
   setModeUI(s.mode);
   const lab = page === 'lab' && document.activeElement && document.activeElement.type === 'range';
   DRIVES.forEach(d => {
