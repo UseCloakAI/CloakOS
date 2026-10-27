@@ -93,16 +93,36 @@ wp_lang() {          # macOS locale -> a wire-pod speech language (falls back to
   esac
 }
 
-wp_autosetup() {     # finish wire-pod's first-run setup (speech language) so its web UI doesn't ask
-  local url="http://localhost:8080" lang done_ i
+wp_cfg() {           # wp_cfg <key> : read a field from wire-pod's live config (server.epconfig, pastinitialsetup, ...)
+  curl -fsS -m 5 "http://localhost:8080/api/get_config" 2>/dev/null | "$HOME_DIR/venv/bin/python" -c \
+    'import json,sys; c=json.load(sys.stdin)
+for k in sys.argv[1].split("."): c=(c or {}).get(k)
+print(int(bool(c)))' "$1" 2>/dev/null || echo 0
+}
+
+wp_repair_config() { # setup marked done but no connection mode: WirePod crashes looking for IP-mode certs
+  [[ -f "$WP_CONF_DIR/apiConfig.json" ]] || return 1
+  "$HOME_DIR/venv/bin/python" - "$WP_CONF_DIR/apiConfig.json" "$WP_CONF_DIR/certs/cert.key" <<'PY'
+import json, os, sys
+path, key = sys.argv[1:3]
+c = json.load(open(path))
+server = c.setdefault("server", {})
+if c.get("pastinitialsetup") and not server.get("epconfig") and not os.path.exists(key):
+    server["epconfig"], server["port"] = True, "443"     # escape-pod mode, what wire-pod's own setup picks
+    json.dump(c, open(path, "w"))
+    sys.exit(0)
+sys.exit(1)
+PY
+}
+
+wp_autosetup() {     # finish wire-pod's first-run setup so its web UI never asks: speech language + escape-pod mode
+  local url="http://localhost:8080" lang i
   for i in $(seq 1 120); do curl -fsS -m 2 -o /dev/null "$url/api/is_running" 2>/dev/null && break; sleep 0.5; done
-  done_="$(curl -fsS -m 5 "$url/api/get_config" 2>/dev/null | "$HOME_DIR/venv/bin/python" -c \
-    'import json,sys; print(int(bool(json.load(sys.stdin).get("pastinitialsetup"))))' 2>/dev/null || echo 0)"
-  [[ "$done_" == "1" ]] && return 0
-  lang="$(wp_lang)"
-  for i in $(seq 1 3); do                     # first call may only start the language model download
-    if curl -fsS -m 10 -X POST -H 'Content-Type: application/json' -d "{\"language\":\"$lang\"}" \
-         "$url/api/set_stt_info" 2>/dev/null | grep -q "downloading"; then
+  if [[ "$(wp_cfg pastinitialsetup)" != "1" ]]; then
+    lang="$(wp_lang)"
+    for i in $(seq 1 3); do                   # first call may only start the language model download
+      curl -fsS -m 10 -X POST -H 'Content-Type: application/json' -d "{\"language\":\"$lang\"}" \
+        "$url/api/set_stt_info" 2>/dev/null | grep -q "downloading" || break
       for _ in $(seq 1 600); do               # up to ~5 min for the speech model
         case "$(curl -fsS -m 5 "$url/api/get_download_status" 2>/dev/null)" in
           *success*|*"not downloading"*) break ;;
@@ -110,16 +130,23 @@ wp_autosetup() {     # finish wire-pod's first-run setup (speech language) so it
         esac
         sleep 0.5
       done
-    else
-      return 0
-    fi
-  done
+    done
+  fi
+  # the second half of wire-pod's own setup page: how robots reach it. Escape-pod mode
+  # (escapepod.local, port 443) is what the robot's wire-pod firmware expects.
+  if [[ "$(wp_cfg server.epconfig)" != "1" ]]; then
+    curl -fsS -m 20 -o /dev/null "$url/api-chipper/use_ep" 2>/dev/null || true
+  fi
 }
 
 wp_ensure() {        # installer/updater entry point: make sure a compatible wire-pod is there and running
   local pinned; pinned="$(wp_pinned "$HOME_DIR/app/compat.json")"
   if wp_managed; then
     [[ "$(wp_installed_version)" == "$pinned" ]] || wp_install "$pinned"
+    if wp_repair_config; then                # fixed a half-finished setup: restart the crashed copy
+      echo "repaired wire-pod's setup (escape-pod mode)"
+      wp_quit
+    fi
     wp_running || open -g -a "$WP_APP"
     wp_autosetup
   elif url="$(wp_reachable)"; then

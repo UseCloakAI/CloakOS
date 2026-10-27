@@ -20,7 +20,7 @@ A living-creature brain for an OEM Anki/DDL Vector, part of [Cloak](https://usec
 One command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/install.sh | bash
 ```
 
 That's the only command. It installs into `~/Library/Application Support/CloakOS`:
@@ -36,7 +36,7 @@ What you might still see on a Mac: macOS asking once to allow "local network" ac
 ### Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/uninstall.sh | bash
 ```
 
 Or `cloakos uninstall`. It asks once, then removes everything CloakOS installed:
@@ -56,7 +56,7 @@ Other commands: `cloakos open | stop | status | logs | update | uninstall`.
 
 Upgrading from an older "Cloak Vector" install? It moves to CloakOS by itself on its next update, or when you run the one-liner again. Settings and recordings come along.
 
-To install from a branch: `curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/<branch>/install.sh | CLOAK_REF=<branch> bash`.
+To install from a branch: `curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/<branch>/install.sh | CLOAK_REF=<branch> bash`.
 
 The manual setup below is for development.
 
