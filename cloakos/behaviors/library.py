@@ -33,8 +33,13 @@ class Wander(Behavior):
                 await body.head_angle(5, 6)
                 next_glance = time.time() + random.uniform(5, 10)
                 continue
+            skills = getattr(body, "skills", None)
             if held(w):
                 await body.drive(0, 0, self.name)
+            elif callable(getattr(skills, "has", None)) and skills.has("wander") and not w.cliff:
+                # the trained brain: steers around what's in its map, stays off edges
+                left, right, _ = skills.act("wander")
+                await body.drive(left, right, self.name)
             elif blocked(w):
                 await body.drive(0, 0, self.name)
                 await body.straight(-50, 80)

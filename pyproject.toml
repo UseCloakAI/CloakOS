@@ -39,7 +39,7 @@ cloakos = "cloakos.__main__:main"
 include = ["cloakos*"]
 
 [tool.setuptools.package-data]
-cloakos = ["web/static/*", "web/static/pair/*", "web/static/vendor/*", "vector/proto/*.proto"]
+cloakos = ["web/static/*", "web/static/pair/*", "web/static/vendor/*", "vector/proto/*.proto", "rl/pretrained/*/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

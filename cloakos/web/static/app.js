@@ -7,7 +7,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const DRIVES = ['energy', 'curiosity', 'boredom', 'attachment', 'fear'];
 const ORB = '<span class="bot-dot cloak-orb" aria-hidden="true"><svg viewBox="-52 -52 104 104"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg></span>';
 
-let ws = null, S = null, info = null, sayMode = 'say', page = 'live';
+let ws = null, S = null, info = null, sayMode = 'talk', page = 'live';
 
 /* ── socket ─────────────────────────────────────────────── */
 function connect() {
@@ -162,6 +162,9 @@ function onEvent(m, quiet) {
   else if (t === 'behavior.changed') text = `→ ${d.name.replace('_', ' ')}`;
   else if (t === 'mode.changed') text = `Mode: ${d.mode}`;
   else if (t === 'freeze.changed') text = FREEZE_TEXT(d.on);
+  else if (t === 'command') text = (d.say ? `“${d.say}”` : 'Heard you') + (d.action === 'go_to' ? ` · going to ${d.target}` : d.action !== 'none' ? ` · ${d.action}` : '');
+  else if (t === 'goto.arrived') text = `Got to the ${d.target}`;
+  else if (t === 'goto.failed') text = `Couldn't reach the ${d.target}`;
   else if (t === 'test.finished') text = `Sim test ${d.title}: ${d.passed ? 'pass' : d.status === 'stopped' ? 'stopped' : 'fail'}`;
   else if (t === 'robot.connection' && d.state === 'connected' && d.name) text = `Connected to ${d.name}`;
   else if (t === 'robot.connection') text = d.state === 'connected' ? 'Connected to Vector' : 'Disconnected';
@@ -224,8 +227,8 @@ function togglePlusMenu(e) { e.stopPropagation(); $('#plus-menu').classList.togg
 function setSayMode(m) {
   sayMode = m;
   $$('#plus-menu .plus-item').forEach(b => b.classList.toggle('on', b.dataset.m === m));
-  const chip = $('.say-mode'); chip.dataset.m = m; chip.textContent = m === 'say' ? 'Say it' : 'Talk to it';
-  input.placeholder = m === 'say' ? 'Make Vector say…' : 'Talk to Vector…';
+  const chip = $('.say-mode'); chip.dataset.m = m; chip.textContent = m === 'say' ? 'Say it' : 'Tell it';
+  input.placeholder = m === 'say' ? 'Make Vector say…' : 'Tell Vector what to do… “go to the mug”';
   $('#plus-menu').classList.remove('open'); $('#plus-btn').classList.remove('open');
   input.focus();
 }
@@ -320,7 +323,13 @@ async function loadInfo() {
   if (info.wirepod) $('#wp-link').href = info.wirepod;
   if (info.product) kv('#kv-about', [['Product', info.product.name], ['Version', info.product.version]]);
   $('#emote-row').innerHTML = (info.emotes || []).map(e => `<button class="chip" onclick="sendWS({type:'emote',name:'${e}'})">${esc(e)}</button>`).join('');
-  kv('#kv-voice', [['TTS', info.tts], ...(info.tts_error ? [['TTS error', info.tts_error, 'err']] : []), ['LLM endpoint', info.llm.base_url], ['LLM model', info.llm.model]]);
+  kv('#kv-voice', [['TTS', info.tts], ...(info.tts_error ? [['TTS error', info.tts_error, 'err']] : [])]);
+  const sk = info.skills || {}, ex = t => { const e = (sk[t] || {}).exam || {}; return !sk[t] ? 'not installed (rule-based fallback)' :
+    t === 'goto' ? `trained · exam: reaches ${Math.round((e.success || 0) * 100)}%, ${e.bumps_per_run ?? '?'} bumps/run` :
+    `trained · exam: ${e.cells_per_min ?? '?'} new cells/min, ${e.bumps_per_min ?? '?'} bumps/min`; };
+  const L = info.llm || {};
+  kv('#kv-brain', [['Wander', ex('wander')], ['Go to', ex('goto')],
+    ['LLM', !L.enabled ? 'off' : L.provider === 'cloak' ? `Cloak · ${L.chat_model} (commands) · ${L.model} (lines)` : `${L.base_url} · ${L.model}`]]);
   const trigs = info.anim_triggers || [];
   $('#anim-list').innerHTML = trigs.map(t => `<option value="${esc(t)}">`).join('');
   $('#trig-list').textContent = trigs.length ? trigs.join('\n') : "Connect to load Vector's animation triggers.";
@@ -412,3 +421,19 @@ buildDrives();
 connect();
 if (document.readyState === "complete") startCamera(); else addEventListener("load", startCamera);   // an endless MJPEG would hold the load event open
 loadInfo();
+
+/* live detection boxes on every camera view (the Map page draws its own) */
+(() => {
+  const draw = L => {
+    const [fw, fh] = L.frame_size || [640, 360];
+    const html = (L.dets || []).map(d => {
+      const [x0, y0, x1, y1] = d.box;
+      return `<div class="det-box" style="left:${100 * x0 / fw}%;top:${100 * y0 / fh}%;width:${100 * (x1 - x0) / fw}%;height:${100 * (y1 - y0) / fh}%"><span>${d.label.replace(/[<>&]/g, '')}<i>${Math.round(d.score * 100)}%</i></span></div>`;
+    }).join('');
+    document.querySelectorAll('[data-dets]').forEach(el => { el.innerHTML = html; });
+  };
+  setInterval(async () => {
+    if (document.hidden || !document.querySelector('[data-dets]')) return;
+    try { draw(await (await fetch('/api/map/live')).json()); } catch { /* offline */ }
+  }, 400);
+})();

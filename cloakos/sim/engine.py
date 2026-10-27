@@ -374,9 +374,14 @@ class Sim:
         if self.cliff_guard and self._n % 5 == 0:     # every 10 ms, like the firmware's sensor loop
             R = d.xmat[self._bid].reshape(3, 3)
             down = -R[:, 2]
-            self._edge = R[2, 2] > 0.7 and any(self._ray(m, d, self._sites[k], down) > 0.02 for k in ("cliff_fl", "cliff_fr"))
-        if self._edge and self._hold_pos is None:
-            self._wheel_cmd = np.minimum(self._wheel_cmd, 0.0)    # forward blocked, reversing allowed
+            up = R[2, 2] > 0.7
+            self._edge = up and any(self._ray(m, d, self._sites[k], down) > 0.02 for k in ("cliff_fl", "cliff_fr"))
+            self._edge_back = up and any(self._ray(m, d, self._sites[k], down) > 0.02 for k in ("cliff_bl", "cliff_br"))
+        if self._hold_pos is None:
+            if self._edge:
+                self._wheel_cmd = np.minimum(self._wheel_cmd, 0.0)    # forward blocked, reversing allowed
+            if getattr(self, "_edge_back", False):
+                self._wheel_cmd = np.maximum(self._wheel_cmd, 0.0)    # the rear sensors stop it backing off
         l, r = self._wheel_cmd / 1000.0 / WHEEL_R
         for k in WHEELS:
             d.ctrl[self._wheel_act[k]] = l if k[0] == "l" else r

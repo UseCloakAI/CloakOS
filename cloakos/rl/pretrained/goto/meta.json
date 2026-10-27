@@ -1,0 +1,12 @@
+{
+ "task": "goto",
+ "sensors": "map",
+ "obs_size": 20,
+ "control_hz": 10.0,
+ "max_speed": 150.0,
+ "n_rays": 11,
+ "steps": 500000,
+ "envs": 2,
+ "created": 1793119103.5773957,
+ "algo": "PPO"
+}

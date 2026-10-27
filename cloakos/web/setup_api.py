@@ -159,7 +159,7 @@ async def autoconfigure(brain: "Brain") -> dict[str, Any]:
         if bot is None and len(ready) > 1:
             return {"state": "pick", "pod": pod["url"], "bots": ready}
         bot = bot or ready[0]
-        model = None if (cfg.get("llm", {}) or {}).get("base_url") else await probe_ollama(http)
+        model = None      # Cloak's API is the default LLM now; a local one is opt-in in Settings / .env
 
     updates = {"WIREPOD_URL": pod["url"], "VECTOR_SERIAL": bot["serial"], "CLOAK_SETUP_DONE": "1"}
     cfg.set_path("wirepod.url", pod["url"])

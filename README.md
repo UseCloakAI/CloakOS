@@ -15,6 +15,14 @@ A living-creature brain for an OEM Anki/DDL Vector, part of [Cloak](https://usec
                                     Web dashboard (Cloak chat UI) ◀──WebSocket──▶ modes · teleop · say
 ```
 
+## How Vector's brain works (the short version)
+- **It wanders.** In Auto mode, Vector roams around and steers around things with a trained driving brain (a small neural network trained in the simulator). Its feelings (curiosity, energy, fear...) decide when it wanders, naps, greets you or sulks.
+- **It remembers.** As it moves, its camera builds a 3D map of the room and pins the things it recognises ("mug", "shoe") to it. The **Map** page shows what it knows, FSD-style.
+- **It does what you tell it.** Type (or say) "go to the mug". Clear commands act instantly; anything else goes to Cloak's AI (`logos`), which decides what to say and do. Vector drives to the mug around whatever's in the way, then goes back to wandering.
+- **Stop it any time:** triple-tap its back button, or the ❄ button.
+
+The driving brains ship pre-trained and pass an exam on rooms they never trained in (see `cloakos/rl/pretrained/*/exam.json`). You don't need to train anything. **Advanced** (Simulator, Training) is there if you want to.
+
 ## Install (macOS)
 
 One command:
@@ -280,3 +288,14 @@ Protos: `cloakos/vector/proto/` holds Anki's Vector external-interface protos (A
 ## Notes
 - Vector's external interface doesn't stream its microphone, so loud sounds come from the PC mic (`senses.ears.enabled: true`, `pip install -e ".[ears]"`). The "Hey Vector" wake word arrives on the event stream as a sense event.
 - In Auto and Teleop, Cloak holds behavior control at `robot.control_priority: default`. Vector's own safety reactions, like the tuck when it's falling, still win. `override` disables those too, so be careful.
+
+## Nous v0.0.1
+
+The mind of CloakOS Vector Edition. First shipped build.
+
+- **Kinesis** (movement): trained in the simulator, exam-scored on rooms it never saw.
+  - `goto` passes: 95% reach the target, 0.15 bumps per run, no falls.
+  - `wander` is a first pass: no falls, 74 cells per minute, but 3.2 bumps per minute (target 1.5).
+- **Opsis** (vision): live 3D map, object memory, depth, detector.
+- **Language**: Cloak models (pneuma, logos, kairos, linus) at api.usecloak.org.
+- Table edges: sensor reflex only on the real robot for now.

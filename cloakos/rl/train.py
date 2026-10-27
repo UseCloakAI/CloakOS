@@ -73,7 +73,8 @@ def main(argv: list[str] | None = None) -> None:
                 ep = info.get("episode")
                 if ep:
                     self.eps.append({"r": ep["r"], "l": ep["l"], "success": bool(info.get("success")),
-                                     "fell": bool(info.get("fell")), "cells": info.get("cells")})
+                                     "fell": bool(info.get("fell")), "cells": info.get("cells"),
+                                     "bumps": info.get("bumps", 0)})
             if (out / "STOP").exists():
                 return False
             return True
@@ -88,6 +89,7 @@ def main(argv: list[str] | None = None) -> None:
                 row["length"] = round(float(np.mean([e["l"] for e in recent])), 1)
                 row["success"] = round(float(np.mean([e["success"] for e in recent])), 3)
                 row["fell"] = round(float(np.mean([e["fell"] for e in recent])), 3)
+                row["bumps"] = round(float(np.mean([e["bumps"] for e in recent])), 2)
             progress.write(json.dumps(row) + "\n")
             progress.flush()
             if time.time() - self.last_save > 60:

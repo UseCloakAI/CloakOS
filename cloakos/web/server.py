@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from ..bus import Event
-from .. import FULL_NAME, __version__
+from .. import FULL_NAME, NOUS, __version__
 from ..drives import DRIVES
 from .setup_api import autoconfigure_loop, env_path, make_router, robot_ota_url, write_env
 from .map_api import make_map_router
@@ -97,12 +97,15 @@ def create_app(brain: "Brain") -> FastAPI:
         c = brain.cfg
         bot = brain.link.client.bot if brain.link.client else None
         return JSONResponse({
-            "product": {"name": FULL_NAME, "version": __version__},
+            "product": {"name": FULL_NAME, "version": __version__, "nous": NOUS},
             "wirepod": (c.get("wirepod", {}) or {}).get("url"),
             "robot": {"name": bot.name if bot else None, "serial": bot.serial if bot else None,
                       "host": bot.host if bot else None},
             "emotes": brain.body.emotes.names if brain.body.emotes else [],
-            "llm": {"base_url": (c.get("llm", {}) or {}).get("base_url"), "model": (c.get("llm", {}) or {}).get("model")},
+            "llm": {"base_url": brain.voice.llm.base_url, "model": brain.voice.llm.model,
+                    "provider": brain.voice.llm.provider, "chat_model": brain.voice.llm.chat_model,
+                    "enabled": brain.voice.llm.enabled},
+            "skills": brain.skills.summary(),
             "tts": brain.voice.tts.id if brain.voice.tts else None,
             "tts_error": brain.voice.tts_error,
             "anim_triggers": brain.link.anim_triggers,
@@ -198,7 +201,7 @@ def create_app(brain: "Brain") -> FastAPI:
             brain.bus.emit(f"sense.{msg['event']}", simulated=True)
 
     async def _talk(text: str) -> None:
-        reply = await brain.voice.reply(text)
+        reply = (await brain.command(text)).get("say")
         if not reply:
             brain.bus.emit("voice.failed", text=text, reason="no reply from LLM" if brain.voice.llm.enabled else "LLM not configured")
 
