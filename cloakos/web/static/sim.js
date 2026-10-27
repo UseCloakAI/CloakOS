@@ -11,6 +11,7 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);   // MuJoCo is z-up
 /* ── three.js scene ─────────────────────────────────────── */
 const canvas = $('#sim-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });   // never let the canvas size its own box
 renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -32,6 +33,18 @@ scene.add(sun);
 let bodies = [], version = -1, robotId = 1, follow = true, shown = false, screenTex = null;
 const world = new THREE.Group();
 scene.add(world);
+const goalMark = new THREE.Mesh(new THREE.RingGeometry(0.035, 0.05, 40), new THREE.MeshBasicMaterial({ color: 0x22c55e, side: THREE.DoubleSide }));
+goalMark.visible = false;
+scene.add(goalMark);
+canvas.addEventListener('dblclick', e => {        // double-click the floor: set a goal for goto policies
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hit = new THREE.Vector3();
+  if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lastFloorZ || 0)), hit)) post('/api/rl/goal', { x: hit.x, y: hit.y });
+});
+let lastFloorZ = 0;
 
 function bg() {
   const css = getComputedStyle(document.documentElement);
@@ -53,10 +66,75 @@ function checker(rgba, size) {
   return t;
 }
 
+const texCache = new Map(), meshCache = new Map();
+let walls = [];
+/* walls between the camera and the room fade out, so you can always see in */
+function fadeWalls() {
+  for (const w of walls) {
+    const out = w.position.clone().setZ(0).normalize();
+    const toCam = camera.position.clone().sub(w.position).setZ(0);
+    const target = toCam.dot(out) > 0 ? 0.08 : 1;
+    w.material.opacity += (target - w.material.opacity) * 0.2;
+    w.material.depthWrite = w.material.opacity > 0.9;
+  }
+}
+function texture(g) {
+  const id = g.mat && g.mat.tex;
+  if (id == null || id < 0) return null;
+  const key = `${version}:${id}`;
+  let base = texCache.get(key);
+  if (!base) {
+    base = new THREE.TextureLoader().load(`/api/sim/texture/${id}?v=${version}`);
+    base.colorSpace = THREE.SRGBColorSpace;
+    base.wrapS = base.wrapT = THREE.RepeatWrapping;
+    base.anisotropy = 8;
+    texCache.set(key, base);
+  }
+  if (g.type === 'mesh') return base;
+  // primitives: MuJoCo "texuniform" repeats per metre; approximate with the geom's size
+  const t = base.clone();
+  const [rx, ry] = g.mat.repeat, [a, b] = g.size;
+  t.repeat.set(g.mat.uniform ? Math.max(1, 2 * (a || 3) * rx) : rx, g.mat.uniform ? Math.max(1, 2 * (b || 3) * ry) : ry);
+  t.needsUpdate = true;
+  return t;
+}
+function meshGeometry(id) {
+  const key = `${version}:${id}`;
+  if (!meshCache.has(key)) meshCache.set(key, fetch(`/api/sim/mesh/${id}?v=${version}`).then(r => r.arrayBuffer()).then(buf => {
+    const [n, nuv] = new Uint32Array(buf, 0, 2);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buf, 8, n * 3), 3));
+    const nrm = new Float32Array(buf, 8 + n * 12, n * 3);
+    if (nrm.some(v => v !== 0)) geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3)); else geo.computeVertexNormals();
+    if (nuv) geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(buf, 8 + n * 24, nuv * 2), 2));
+    return geo;
+  }));
+  return meshCache.get(key);
+}
+function material(g) {
+  const color = new THREE.Color().setRGB(g.rgba[0], g.rgba[1], g.rgba[2], THREE.SRGBColorSpace);
+  const m = g.mat || {};
+  const map = texture(g);
+  return new THREE.MeshStandardMaterial({
+    color: map ? 0xffffff : color, map, transparent: g.rgba[3] < 1, opacity: g.rgba[3],
+    roughness: 1 - 0.85 * Math.min(1, (m.shininess ?? 0.3) * (m.specular ?? 0.5) * 2), metalness: 0.02,
+    emissive: m.emission ? color : 0x000000, emissiveIntensity: m.emission || 0,
+  });
+}
+
 function mesh(g) {
   const [a, b, c] = g.size;
   let geo;
   switch (g.type) {
+    case 'ellipsoid': geo = new THREE.SphereGeometry(1, 24, 16); geo.scale(a, b, c); break;
+    case 'mesh': {
+      const m = new THREE.Mesh(new THREE.BufferGeometry(), material(g));
+      meshGeometry(g.mesh).then(geo => { m.geometry = geo; });
+      m.position.set(...g.pos);
+      m.quaternion.set(g.quat[1], g.quat[2], g.quat[3], g.quat[0]);
+      m.castShadow = m.receiveShadow = true;
+      return m;
+    }
     case 'plane': geo = new THREE.PlaneGeometry(2 * (a || 3), 2 * (b || 3)); break;
     case 'box': geo = new THREE.BoxGeometry(2 * a, 2 * b, 2 * c); break;
     case 'sphere': geo = new THREE.SphereGeometry(a, 24, 16); break;
@@ -64,10 +142,9 @@ function mesh(g) {
     case 'capsule': geo = new THREE.CapsuleGeometry(a, 2 * b, 6, 16); geo.rotateX(Math.PI / 2); break;
     default: return null;
   }
-  const color = new THREE.Color().setRGB(g.rgba[0], g.rgba[1], g.rgba[2], THREE.SRGBColorSpace);
-  const mat = g.type === 'plane'
+  const mat = g.type === 'plane' && !(g.mat && g.mat.tex >= 0)
     ? new THREE.MeshStandardMaterial({ map: checker(g.rgba, [a || 3, b || 3]), roughness: 0.9 })
-    : new THREE.MeshStandardMaterial({ color, roughness: 0.65, metalness: 0.05, transparent: g.rgba[3] < 1, opacity: g.rgba[3] });
+    : material(g);
   let m = new THREE.Mesh(geo, mat);
   if (g.name === 'screen') {   // Vector's face: show the eyes CloakOS is drawing
     screenTex = screenTex || new THREE.Texture();
@@ -80,6 +157,7 @@ function mesh(g) {
   }
   m.position.set(...g.pos);
   m.quaternion.set(g.quat[1], g.quat[2], g.quat[3], g.quat[0]);
+  if ((g.name || '').startsWith('wall')) { mat.transparent = true; walls.push(m); }
   m.castShadow = g.type !== 'plane' && !(g.name || '').startsWith('wall');
   m.receiveShadow = true;
   return m;
@@ -89,9 +167,11 @@ async function loadScene() {
   const sc = await (await fetch('/api/sim/scene')).json();
   world.clear();
   bodies = [];
+  walls = [];
   for (let i = 0; i < (sc.nbody || 0); i++) { const grp = new THREE.Group(); bodies.push(grp); world.add(grp); }
   for (const g of sc.geoms || []) { const m = mesh(g); if (m && bodies[g.body]) bodies[g.body].add(m); }
   robotId = sc.robot || 1;
+  lastFloorZ = sc.world === 'table' ? 0.38 : 0;
   version = sc.version;
   $('#sim-world').value = sc.world || 'room';
   $('#sim-seed').placeholder = sc.seed ? `seed ${sc.seed}` : 'seed';
@@ -112,6 +192,8 @@ function connect() {
       bodies[i].quaternion.set(p[o + 4], p[o + 5], p[o + 6], p[o + 3]);
     }
     badges(msg);
+    goalMark.visible = !!msg.goal;
+    if (msg.goal) goalMark.position.set(msg.goal[0], msg.goal[1], (lastFloorZ || 0) + 0.002);
     running(msg.test);
   };
   ws.onclose = () => setTimeout(connect, 1500);
@@ -131,7 +213,7 @@ function badges(msg) {
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
   if (!r.width) return;
-  renderer.setSize(r.width, r.height, false);
+  renderer.setSize(Math.min(r.width, 4096), Math.min(r.height, 4096), false);
   camera.aspect = r.width / r.height;
   camera.updateProjectionMatrix();
 }
@@ -149,6 +231,7 @@ function frame() {
     camera.position.add(d);
   }
   controls.update();
+  fadeWalls();
   renderer.render(scene, camera);
 }
 frame();

@@ -39,6 +39,9 @@ sim:
   camera_noise: 4.0     # sensor noise (0-255 scale)
   jpeg_quality: 40      # Vector's feed is heavily compressed
   cliff_guard: true     # firmware-style stop at front cliffs, like the real robot at default priority
+  assets: true          # photo-scanned objects + realistic materials (downloaded on demand, cached)
+  asset_dir: data/sim_assets
+  download: true        # false = only use objects already in the cache
 
 # ── drives ─────────────────────────────────────────────
 # Each drive relaxes toward `baseline` with time constant `tau` (s).

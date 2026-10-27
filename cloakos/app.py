@@ -27,7 +27,7 @@ from .world import World
 
 log = logging.getLogger(__name__)
 
-MODES = ("auto", "teleop", "idle")
+MODES = ("auto", "teleop", "idle", "learned")
 # sense events that count as "something happened" for boredom
 NON_STIMULI = {"face_lost", "put_down"}
 
@@ -57,6 +57,12 @@ class Brain:
             "auto": RulePolicy(cfg, self.body, self.bus, self.world, self.drives.values),
             "teleop": TeleopPolicy(cfg, self.body),
         }
+        from .rl.manager import Trainer
+        from .rl.policy import LearnedPolicy
+        self.policies["learned"] = LearnedPolicy(self.body, self.link)
+        self.trainer = Trainer((cfg.get("datalog", {}) or {}).get("dir", "data"))
+        from .mapping.mapper import Mapper
+        self.mapper = Mapper(cfg, self.link, self.world, self.bus)
         self.mode = "idle"
         self.policy: Policy | None = None
         self._auto_rec = False
@@ -72,6 +78,10 @@ class Brain:
         self.bus.on("raw.button_press", self._on_button)
         self.bus.on("sense.*", self._on_sense)
         self.bus.on("*", self._collect)
+
+    @property
+    def learned(self):
+        return self.policies["learned"]
 
     @property
     def teleop(self) -> TeleopPolicy:
@@ -257,6 +267,7 @@ class Brain:
             asyncio.create_task(self._tick_loop(), name="tick"),
             asyncio.create_task(self._eye_loop(), name="eyes"),
             asyncio.create_task(self.voice.start(), name="voice"),
+            asyncio.create_task(self.mapper.run(), name="mapper"),
         ]
         if web:
             from .web.server import serve
@@ -285,6 +296,7 @@ class Brain:
                 pass
         self.recorder.stop()
         self.ears.stop()
+        await asyncio.to_thread(self.mapper.save)
         await self.link.stop()
         link_task = next((t for t in tasks if t.get_name() == "link"), None)
         for t in tasks:

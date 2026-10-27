@@ -13,7 +13,7 @@ from cloakos.datalog import Recorder  # noqa: E402
 from cloakos.sim import rooms  # noqa: E402
 from cloakos.sim.engine import Sim  # noqa: E402
 
-NO_CAM = {"sim": {"camera": False}}
+NO_CAM = {"sim": {"camera": False, "assets": False}}
 
 
 def run_for(sim: Sim, seconds: float) -> None:
@@ -92,7 +92,7 @@ async def test_brain_on_sim_with_freeze(tmp_path):
     cfg = Config(load_config("config.yaml"))
     cfg["datalog"]["dir"] = str(tmp_path)
     cfg["voice"]["enabled"] = False
-    cfg["sim"].update(enabled=True, camera=False, world="empty", seed=5)
+    cfg["sim"].update(enabled=True, camera=False, assets=False, world="empty", seed=5)
     cfg["robot"]["heartbeat_s"] = 0.2
     brain = Brain(cfg)
     task = asyncio.create_task(brain.run(mode="teleop", web=False))

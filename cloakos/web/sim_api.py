@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Body, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Response, WebSocket, WebSocketDisconnect
 
 from ..sim.rooms import WORLDS
 from .setup_api import env_path, write_env
@@ -69,6 +69,18 @@ def make_sim_router(brain: "Brain") -> APIRouter:
         tester().stop()
         return {"ok": True}
 
+    @r.get("/mesh/{mesh}")
+    async def mesh(mesh: int) -> Response:
+        sim = brain.link.sim
+        data = await asyncio.to_thread(sim.mesh_data, mesh) if sim else None
+        return Response(data, media_type="application/octet-stream") if data else Response(status_code=404)
+
+    @r.get("/texture/{tex}")
+    async def texture(tex: int) -> Response:
+        sim = brain.link.sim
+        data = await asyncio.to_thread(sim.texture_png, tex) if sim else None
+        return Response(data, media_type="image/png") if data else Response(status_code=404)
+
     @r.get("/scene")
     async def scene() -> dict[str, Any]:
         sim = brain.link.sim
@@ -86,7 +98,7 @@ async def sim_ws(brain: "Brain", ws: WebSocket) -> None:
             t = brain.tester
             if sim is not None and sim.scene_info is not None:
                 snap = sim.snapshot or {}
-                msg = {"v": sim.version, "p": sim.poses(), "frozen": brain.frozen,
+                msg = {"v": sim.version, "p": sim.poses(), "frozen": brain.frozen, "goal": brain.learned.goal,
                        "s": {k: snap.get(k) for k in ("upright", "pitch", "speed", "picked_up", "cliff", "bump")},
                        "test": t.running if t else None}
                 await ws.send_text(json.dumps(msg))

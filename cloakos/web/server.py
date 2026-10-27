@@ -24,6 +24,8 @@ from ..bus import Event
 from .. import FULL_NAME, __version__
 from ..drives import DRIVES
 from .setup_api import autoconfigure_loop, env_path, make_router, robot_ota_url, write_env
+from .map_api import make_map_router
+from .rl_api import make_rl_router
 from .sim_api import make_sim_router, sim_ws
 
 if TYPE_CHECKING:
@@ -38,6 +40,15 @@ SIM_EVENTS = ("face_seen", "touched", "picked_up", "put_down", "cliff", "loud_so
 
 def create_app(brain: "Brain") -> FastAPI:
     app = FastAPI(title=FULL_NAME, docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def revalidate(request: Request, call_next):
+        # the UI changes with every update: always revalidate (cheap 304s via ETag), never serve stale files
+        resp = await call_next(request)
+        path = request.url.path
+        if path == "/" or path.startswith("/static/") or path in ("/setup", "/pair"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
     clients: set[WebSocket] = set()
     history: list[dict[str, Any]] = []
 
@@ -62,6 +73,8 @@ def create_app(brain: "Brain") -> FastAPI:
 
     app.include_router(make_router(brain))
     app.include_router(make_sim_router(brain))
+    app.include_router(make_rl_router(brain))
+    app.include_router(make_map_router(brain))
 
     @app.get("/")
     async def index() -> FileResponse:

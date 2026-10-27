@@ -16,7 +16,7 @@
 #
 # Env knobs: CLOAK_REF (branch/tag/sha, default main) · CLOAK_CHANNEL (what auto-update follows)
 #            CLOAK_SOURCE (local checkout, for dev) · CLOAK_HOME (install dir)
-#            CLOAK_NO_OPEN=1 (don't start/open at the end) · CLOAK_WIREPOD=skip
+#            CLOAK_NO_OPEN=1 (don't start/open at the end) · CLOAK_WIREPOD=skip · CLOAK_EXTRAS (default kokoro,rl,ml)
 set -euo pipefail
 
 REPO="UseCloakAI/CloakOS"
@@ -123,7 +123,12 @@ get_app() {
 python_env() {
   local uv; uv="$(uv_bin)"
   "$uv" venv --quiet --allow-existing --python 3.12 "$HOME_DIR/venv"
-  "$uv" pip install --quiet --python "$HOME_DIR/venv/bin/python" "$HOME_DIR/app[kokoro]"
+  # AI extras: rl = training in the simulator, ml = camera depth + object detection for the 3D map
+  local extras="${CLOAK_EXTRAS:-kokoro,rl,ml}"
+  if ! "$uv" pip install --quiet --python "$HOME_DIR/venv/bin/python" "$HOME_DIR/app[$extras]"; then
+    echo "    (couldn't install the AI extras; continuing with the basics)"
+    "$uv" pip install --quiet --python "$HOME_DIR/venv/bin/python" "$HOME_DIR/app[kokoro]"
+  fi
   "$uv" pip uninstall --quiet --python "$HOME_DIR/venv/bin/python" cloak-vector 2>/dev/null || true   # pre-CloakOS name
 }
 

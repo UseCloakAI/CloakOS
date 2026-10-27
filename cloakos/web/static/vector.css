@@ -68,6 +68,7 @@
 .mode-swatch{width:8px;height:8px;border:1.5px solid var(--ink);background:var(--acc);flex-shrink:0}
 .mode-swatch[data-mode="teleop"]{background:var(--yel)}
 .mode-swatch[data-mode="idle"]{background:var(--surf)}
+.mode-swatch[data-mode="learned"]{background:var(--grn)}
 
 /* connection pill: the live dot is green only while connected */
 .status-pill .live-dot.off{background:var(--ink);opacity:.3;animation:none}
@@ -263,3 +264,13 @@ body.is-frozen .live-dot{background:#3B82F6!important}
   .sim-side{overflow:visible}
   .sim-world .sim-seed{width:64px}
 }
+
+/* training */
+.rl-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:10px 0}
+.rl-form label{display:flex;flex-direction:column;gap:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.rl-form .chip{height:30px}
+.rl-chart-wrap{border:var(--bd);background:var(--surf);box-shadow:var(--shsm);padding:8px;margin:12px 0}
+#rl-chart{width:100%;height:220px;display:block}
+.rl-chart-legend{font-size:11px;font-weight:700;display:flex;gap:12px;align-items:center}
+.sc-card.sel{outline:2px solid var(--acc);outline-offset:-2px}
+.err{color:var(--acc)}
