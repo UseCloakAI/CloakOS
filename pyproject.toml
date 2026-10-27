@@ -20,6 +20,7 @@ dependencies = [
   "pillow>=10",
   "scipy>=1.11",
   "mujoco>=3.2",
+  "opencv-python-headless>=4.8",
 ]
 
 [project.optional-dependencies]
