@@ -85,7 +85,7 @@ senses:
 # Cloak's own face: square rust eyes with a hard shadow, synthesized chirps, motion emotes.
 expression:
   eyes: true
-  eye_fps: 20           # smooth: the eyes tween every frame
+  eye_fps: 10           # frames sent to Vector per second (max 12: more crashes its display, error 8xx)
   eye_color: "#FFFFFF"
   eye_glow: true
   sfx: true             # reactive sound effects (picked up, petted, edges, found something, got there...)

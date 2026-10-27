@@ -21,36 +21,54 @@ class Wander(Behavior):
         return 0.45 * d["curiosity"] + 0.45 * d["energy"] - 0.25 * d["boredom"]
 
     async def run(self, body: Body, w: World, d: dict):
-        await body.head_angle(5)
-        steer = 0.0
-        next_glance = time.time() + random.uniform(3, 7)
+        """Like an animal exploring: pick a way, roll there smoothly for a few seconds, stop and
+        look around, sometimes sit a while. Never a new random speed every tick."""
+        await body.head_angle(5, 4)
         while True:
-            if time.time() > next_glance and not held(w):
-                # look up now and then: faces are above a floor robot's eye line
-                await body.drive(0, 0, self.name)
-                await body.head_angle(random.uniform(25, 40), 6)
-                await sleep(1.2)
-                await body.head_angle(5, 6)
-                next_glance = time.time() + random.uniform(5, 10)
-                continue
-            skills = getattr(body, "skills", None)
             if held(w):
                 await body.drive(0, 0, self.name)
-            elif callable(getattr(skills, "has", None)) and skills.has("wander") and not w.cliff:
-                # the trained brain: steers around what's in its map, stays off edges
-                left, right, _ = skills.act("wander")
-                await body.drive(left, right, self.name)
-            elif blocked(w):
+                await sleep(0.3)
+                continue
+            # 1. turn to a new heading, unhurried
+            await body.turn(random.choice((-1, 1)) * random.uniform(25, 120), random.uniform(50, 80))
+            # 2. one leg: steady speed, gently drifting curve
+            await self._leg(body, w, d, random.uniform(2.0, 5.5))
+            # 3. stop and take it in
+            await body.drive(0, 0, self.name)
+            r = random.random()
+            if r < 0.35:                                   # glance up: faces are above a floor robot's eye line
+                await body.head_angle(random.uniform(25, 40), 5)
+                await sleep(random.uniform(0.8, 1.6))
+                await body.head_angle(5, 5)
+            elif r < 0.6:                                  # look side to side
+                for a in (random.uniform(15, 35), -random.uniform(15, 35)):
+                    await body.turn(a, 45)
+                    await sleep(random.uniform(0.3, 0.7))
+            rest = random.uniform(0.6, 2.0) + (random.uniform(2, 5) if d.get("energy", 1) < 0.35 else 0.0)
+            await sleep(rest)
+
+    async def _leg(self, body: Body, w: World, d: dict, seconds: float) -> None:
+        speed = random.uniform(55, 85) * (0.8 + 0.4 * d.get("energy", 0.5))
+        curve, curve_goal = 0.0, random.uniform(-0.25, 0.25)
+        skills = getattr(body, "skills", None)
+        trained = callable(getattr(skills, "has", None)) and skills.has("wander")
+        end = time.time() + seconds
+        while time.time() < end:
+            if held(w):
+                break
+            if blocked(w) or w.cliff:
                 await body.drive(0, 0, self.name)
-                await body.straight(-50, 80)
-                await body.turn(random.choice((-1, 1)) * random.uniform(70, 150))
+                await body.straight(-40, 70)
+                await body.turn(random.choice((-1, 1)) * random.uniform(80, 140), 70)
+                return
+            if trained:                                    # the trained brain steers around what it has mapped
+                left, right, _ = skills.act("wander")
             else:
-                speed = 40 + 60 * random.random()
-                steer = max(-1.0, min(1.0, steer + random.uniform(-0.25, 0.25)))
-                await body.drive(speed * (1 + 0.4 * steer), speed * (1 - 0.4 * steer), self.name)
-                if random.random() < 0.01:
-                    await body.drive(0, 0, self.name)
-                    await body.emote("curious")
+                curve += (curve_goal - curve) * 0.08       # curves ease in and out
+                if random.random() < 0.03:
+                    curve_goal = random.uniform(-0.3, 0.3)
+                left, right = speed * (1 + curve), speed * (1 - curve)
+            await body.drive(left, right, self.name)
             await sleep(0.1)
 
 
@@ -65,8 +83,8 @@ class LookAround(Behavior):
         while True:
             await body.head_angle(random.uniform(-5, 40))
             if not held(w):
-                await body.turn(random.uniform(-70, 70), 60)
-            await sleep(random.uniform(1.0, 2.5))
+                await body.turn(random.uniform(-70, 70), 50)
+            await sleep(random.uniform(1.5, 3.5))           # take it in before looking elsewhere
             if random.random() < 0.25:
                 await body.emote("curious")
 

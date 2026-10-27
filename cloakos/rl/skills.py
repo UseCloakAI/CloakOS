@@ -36,9 +36,11 @@ class Skill:
         self.model = NumpyPolicy(folder / "policy.npz")
         self.exam = json.loads((folder / "exam.json").read_text()) if (folder / "exam.json").exists() else None
         self.last_action = np.zeros(2, np.float32)
+        self.smooth: np.ndarray | None = None
 
     def reset(self) -> None:
         self.last_action = np.zeros(2, np.float32)
+        self.smooth = None
 
 
 class Skills:
@@ -56,9 +58,13 @@ class Skills:
             if d.is_dir() and (d / "policy.npz").exists():
                 try:
                     s = Skill(d)
-                    self.skills[s.spec.task] = s
                 except Exception as e:
                     log.warning("skill %s didn't load: %s", d.name, e)
+                    continue
+                if not (s.exam or {}).get("passed"):           # only skills that passed their exam drive the robot
+                    log.info("skill %s skipped: it hasn't passed its exam yet", d.name)
+                    continue
+                self.skills[s.spec.task] = s
         if self.skills:
             log.info("trained skills: %s", ", ".join(self.skills))
 
@@ -100,10 +106,12 @@ class Skills:
         a = np.clip(np.asarray(a, np.float32), -1, 1)
         sk.last_action = a[:2]
         a = reflex(sk.spec, s, a)
+        # smooth what reaches the wheels: trained policies flick between choices every tick
+        sk.smooth = a[:2] if sk.smooth is None or s.get("cliff") else sk.smooth + 0.35 * (a[:2] - sk.smooth)
         info: dict[str, Any] = {}
         if goal is not None:
             info["dist"] = math.dist(s["pos"][:2], goal)
-        return float(a[0]) * sk.spec.max_speed, float(a[1]) * sk.spec.max_speed, info
+        return float(sk.smooth[0]) * sk.spec.max_speed, float(sk.smooth[1]) * sk.spec.max_speed, info
 
     def summary(self) -> dict:
         return {t: {"name": s.name, "exam": {k: v for k, v in (s.exam or {}).items() if k not in ("runs",)}}
