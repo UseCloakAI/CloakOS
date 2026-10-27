@@ -129,3 +129,20 @@ async def test_brain_on_sim_with_freeze(tmp_path):
     brain.request_stop()
     await asyncio.wait_for(task, 10)
     sim.stop()
+
+
+def test_camera_thread_falls_back_to_physics_thread(monkeypatch):
+    import mujoco
+    from cloakos.sim.engine import Sim
+
+    sim = Sim({"sim": {"assets": False}})
+    sim.load("empty", 1)
+    sim._separate_render = True
+    sim.touch(10)
+
+    def broken(*a, **k):
+        raise RuntimeError("no GL context on this thread")
+    monkeypatch.setattr(mujoco, "Renderer", broken)
+    sim._render_once({"thread": True})
+    assert sim._separate_render is False and sim.camera_on        # still on, now via the physics thread
+    assert "no GL context" in sim.render_error

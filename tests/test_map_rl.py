@@ -57,7 +57,9 @@ def test_mapper_remembers_and_merges(tmp_path):
     b = mp.remember("cup", np.array([1.1, 1.0, 0.0]), 0.8, "camera")
     mp.remember("shoe", np.array([-1.0, 0.0, 0.0]), 0.7, "camera")
     assert a is b and a["seen"] == 2 and len(mp.objects) == 2
-    assert mp.find("cup")["id"] == a["id"] and mp.find("dragon") is None
+    assert mp.find("cup") is None                     # two glimpses aren't enough yet
+    mp.remember("cup", np.array([1.05, 1.0, 0.0]), 0.8, "camera")
+    assert mp.find("cup")["id"] == a["id"] and mp.find("dragon") is None and mp.find("shoe") is None
     mp.save()
     mp2 = Mapper({"datalog": {"dir": str(tmp_path)}}, Link(), World(), Bus())
     mp2._use("test", (0, 0))
@@ -76,7 +78,7 @@ def test_sim_depth_maps_the_room(tmp_path):
         r = mujoco.Renderer(sim._m, 90, 160)
     except Exception:
         pytest.skip("no OpenGL here")
-    sim._capture_depth(r)
+    sim._capture_depth(r, sim._d, sim._m, sim.scene_info)
     f = sim.depth_frame
     assert f["depth"].shape == (90, 160) and np.isfinite(f["depth"]).all()
     mp = Mapper.__new__(Mapper)

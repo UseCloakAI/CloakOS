@@ -93,7 +93,9 @@ class DepthModel:
 
     NAME = "depth-anything/Depth-Anything-V2-Small-hf"
 
-    def __init__(self) -> None:
+    def __init__(self, name: str | None = None) -> None:
+        self.name = name or self.NAME
+        self.is_metric = "metric" in self.name.lower()     # outputs metres directly (no floor fit needed)
         self.pipe = None
         self.error: str | None = None
 
@@ -106,7 +108,7 @@ class DepthModel:
         from transformers import pipeline
 
         dev = "mps" if torch.backends.mps.is_available() else "cpu"
-        self.pipe = pipeline("depth-estimation", model=self.NAME, device=dev)
+        self.pipe = pipeline("depth-estimation", model=self.name, device=dev)
         log.info("depth model loaded on %s", dev)
 
     def relative(self, image) -> np.ndarray:
@@ -120,9 +122,11 @@ class DepthModel:
         return np.asarray(Image.fromarray(d).resize(image.size, Image.BILINEAR), np.float32)
 
     def metric(self, image, cam: CameraPose, prox_m: float | None = None, floor_z: float = 0.0) -> np.ndarray | None:
-        """Relative inverse depth -> metres. None if the frame can't be scaled (no floor in view)."""
+        """Model output -> metres. None if the frame can't be scaled (no floor in view)."""
         rel = self.relative(image)
         h, w = rel.shape
+        if self.is_metric:
+            return self._metric_direct(rel, cam, prox_m, floor_z)
         fl = floor_depth(cam, w, h, floor_z)
         ys, xs = np.nonzero(np.isfinite(fl[::4, ::4]))
         if len(ys) < 60:
@@ -152,6 +156,24 @@ class DepthModel:
             c = z[h // 2 - 8:h // 2 + 8, w // 2 - 8:w // 2 + 8]
             med = np.nanmedian(c)
             if np.isfinite(med) and med > 0 and 0.5 < prox_m / med < 2.0:
+                z *= prox_m / med
+        return z
+
+    def _metric_direct(self, z: np.ndarray, cam: CameraPose, prox_m: float | None, floor_z: float) -> np.ndarray:
+        """A metric model's metres, nudged by the floor (whose true distance the camera geometry gives)
+        and the distance sensor. The model was trained on human-height views, so the scale drifts."""
+        h, w = z.shape
+        z = z.astype(np.float32).copy()
+        fl = floor_depth(cam, w, h, floor_z)
+        both = np.isfinite(fl) & (z > 0)
+        if both.sum() > 200:
+            s = float(np.median(fl[both] / z[both]))
+            if 0.03 < s < 5.0:                      # at Vector's height these models read ~6x too far
+                z *= s
+        if prox_m:
+            c = z[h // 2 - 8:h // 2 + 8, w // 2 - 8:w // 2 + 8]
+            med = float(np.nanmedian(c))
+            if med > 0 and 0.5 < prox_m / med < 2.0:
                 z *= prox_m / med
         return z
 

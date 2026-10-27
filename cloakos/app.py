@@ -139,7 +139,7 @@ class Brain:
         from .voice.commander import decide
 
         here = tuple(self.policies["goto"].skills.snapshot()["pos"][:2]) if self.link.connected else None
-        d = await decide(self.voice.llm, text, self.mapper.objects, here)
+        d = await decide(self.voice.llm, text, self.mapper.known(), here)
         if d.action == "go_to" and d.target:
             ok = await self.go_to(d.target)
             if not ok:
