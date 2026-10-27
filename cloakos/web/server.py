@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from ..bus import Event
 from .. import FULL_NAME, __version__
 from ..drives import DRIVES
-from .setup_api import autoconfigure_loop, make_router, robot_ota_url
+from .setup_api import autoconfigure_loop, env_path, make_router, robot_ota_url, write_env
 
 if TYPE_CHECKING:
     from ..app import Brain
@@ -157,6 +157,9 @@ def create_app(brain: "Brain") -> FastAPI:
             asyncio.ensure_future(brain.voice.say(str(msg.get("text", ""))[:200], trigger="manual", source="you"))
         elif kind == "talk":
             asyncio.ensure_future(_talk(str(msg.get("text", ""))[:500]))
+        elif kind == "volume":
+            await brain.link.set_volume(int(msg.get("value", 80)))
+            write_env(env_path(), {"CLOAK_VOLUME": str(brain.link.volume)})
         elif kind == "anim":
             asyncio.ensure_future(brain.body.anim(str(msg.get("key", ""))))
         elif kind == "emote":

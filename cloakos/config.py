@@ -26,6 +26,7 @@ ENV_OVERRIDES = {
     "WEB_HOST": "web.host",
     "WEB_PORT": "web.port",
     "DATA_DIR": "datalog.dir",
+    "CLOAK_VOLUME": "robot.volume",
 }
 
 

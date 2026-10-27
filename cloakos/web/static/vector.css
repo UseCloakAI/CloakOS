@@ -200,3 +200,13 @@
 a.sb-btn{text-decoration:none}
 .chip-link{display:inline-flex;align-items:center;text-decoration:none}
 @media (max-width:640px){.pair-cta{flex-direction:column;align-items:stretch}.pair-cta-btn{justify-content:center}}
+
+/* volume */
+.vol{display:inline-flex;align-items:center;gap:6px;margin-right:auto}
+.vol-btn{display:grid;place-items:center;width:22px;height:22px;border:0;background:none;color:var(--ink);opacity:.45;cursor:pointer;padding:0}
+.vol-btn:hover{opacity:.9}
+.vol .vol-x{display:none}
+.vol.muted .vol-x{display:inline}.vol.muted .vol-wave{display:none}
+.vol input[type=range]{width:90px;accent-color:var(--acc)}
+.vol-val{min-width:22px}
+.input-foot{gap:12px}

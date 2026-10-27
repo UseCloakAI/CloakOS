@@ -40,6 +40,7 @@ class RobotLink:
         self.state = "disconnected"
         self.anim_triggers: list[str] = []
         self.hint: str | None = None          # a known, fixable reason the last connect failed
+        self.volume = max(0, min(100, int(self.cfg.get("volume", 80))))   # 0..100, 0 = Cloak's sounds muted
         self.control_gen = 0                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
         self._stop = asyncio.Event()
@@ -95,6 +96,7 @@ class RobotLink:
             await client.face_detection(True)
         except Exception as e:
             log.warning("face detection: %s", e)
+        await self._push_volume()
         try:
             self.anim_triggers = await client.anim_triggers()
         except Exception as e:
@@ -152,6 +154,19 @@ class RobotLink:
         self.state = state
         self.world.connected = state == "connected"
         self.bus.emit("robot.connection", state=state, **extra)
+
+    # ── volume ─────────────────────────────────────────────────
+
+    async def set_volume(self, volume: int) -> None:
+        self.volume = max(0, min(100, int(volume)))
+        if self.client is not None:
+            await self._push_volume()
+
+    async def _push_volume(self) -> None:
+        try:
+            await self.client.master_volume(round(self.volume / 25))
+        except Exception as e:
+            log.debug("master volume: %s", e)
 
     # ── control ────────────────────────────────────────────────
 

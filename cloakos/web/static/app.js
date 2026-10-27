@@ -80,6 +80,8 @@ function render(s) {
   const rec = s.recording || {};
   $$('.rec-btn').forEach(b => { b.classList.toggle('on', !!rec.on); b.title = rec.on ? `Recording · ${rec.steps} steps` : 'Record episode'; });
   $('#sb-rec-label').textContent = rec.on ? `Stop · ${rec.steps} steps` : 'Record episode';
+  // volume (leave the slider alone while it's being dragged)
+  if (s.volume != null && document.activeElement !== $('#vol')) { $('#vol').value = s.volume; volLabel(s.volume); }
   // voice
   const v = s.voice || {};
   $('#voice-sub').textContent = v.error ? 'Voice off: ' + v.error : !v.ready ? 'Voice loading…' : v.speaking ? 'Speaking…' : (v.llm ? 'Voice ready · LLM on' : 'Voice ready · LLM not set');
@@ -98,6 +100,14 @@ function render(s) {
   if (page === 'lab') $('#kv-scores').innerHTML = Object.entries(s.scores || {}).sort((x, y) => y[1] - x[1])
     .map(([k, v]) => `<dt>${esc(k.replace('_', ' '))}</dt><dd>${v.toFixed(3)}${k === s.behavior ? '  ← running' : ''}</dd>`).join('') || '<dt>—</dt><dd>Auto mode only</dd>';
 }
+
+let lastVol = 80;
+function volLabel(v) {
+  v = +v; $('#vol-val').textContent = v ? v : 'Off';
+  $('.vol').classList.toggle('muted', v === 0);
+}
+function setVolume(v) { v = +v; if (v) lastVol = v; volLabel(v); sendWS({ type: 'volume', value: v }); }
+function toggleMute() { const v = +$('#vol').value ? 0 : lastVol || 80; $('#vol').value = v; setVolume(v); }
 
 function drawFace(f) {
   $$('[data-cam]').forEach(cam => {

@@ -209,6 +209,10 @@ class VectorClient:
     async def eye_color(self, hue: float, saturation: float) -> None:
         await self.stub.SetEyeColor(m.SetEyeColorRequest(hue=hue, saturation=saturation), timeout=2)
 
+    async def master_volume(self, level: int) -> None:
+        """Vector's own speaker volume (stock sounds + ours): 0 low .. 4 high."""
+        await self.stub.SetMasterVolume(m.MasterVolumeRequest(volume_level=max(0, min(4, level))), timeout=5)
+
     async def face_detection(self, on: bool = True) -> None:
         await self.stub.EnableFaceDetection(m.EnableFaceDetectionRequest(enable=on), timeout=5)
 

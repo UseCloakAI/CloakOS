@@ -47,6 +47,15 @@ async def test_brain_end_to_end(tmp_path):
     await asyncio.sleep(0.3)
     assert ("DriveWheels", (150.0, 150.0)) in fv.calls
 
+    await brain.link.set_volume(40)                                         # master volume + scaled clip volume
+    assert ("MasterVolume", 2) in fv.calls
+    await brain.body.play_pcm(b"\0" * 2048, volume=75)
+    assert ("AudioVolume", 30) in fv.calls
+    await brain.link.set_volume(0)                                          # muted: nothing goes to the speaker
+    n = len(fv.calls)
+    await brain.body.play_pcm(b"\0" * 2048, volume=75)
+    assert not any(c[0] == "AudioVolume" for c in fv.calls[n:])
+
     await brain.set_mode("idle")
     await asyncio.sleep(0.2)
     assert not fv.control                                                   # stock Vector gets control back

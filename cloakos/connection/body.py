@@ -142,4 +142,6 @@ class Body:
 
     async def play_pcm(self, pcm: bytes, volume: int = 75, text: str = "", rate: int = 16000) -> None:
         self._mark("say" if text else "sound", text=text)
-        await self._do("play_pcm", pcm, rate, volume)
+        master = self.link.volume
+        if master > 0:
+            await self._do("play_pcm", pcm, rate, round(volume * master / 100))
