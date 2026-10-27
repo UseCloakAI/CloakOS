@@ -3,6 +3,7 @@
    recognised objects as 3D boxes, its view cone, and a chase camera behind it. */
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import { adaptive } from './perf.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -12,7 +13,7 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 const canvas = $('#map-canvas');
 Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+const tune = adaptive(renderer, { max: 1.5 });
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 60);
 camera.position.set(-0.5, -0.4, 0.4);
@@ -52,7 +53,7 @@ function theme() {
 }
 
 /* ── voxels + drivable floor ───────────────────────────── */
-let vox = null;      // last decoded voxel payload, kept so the look can switch without refetching
+let vox = null, lastVox = 0;      // last decoded voxel payload, kept so the look can switch without refetching
 async function loadVoxels() {
   if (fetching) return;
   fetching = true;
@@ -71,14 +72,16 @@ async function loadVoxels() {
   } finally { fetching = false; }
 }
 
+let voxGeo = null, voxMat = null;
 function paintVoxels() {
-  if (voxels) { scene.remove(voxels); voxels.geometry.dispose(); voxels.material.dispose(); voxels = null; }
+  if (voxels) { scene.remove(voxels); voxels.dispose(); voxels = null; }
   if (floor) { scene.remove(floor); floor.geometry.dispose(); floor.material.map.dispose(); floor.material.dispose(); floor = null; }
   const v = vox;
   $('#map-empty').hidden = !!(v && v.n);
   if (!v || !v.n) return;
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(v.vs * 0.9, v.vs * 0.9, v.vs * 0.9),
-    new THREE.MeshStandardMaterial({ roughness: 0.85 }), v.n);
+  voxGeo = voxGeo && voxGeo.userData.vs === v.vs ? voxGeo : Object.assign(new THREE.BoxGeometry(v.vs * 0.9, v.vs * 0.9, v.vs * 0.9), { userData: { vs: v.vs } });
+  voxMat = voxMat || new THREE.MeshLambertMaterial();
+  const mesh = new THREE.InstancedMesh(voxGeo, voxMat, v.n);
   const mat = new THREE.Matrix4(), c = new THREE.Color();
   let floorK = Infinity;
   for (let i = 0; i < v.n; i++) floorK = Math.min(floorK, v.ijk[3 * i + 2]);
@@ -176,7 +179,7 @@ function drawLive(L) {
     return `<div class="det-box" style="left:${100 * x0 / fw}%;top:${100 * y0 / fh}%;width:${100 * (x1 - x0) / fw}%;height:${100 * (y1 - y0) / fh}%"><span>${esc(d.label)}</span></div>`;
   }).join('');
   $('#map-status').textContent = L.status || '';
-  if (L.version !== voxelVersion) { voxelVersion = L.version; loadVoxels(); }
+  if (L.version !== voxelVersion && performance.now() - lastVox > 1200) { voxelVersion = L.version; lastVox = performance.now(); loadVoxels(); }
 }
 
 /* ── side panel (slower) ───────────────────────────────── */
@@ -232,6 +235,7 @@ const behind = new THREE.Vector3(), ahead = new THREE.Vector3();
   }
   controls.update();
   renderer.render(scene, camera);
+  tune();
 })();
 
 let liveTimer = null;

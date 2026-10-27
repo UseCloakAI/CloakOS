@@ -135,6 +135,8 @@ def create_app(brain: "Brain") -> FastAPI:
             last = -1
             while True:
                 w = brain.world
+                if brain.link.sim is not None:
+                    brain.link.sim.touch()
                 if w.frame is not None and w.frame_id != last:
                     last = w.frame_id
                     buf = io.BytesIO()
