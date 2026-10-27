@@ -29,7 +29,7 @@ VOICES = [
     ("bf_emma", "Emma · British"), ("bm_george", "George · British"),
 ]
 POD_GUESSES = ["http://escapepod.local:8080", "http://localhost:8080", "http://127.0.0.1:8080"]
-ENV_KEYS = {"CLOAK_AUTO_UPDATE", "WIREPOD_URL", "VECTOR_SERIAL", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "KOKORO_VOICE", "CLOAK_SETUP_DONE"}
+ENV_KEYS = {"CLOAK_AUTO_UPDATE", "WIREPOD_URL", "VECTOR_SERIAL", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "KOKORO_VOICE", "CLOAK_SETUP_DONE", "CLOAK_VOLUME"}
 
 
 def env_path() -> Path:

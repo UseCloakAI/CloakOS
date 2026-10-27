@@ -119,6 +119,10 @@ class FakeVector(rpc.ExternalInterfaceServicer):
         self.calls.append(("DisplayFaceImageRGB", len(req.face_data)))
         return m.DisplayFaceImageRGBResponse()
 
+    async def SetMasterVolume(self, req, ctx):
+        self.calls.append(("MasterVolume", req.volume_level))
+        return m.MasterVolumeResponse()
+
     async def EnableFaceDetection(self, req, ctx):
         return m.EnableFaceDetectionResponse()
 
@@ -140,6 +144,7 @@ class FakeVector(rpc.ExternalInterfaceServicer):
             kind = r.WhichOneof("audio_request_type")
             if kind == "audio_stream_prepare":
                 prepared = r.audio_stream_prepare.audio_frame_rate
+                self.calls.append(("AudioVolume", r.audio_stream_prepare.audio_volume))
             elif kind == "audio_stream_chunk":
                 assert r.audio_stream_chunk.audio_chunk_size_bytes <= 1024
                 self.audio_bytes += len(r.audio_stream_chunk.audio_chunk_samples)

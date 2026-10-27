@@ -175,6 +175,14 @@
               </div>
             </div>
             <div class="input-foot">
+              <span class="vol" title="Volume">
+                <button class="vol-btn" type="button" id="vol-btn" onclick="toggleMute()" aria-label="Mute">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path class="vol-wave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="vol-x" d="m16 9 6 6m0-6-6 6"/></svg>
+                </button>
+                <input type="range" id="vol" min="0" max="100" step="5" value="80" aria-label="Volume"
+                  oninput="volLabel(this.value)" onchange="setVolume(this.value)">
+                <span class="input-sub vol-val" id="vol-val">80</span>
+              </span>
               <span class="input-sub" id="voice-sub">Voice loading…</span>
               <span class="input-sub">Enter to send &middot; Shift+Enter for new line</span>
             </div>
