@@ -2,8 +2,8 @@
 alive. Every parameter eases toward its target with a spring, so expressions blend instead of
 snapping; blinks squash, glances overshoot a little, and the eyes breathe when nothing happens.
 
-When Vector is busy with something (wandering, going to the mug, undocking...) the eyes fade back
-and a short line of text says what it's doing.
+When Vector starts something new (wandering, going to the mug, undocking...) the words take over the
+screen for a moment, big and bold, then the eyes grow back.
 
 shape() picks the target from drives/behavior/face/mood; step() moves the live shape toward it;
 render() draws a frame. All pure PIL, so it's testable.
@@ -65,12 +65,12 @@ class Eyes:
         # status overlay: what it's doing, in words
         self.status: str | None = None    # set every frame by the brain
         self._flash: tuple[str, float] | None = None
-        self._ov = 0.0                    # overlay fade 0..1
+        self._ov = 0.0                    # 0 = eyes, 1 = words
         self._shown_text = ""
-        try:
-            self.font = ImageFont.load_default(size=14 * SS)
-        except Exception:                 # very old Pillow / no FreeType: the small bitmap font
-            self.font = ImageFont.load_default()
+        self._said: str | None = None     # the line already announced (each is shown once)
+        self._text_t0: float | None = None
+        self._fonts: dict[int, object] = {}
+        self._layouts: dict[str, tuple[list[str], int]] = {}
 
     def set_mood(self, mood: str, seconds: float) -> None:
         self.mood, self.mood_until = mood, time.time() + seconds
@@ -181,12 +181,11 @@ class Eyes:
         sleeping = target.open < 0.1
         blink = self._blink(now, sleeping)
         breathe = 0.0 if self.frozen else 0.018 * math.sin(now * 2 * math.pi * 0.22)
-        text = self._text(now)
-        goal = 1.0 if text else 0.0
-        self._ov += (goal - self._ov) * min(1.0, 7.0 * dt)
-        if text:
-            self._shown_text = text
+        self._ov = self._announce(now)
         return self.render(s, blink=blink, breathe=breathe, overlay=self._ov, text=self._shown_text)
+
+    # a new activity's name takes over the screen for a moment, then the eyes come back
+    TEXT_IN, TEXT_HOLD, TEXT_OUT = 0.18, 1.5, 0.45
 
     def _text(self, now: float) -> str | None:
         if self._flash and now < self._flash[1]:
@@ -194,14 +193,38 @@ class Eyes:
         self._flash = None
         return self.status
 
+    def _announce(self, now: float) -> float:
+        """0 = eyes, 1 = words. Each new line is shown once, eased in and out."""
+        text = self._text(now)
+        if text and text != self._said:
+            self._said, self._shown_text = text, text
+            # if words are already up, swap them without blanking
+            self._text_t0 = now - (self.TEXT_IN if self._ov > 0.5 else 0.0)
+        elif not text:
+            self._said = None
+        if self._text_t0 is None:
+            return 0.0
+        t = now - self._text_t0
+        if t < self.TEXT_IN:
+            x = t / self.TEXT_IN
+        elif t < self.TEXT_IN + self.TEXT_HOLD:
+            x = 1.0
+        elif t < self.TEXT_IN + self.TEXT_HOLD + self.TEXT_OUT:
+            x = 1.0 - (t - self.TEXT_IN - self.TEXT_HOLD) / self.TEXT_OUT
+        else:
+            self._text_t0 = None
+            return 0.0
+        return x * x * (3 - 2 * x)                       # smoothstep
+
     def render(self, s: EyeShape, blink: float = 0.0, breathe: float = 0.0, overlay: float = 0.0, text: str = "") -> Image.Image:
         img = Image.new("RGB", (W * SS, H * SS), self.bg)
         eyes = Image.new("L", (W * SS, H * SS), 0)            # eye mask, lids cut out of it
         dr = ImageDraw.Draw(eyes)
         jx = random.uniform(-s.jitter, s.jitter) if s.jitter > 0.05 else 0.0
         jy = random.uniform(-s.jitter, s.jitter) if s.jitter > 0.05 else 0.0
-        shrink = 1.0 - 0.22 * overlay                         # eyes step back when there's text
-        lift = -14 * overlay
+        # words take the screen: the eyes shrink away, then grow back with a little pop
+        shrink = (1.0 - overlay) * (1.0 + 0.08 * math.sin(math.pi * min(1.0, overlay * 2))) if overlay < 1 else 0.0
+        lift = 0.0
         open_ = max(0.0, min(1.2, s.open)) * (1 - blink)
         for side in (-1, 1):
             size = 38 * max(0.4, s.scale) * (1 + breathe) * shrink * (1 + (s.asym if side > 0 else -s.asym * 0.5))
@@ -225,26 +248,68 @@ class Eyes:
             if s.angry > 0.05:
                 drop = h * 0.5 * min(1.0, s.angry)
                 dr.polygon([(inner * SS, (box[1] - 3) * SS), (inner * SS, (box[1] + drop) * SS), (outer * SS, (box[1] - 3) * SS)], fill=0)
-        bright = 1.0 - 0.6 * overlay
+        bright = 1.0 - overlay
         color = tuple(int(c * bright + b * (1 - bright)) for c, b in zip(self.color, self.bg))
-        if self.glow:                                          # soft halo, like a lit screen
-            halo = eyes.filter(ImageFilter.GaussianBlur(5 * SS)).point(lambda v: int(v * 0.35))
-            img.paste(Image.new("RGB", img.size, color), (0, 0), halo)
-        img.paste(Image.new("RGB", img.size, color), (0, 0), eyes)
+        if shrink > 0.02:
+            if self.glow:                                      # soft halo, like a lit screen
+                halo = eyes.filter(ImageFilter.GaussianBlur(5 * SS)).point(lambda v: int(v * 0.35))
+                img.paste(Image.new("RGB", img.size, color), (0, 0), halo)
+            img.paste(Image.new("RGB", img.size, color), (0, 0), eyes)
         if overlay > 0.02 and text:
             self._draw_text(img, text, overlay)
         return img.resize((W, H), Image.LANCZOS)
 
+    def _font(self, px: int):
+        if px not in self._fonts:
+            try:
+                self._fonts[px] = ImageFont.load_default(size=px)
+            except Exception:
+                self._fonts[px] = ImageFont.load_default()
+        return self._fonts[px]
+
+    def _layout(self, text: str) -> tuple[list[str], int]:
+        """The biggest size the words fit at, on one line or two (whichever is bigger)."""
+        if text in self._layouts:
+            return self._layouts[text]
+        dr = ImageDraw.Draw(Image.new("L", (1, 1)))
+        words = text.split()
+        options = [[text]] + [[" ".join(words[:i]), " ".join(words[i:])] for i in range(1, len(words))]
+        best: tuple[list[str], int] = ([text], 8 * SS)
+        for lines in options:
+            lo, hi = 8 * SS, 60 * SS
+            while lo < hi:                               # binary search the font size
+                mid = (lo + hi + 1) // 2
+                f = self._font(mid)
+                stroke = max(1, mid // 22)
+                ws = [dr.textbbox((0, 0), ln, font=f, stroke_width=stroke) for ln in lines]
+                tw = max(b[2] - b[0] for b in ws)
+                th = sum(b[3] - b[1] for b in ws) + (len(lines) - 1) * mid * 0.15
+                if tw <= (W - 12) * SS and th <= (H - 14) * SS:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            if lo > best[1]:
+                best = (lines, lo)
+        self._layouts[text] = best
+        return best
+
     def _draw_text(self, img: Image.Image, text: str, alpha: float) -> None:
-        dr = ImageDraw.Draw(img)
-        t = text if len(text) <= 22 else text[:21] + "…"
-        x0, y0, x1, y1 = dr.textbbox((0, 0), t, font=self.font)
-        tw = x1 - x0
-        x = (W * SS - tw) / 2 - x0
-        y = H * SS - (y1 - y0) - 12 * SS + (1 - alpha) * 8 * SS   # slides up as it fades in
+        """Words fill the screen: centred, as big as they fit, bold (stroked), easing in a touch large."""
+        lines, px = self._layout(text)
         a = max(0.0, min(1.0, alpha))
+        px_now = max(8, int(px * (1.0 + 0.12 * (1 - a))))           # settles from slightly bigger
+        f = self._font(px_now)
+        stroke = max(1, px_now // 22)
+        dr = ImageDraw.Draw(img)
+        boxes = [dr.textbbox((0, 0), ln, font=f, stroke_width=stroke) for ln in lines]
+        gap = px_now * 0.15
+        total = sum(b[3] - b[1] for b in boxes) + gap * (len(lines) - 1)
+        y = (H * SS - total) / 2
         col = tuple(int(c * a + b * (1 - a)) for c, b in zip(self.color, self.bg))
-        dr.text((x, y), t, font=self.font, fill=col)
+        for ln, b in zip(lines, boxes):
+            x = (W * SS - (b[2] - b[0])) / 2 - b[0]
+            dr.text((x, y - b[1]), ln, font=f, fill=col, stroke_width=stroke, stroke_fill=col)
+            y += (b[3] - b[1]) + gap
 
 
 def preview_strip(eyes: Eyes, shapes: dict[str, EyeShape]) -> Image.Image:
