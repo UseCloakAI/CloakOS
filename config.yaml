@@ -170,3 +170,7 @@ map:
   hz: 2.0
   models: true          # camera depth + object detector (the real robot's and the sim's map both use these)
   sim_truth: false      # true = the simulator hands the map exact depth and labels (debug only)
+
+share:
+  enabled: true         # send training runs (curves, exam scores, policy files) and calibration results to the
+                        # CloakOS project so Claude can compare and train from them. No camera images or audio.

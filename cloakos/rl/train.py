@@ -113,6 +113,29 @@ def main(argv: list[str] | None = None) -> None:
         (out / "meta.json").write_text(json.dumps(meta, indent=1))
         progress.close()
         vec.close()
+    finish(out)
+
+
+def finish(out: Path) -> None:
+    """After a run: take the exam (own process, no torch), then share the result."""
+    import subprocess
+    import sys
+
+    if meta_task(out) in ("goto", "wander"):
+        subprocess.run([sys.executable, "-m", "cloakos.rl.evaluate", str(out)], capture_output=True, timeout=1800)
+    from .. import share
+    if share.enabled():
+        try:
+            share.upload_run(out, os.environ.get("CLOAK_SHARE_SOURCE", "local"))
+        except Exception as e:                         # offline or Supabase down: training still counts
+            print(f"couldn't share this run: {e}", flush=True)
+
+
+def meta_task(out: Path) -> str | None:
+    try:
+        return json.loads((out / "meta.json").read_text()).get("task")
+    except (OSError, ValueError):
+        return None
 
 
 if __name__ == "__main__":

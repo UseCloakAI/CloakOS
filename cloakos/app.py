@@ -8,6 +8,7 @@ Modes:
 from __future__ import annotations
 
 import asyncio
+import os
 import logging
 import signal
 import time
@@ -57,6 +58,8 @@ class Brain:
             "auto": RulePolicy(cfg, self.body, self.bus, self.world, self.drives.values),
             "teleop": TeleopPolicy(cfg, self.body),
         }
+        if not (cfg.get("share", {}) or {}).get("enabled", True):
+            os.environ["CLOAK_SHARE"] = "0"            # training subprocesses read this too
         from .rl.manager import Trainer
         from .rl.policy import LearnedPolicy
         self.policies["learned"] = LearnedPolicy(self.body, self.link)

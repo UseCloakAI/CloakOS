@@ -61,6 +61,13 @@ class Calibrator:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(self.result, indent=1))
             self.progress = "done"
+            from . import share
+            if share.enabled():
+                try:
+                    await asyncio.to_thread(share.upload_calibration, {kind: out}, self.brain.link.target)
+                    self.progress = "done · shared with Claude"
+                except Exception as e:
+                    self.progress = f"done (couldn't share: {e})"[:200]
         except asyncio.CancelledError:
             self.progress = "stopped"
             raise
