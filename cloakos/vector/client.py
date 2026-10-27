@@ -39,6 +39,9 @@ STATUS = {
     "moving": 0x1, "picked_up": 0x8, "button": 0x10, "falling": 0x20, "animating": 0x40,
     "on_charger": 0x1000, "charging": 0x2000, "cliff": 0x4000, "wheels_moving": 0x8000, "held": 0x10000,
 }
+# No gRPC keepalive pings: Vector's Go server allows one per 5 min and drops the connection
+# (GOAWAY too_many_pings) if we ping faster. RobotLink's battery heartbeat does that job.
+CHANNEL_OPTIONS = [("grpc.keepalive_time_ms", 2**31 - 1), ("grpc.max_receive_message_length", 8 * 1024 * 1024)]
 PRIORITY = {"override": m.ControlRequest.OVERRIDE_BEHAVIORS, "default": m.ControlRequest.DEFAULT,
             "reserve": m.ControlRequest.RESERVE_CONTROL}
 
@@ -65,8 +68,7 @@ class VectorClient:
         )
         self.channel = grpc.aio.secure_channel(
             self.bot.host, creds,
-            options=[("grpc.ssl_target_name_override", self.bot.name),
-                     ("grpc.keepalive_time_ms", 10000), ("grpc.max_receive_message_length", 8 * 1024 * 1024)],
+            options=CHANNEL_OPTIONS + [("grpc.ssl_target_name_override", self.bot.name)],
         )
         await asyncio.wait_for(self.channel.channel_ready(), timeout)
         self.stub = rpc.ExternalInterfaceStub(self.channel)

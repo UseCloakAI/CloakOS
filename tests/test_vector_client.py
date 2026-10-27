@@ -115,3 +115,10 @@ async def test_discover_reads_cert_from_robot_when_wirepod_has_none(fake, tmp_pa
                            transport=httpx.MockTransport(handler))
     assert found.cert.strip() == bot.cert.strip() and found.name == NAME
     assert (tmp_path / "003091c9.pem").exists()       # cached for next time
+
+
+def test_no_fast_keepalive_pings():
+    # Vector's Go gRPC server drops clients that ping more than once per 5 min
+    from cloakos.vector.client import CHANNEL_OPTIONS
+    ka = dict(CHANNEL_OPTIONS).get("grpc.keepalive_time_ms")
+    assert ka is None or ka >= 300_000
