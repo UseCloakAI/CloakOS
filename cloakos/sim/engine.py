@@ -36,6 +36,9 @@ def _gl_backend() -> None:
         os.environ["MUJOCO_GL"] = "cgl" if sys.platform == "darwin" else "egl"
 
 
+_gl_backend()      # before mujoco is first imported: it reads MUJOCO_GL once
+
+
 class Sim:
     def __init__(self, cfg: dict | None = None) -> None:
         c = (cfg or {}).get("sim", {}) or {}
@@ -245,7 +248,6 @@ class Sim:
     def _loop(self) -> None:
         import mujoco
 
-        _gl_backend()
         renderer, rendered_for = None, None
         next_frame = next_snap = 0.0
         last = time.monotonic()
