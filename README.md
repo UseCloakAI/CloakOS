@@ -1,4 +1,6 @@
-# Cloak for Vector
+# CloakOS
+
+**CloakOS Vector Edition**: a living-creature brain for Anki/DDL Vector, part of [Cloak](https://usecloak.org).
 
 A living-creature brain for an OEM Anki/DDL Vector, part of [Cloak](https://usecloak.org).
 **The PC is the brain, Vector is the body.** No firmware mods and no Anki SDK. Everything is custom and built on [wire-pod](https://github.com/kercre123/wire-pod): Cloak asks wire-pod for the robot's address, token and cert, then talks gRPC straight to Vector with its own client.
@@ -21,22 +23,38 @@ One command:
 curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/install.sh | bash
 ```
 
-That's the only command. It installs into `~/Library/Application Support/Cloak Vector`:
+That's the only command. It installs into `~/Library/Application Support/CloakOS`:
 - Python (via [uv](https://docs.astral.sh/uv/), no Homebrew needed), the app and the voice model.
 - **wire-pod**, if there isn't one on your network yet. That's the official [WirePod](https://github.com/kercre123/WirePod) app, at the version pinned in `compat.json`. Its first-run questions are answered for you: it starts at login, and its speech language is picked from your Mac's language.
-- **Cloak Vector** in `~/Applications`, plus a `cloak-vector` command.
+- **CloakOS** in `~/Applications`, plus a `cloakos` command.
 - Background jobs: Cloak starts when you log in, and checks for updates every 6 hours.
 
 Then it opens Cloak in your browser and configures itself. It finds wire-pod and your robot, and uses a local LLM if Ollama is running. The only thing it can't do for you is introduce Vector to wire-pod: that's a Bluetooth pairing in wire-pod's **Bot Setup** page. If that hasn't happened yet, Cloak shows the 3 steps and carries on by itself the moment Vector shows up. Voice and brain are optional ("Customize voice & brain").
 
 What you might still see on a Mac: macOS asking once to allow "local network" access (click Allow), and, if your user isn't an admin, a password prompt to put WirePod in `/Applications`.
 
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/uninstall.sh | bash
+```
+
+Or `cloakos uninstall`. It asks once, then removes everything CloakOS installed:
+- the app, the `cloakos` command, start-at-login and auto-update
+- the install folder (Python environment, voice model, settings)
+- **WirePod**: the app, its login item and its settings, if CloakOS installed it
+- **uv** and the Python it downloaded, if CloakOS installed them
+
+A wire-pod or uv you had before CloakOS is left alone. Your recordings are moved to `~/Documents/CloakOS Recordings` rather than deleted; pass `--delete-recordings` to delete them. Pass `--yes` to skip the question.
+
 ### Updates
-- **Cloak** updates itself in the background (every 6 hours) from `main`. It never interrupts a recording, and you can turn it off in Settings → Updates or run `cloak-vector update` any time.
+- **CloakOS** updates itself in the background (every 6 hours) from `main`. It never interrupts a recording, and you can turn it off in Settings → Updates or run `cloakos update` any time.
 - **wire-pod** only updates to a version we've deemed compatible. Every Monday, the `wire-pod compatibility` workflow checks the newest WirePod release against everything Cloak uses (`scripts/wirepod_contract.py`). If it passes, the workflow opens a PR bumping `compat.json`. Merging that PR rolls the new wire-pod out to every Mac on its next update. Cloak never touches a wire-pod it didn't install.
 - For the workflow to open PRs, enable *Settings → Actions → General → Allow GitHub Actions to create and approve pull requests* in the repo.
 
-Other commands: `cloak-vector open | stop | status | logs | update | uninstall`.
+Other commands: `cloakos open | stop | status | logs | update | uninstall`.
+
+Upgrading from an older "Cloak Vector" install? It moves to CloakOS by itself on its next update, or when you run the one-liner again. Settings and recordings come along.
 
 To install from a branch: `curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/<branch>/install.sh | CLOAK_REF=<branch> bash`.
 
@@ -45,8 +63,8 @@ The manual setup below is for development.
 ## Layout
 
 ```
-cloak_vector/
-  __main__.py      python -m cloak_vector
+cloakos/
+  __main__.py      python -m cloakos
   app.py           Brain: wiring, 10 Hz tick loop, modes (auto / teleop / idle)
   config.py        config.yaml + .env overrides
   bus.py           asyncio pub/sub (sense.*, drive.*, voice.said, behavior.changed, ...)
@@ -73,8 +91,9 @@ cloak_vector/
 config.yaml        all tuning
 .env.example       robot + LLM secrets
 install.sh         one-command macOS installer
+uninstall.sh       removes everything CloakOS installed
 compat.json        the wire-pod version Cloak installs/updates to (bumped by the compatibility workflow)
-scripts/           cloakctl.sh (cloak-vector command + updater) · wirepod.sh (install/update WirePod)
+scripts/           cloakctl.sh (cloakos command + updater) · wirepod.sh (install/update WirePod)
                    wirepod_contract.py (compatibility check) · make_icon.py · gen_proto.py
 tests/             no robot needed (includes a fake Vector gRPC server over real TLS)
 ```
@@ -110,10 +129,10 @@ Want the full-precision model? Grab `kokoro-v1.0.onnx` and point `voice.tts.koko
 ## Run
 
 ```bash
-python -m cloak_vector                 # auto mode + dashboard at http://127.0.0.1:8765
-python -m cloak_vector --mode teleop   # start in teleop (records automatically)
-python -m cloak_vector --mode idle     # stock Vector runs; we just watch and log
-python -m cloak_vector --no-web -v     # headless, debug logs
+python -m cloakos                 # auto mode + dashboard at http://127.0.0.1:8765
+python -m cloakos --mode teleop   # start in teleop (records automatically)
+python -m cloakos --mode idle     # stock Vector runs; we just watch and log
+python -m cloakos --no-web -v     # headless, debug logs
 ```
 Switch modes live from the dashboard's mode picker. Ctrl+C stops the motors, hands control back to Vector, saves any recording and disconnects cleanly. If Vector drops off Wi-Fi, or any stream dies, the link re-discovers through wire-pod and reconnects with backoff (1s up to 30s), then picks the mode back up.
 
@@ -131,7 +150,7 @@ It's styled like Cloak chat: same sidebar, topbar, composer and themes (`cloak_d
 - **Drive lab**: fire fake senses, play any emote, drag drive values around, and watch the live behavior scores. Handy for tuning without the bot.
 - **Settings**: wire-pod and robot info, voice and LLM status, and every stock animation trigger your Vector has, with a test player.
 
-Keep `cloak_vector/web/static/cloak.css` an exact copy of `usecloakai/cloak/cloak.css`. Put overrides in `vector.css`, and to sync, copy the file over again.
+Keep `cloakos/web/static/cloak.css` an exact copy of `usecloakai/cloak/cloak.css`. Put overrides in `vector.css`, and to sync, copy the file over again.
 
 ## Drive system
 
@@ -204,7 +223,7 @@ pip install -e ".[dev]" && pytest
 ```
 The tests cover drive math, behavior selection, teleop mapping, audio, the recorder, eyes and chirps, wire-pod discovery (mocked HTTP) and our gRPC client against a fake Vector server over real TLS with token auth. There's also a full brain run against that fake robot: connect, control grant, events, camera, eyes on the screen, auto, teleop with recording, idle, shutdown.
 
-Protos: `cloak_vector/vector/proto/` holds Anki's Vector external-interface protos (Apache-2.0, via vector-go-sdk) with the REST annotations stripped. The generated stubs are committed. If you edit a proto, run `pip install -e ".[proto]" && python scripts/gen_proto.py`.
+Protos: `cloakos/vector/proto/` holds Anki's Vector external-interface protos (Apache-2.0, via vector-go-sdk) with the REST annotations stripped. The generated stubs are committed. If you edit a proto, run `pip install -e ".[proto]" && python scripts/gen_proto.py`.
 
 ## Notes
 - Vector's external interface doesn't stream its microphone, so loud sounds come from the PC mic (`senses.ears.enabled: true`, `pip install -e ".[ears]"`). The "Hey Vector" wake word arrives on the event stream as a sense event.

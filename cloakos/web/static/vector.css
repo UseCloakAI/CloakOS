@@ -1,4 +1,4 @@
-/* Cloak for Vector: page styles on top of the vendored cloak.css (don't edit that file; re-copy it from usecloakai/cloak to sync). */
+/* CloakOS: page styles on top of the vendored cloak.css (don't edit that file; re-copy it from usecloakai/cloak to sync). */
 :root{--fm:"Courier New",Courier,monospace}
 
 /* ── MODE PICKER (Cloak's model picker, from chat.html) ── */
@@ -188,3 +188,6 @@
   .ev{animation:none}
   .drive-fill,.cam-face{transition:none}
 }
+
+/* CloakOS wordmark: the OS unfolds last, in the accent */
+.sb-word>span.sb-os{--sb-d:.17s;color:var(--acc)}

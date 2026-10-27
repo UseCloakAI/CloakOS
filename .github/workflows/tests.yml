@@ -16,4 +16,4 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
       - name: Shell scripts parse
-        run: bash -n install.sh && bash -n scripts/cloakctl.sh && bash -n scripts/wirepod.sh
+        run: bash -n install.sh && bash -n uninstall.sh && bash -n scripts/cloakctl.sh && bash -n scripts/wirepod.sh

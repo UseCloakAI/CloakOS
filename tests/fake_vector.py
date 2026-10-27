@@ -16,8 +16,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from PIL import Image
 
-from cloak_vector.vector.client import m
-from cloak_vector.vector.pb import external_interface_pb2_grpc as rpc
+from cloakos.vector.client import m
+from cloakos.vector.pb import external_interface_pb2_grpc as rpc
 
 NAME, GUID, SERIAL = "Vector-T3ST", "test-guid-123", "00e2feed"
 

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
-  Cloak's pairing page. The Bluetooth + robot logic is Digital Dream Labs' vector-web-setup
+  CloakOS's pairing page. The Bluetooth + robot logic is Digital Dream Labs' vector-web-setup
   (MIT, via kercre123's fork), patched for wire-pod and bundled into /static/pair/rts.js.
   Element ids below are what that code drives; keep them when restyling.
 -->
@@ -9,7 +9,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#131110">
-<title>Pair Vector · Cloak</title>
+<title>Pair Vector · CloakOS</title>
 <link rel="icon" type="image/svg+xml" href="/static/orb.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
@@ -102,7 +102,7 @@ input.vec-field[type=text],input.vec-field[type=password],select.vec-field{width
   <div class="wiz">
     <div class="auth-card">
       <div class="brand">
-        <div class="brand-name">Cloak</div>
+        <div class="brand-name">CloakOS</div>
         <div class="brand-tag">Pair Vector</div>
       </div>
 
@@ -130,7 +130,7 @@ input.vec-field[type=text],input.vec-field[type=password],select.vec-field{width
       </div>
       <div id="containerEnvironmentError" class="vec-container">
         <h2>Something's off</h2>
-        <p>Cloak couldn't load its pairing settings. Restart Cloak and try again.</p>
+        <p>CloakOS couldn't load its pairing settings. Restart CloakOS and try again.</p>
       </div>
 
       <div id="containerDiscover" class="vec-container" icon="iconBle">
@@ -169,7 +169,7 @@ input.vec-field[type=text],input.vec-field[type=password],select.vec-field{width
       <div id="containerWifi" class="vec-container" icon="iconWifi">
         <div class="kicker">Step 2 · Wi-Fi</div>
         <h2>Which Wi-Fi?</h2>
-        <p>Pick the same network as this Mac, so Cloak and wire-pod can reach him.</p>
+        <p>Pick the same network as this Mac, so CloakOS and wire-pod can reach him.</p>
         <div id="wifiConnectErrorLabel" class="vec-error vec-hidden">Vector couldn't join that network. Check the password and try again.</div>
         <div id="wifiScanTable" class="vec-table"></div>
         <span id="btnCustomWifi" class="vec-link">Network not listed? Type it in</span>
@@ -281,8 +281,8 @@ input.vec-field[type=text],input.vec-field[type=password],select.vec-field{width
       <div id="containerComplete" class="vec-container">
         <svg class="done-orb" viewBox="-52 -52 104 104" aria-hidden="true"><circle class="cs-shape" cx="0" cy="0" r="46"></circle></svg>
         <h2 style="text-align:center">Vector is paired.</h2>
-        <p style="text-align:center">Cloak picks him up on its own in a few seconds.</p>
-        <a class="btn-primary" href="/" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Back to Cloak</a>
+        <p style="text-align:center">CloakOS picks him up on its own in a few seconds.</p>
+        <a class="btn-primary" href="/" style="display:flex;align-items:center;justify-content:center;text-decoration:none">Back to CloakOS</a>
       </div>
 
       <div class="vec-vector-status">

@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Cloak for Vector: one-command installer for macOS.
+# CloakOS (Vector Edition): one-command installer for macOS.
 #
 #   curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/install.sh | bash
 #
-# Installs everything into ~/Library/Application Support/Cloak Vector (Python via uv,
-# the app, the voice model), adds "Cloak Vector" to ~/Applications and a `cloak-vector`
-# command, then opens the setup wizard in your browser. Re-run it any time to update;
-# your settings and recordings are kept.
+# Installs everything into ~/Library/Application Support/CloakOS (Python via uv, the app,
+# the voice model), adds CloakOS to ~/Applications and a `cloakos` command, then opens
+# CloakOS in your browser. Re-run it any time to update; your settings and recordings are
+# kept. Older "Cloak Vector" installs are moved over automatically.
+#
+# Remove it with:  curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakVOS/main/uninstall.sh | bash
 #
 # It also installs wire-pod (the official WirePod app) if none is on your network, and
-# sets up background updates: Cloak follows its channel (main); wire-pod only ever moves
+# sets up background updates: CloakOS follows its channel (main); wire-pod only ever moves
 # to the version pinned in compat.json, i.e. one we've deemed compatible.
 #
 # Env knobs: CLOAK_REF (branch/tag/sha, default main) · CLOAK_CHANNEL (what auto-update follows)
@@ -22,10 +24,15 @@ REF="${CLOAK_REF:-main}"
 PORT=8765
 OS="$(uname -s)"
 if [[ "$OS" == "Darwin" ]]; then
-  HOME_DIR="${CLOAK_HOME:-$HOME/Library/Application Support/Cloak Vector}"
+  NEW_HOME="$HOME/Library/Application Support/CloakOS"
+  LEGACY_HOME="$HOME/Library/Application Support/Cloak Vector"
 else
-  HOME_DIR="${CLOAK_HOME:-$HOME/.local/share/cloak-vector}"
+  NEW_HOME="$HOME/.local/share/cloakos"
+  LEGACY_HOME="$HOME/.local/share/cloak-vector"
 fi
+HOME_DIR="${CLOAK_HOME:-$NEW_HOME}"
+# an updater running from an old "Cloak Vector" install still passes its old home: move to the new one
+[[ "$HOME_DIR" == "$LEGACY_HOME" ]] && HOME_DIR="$NEW_HOME"
 BIN_DIR="$HOME/.local/bin"
 LOG="$HOME_DIR/logs/install.log"
 MODEL_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
@@ -41,12 +48,12 @@ trap 'printf "%s" "$SHOW"' EXIT
 
 banner() {
   printf '\n'
-  printf '%s   ██████ ██       ██████   █████  ██   ██%s\n' "$ACC" "$RST"
-  printf '%s  ██      ██      ██    ██ ██   ██ ██  ██ %s\n' "$ACC" "$RST"
-  printf '%s  ██      ██      ██    ██ ███████ █████  %s\n' "$ACC" "$RST"
-  printf '%s  ██      ██      ██    ██ ██   ██ ██  ██ %s\n' "$ACC" "$RST"
-  printf '%s   ██████ ███████  ██████  ██   ██ ██   ██%s\n' "$ACC" "$RST"
-  printf '\n  %sF O R   V E C T O R%s   %sa living creature brain · usecloak.org%s\n' "$YEL$INK" "$RST" "$DIM" "$RST"
+  printf '%s   ██████ ██       ██████   █████  ██   ██ %s ██████  ███████%s\n' "$ACC" "$YEL" "$RST"
+  printf '%s  ██      ██      ██    ██ ██   ██ ██  ██  %s██    ██ ██     %s\n' "$ACC" "$YEL" "$RST"
+  printf '%s  ██      ██      ██    ██ ███████ █████   %s██    ██ ███████%s\n' "$ACC" "$YEL" "$RST"
+  printf '%s  ██      ██      ██    ██ ██   ██ ██  ██  %s██    ██      ██%s\n' "$ACC" "$YEL" "$RST"
+  printf '%s   ██████ ███████  ██████  ██   ██ ██   ██ %s ██████  ███████%s\n' "$ACC" "$YEL" "$RST"
+  printf '\n  %sV E C T O R   E D I T I O N%s   %sa living creature brain · usecloak.org%s\n' "$YEL$INK" "$RST" "$DIM" "$RST"
   printf '  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n' "$DIM" "$RST"
 }
 
@@ -85,6 +92,7 @@ need_uv() {
   if command -v uv >/dev/null 2>&1; then return; fi
   if [[ -x "$HOME/.local/bin/uv" ]]; then return; fi
   curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
+  touch "$HOME_DIR/uv.managed"          # so the uninstaller knows uv is ours to remove
 }
 uv_bin() { command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv"; }
 
@@ -114,6 +122,7 @@ python_env() {
   local uv; uv="$(uv_bin)"
   "$uv" venv --quiet --allow-existing --python 3.12 "$HOME_DIR/venv"
   "$uv" pip install --quiet --python "$HOME_DIR/venv/bin/python" "$HOME_DIR/app[kokoro]"
+  "$uv" pip uninstall --quiet --python "$HOME_DIR/venv/bin/python" cloak-vector 2>/dev/null || true   # pre-CloakOS name
 }
 
 voice_model() {
@@ -134,6 +143,7 @@ settings() {
   mkdir -p "$HOME_DIR/data" "$HOME_DIR/bin"
   install -m 755 "$HOME_DIR/app/scripts/cloakctl.sh" "$HOME_DIR/bin/cloakctl"
   install -m 644 "$HOME_DIR/app/scripts/wirepod.sh" "$HOME_DIR/bin/wirepod.sh"
+  install -m 755 "$HOME_DIR/app/uninstall.sh" "$HOME_DIR/bin/uninstall.sh"
 }
 
 wirepod() {
@@ -159,15 +169,15 @@ background() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>'
   # Cloak wakes up when you log in
-  agent org.usecloak.vector "$head
-  <key>Label</key><string>org.usecloak.vector</string>
+  agent org.usecloak.cloakos "$head
+  <key>Label</key><string>org.usecloak.cloakos</string>
   <key>ProgramArguments</key><array><string>$HOME_DIR/bin/cloakctl</string><string>start</string></array>
   <key>RunAtLoad</key><true/>
   <key>AbandonProcessGroup</key><true/>
 </dict></plist>"
   # checks for updates every 6 hours (Cloak, and wire-pod once a new version is deemed compatible)
-  agent org.usecloak.vector.update "$head
-  <key>Label</key><string>org.usecloak.vector.update</string>
+  agent org.usecloak.cloakos.update "$head
+  <key>Label</key><string>org.usecloak.cloakos.update</string>
   <key>ProgramArguments</key><array><string>$HOME_DIR/bin/cloakctl</string><string>auto-update</string></array>
   <key>StartInterval</key><integer>21600</integer>
   <key>AbandonProcessGroup</key><true/>
@@ -178,24 +188,25 @@ background() {
 
 launchers() {
   mkdir -p "$BIN_DIR"
-  ln -sf "$HOME_DIR/bin/cloakctl" "$BIN_DIR/cloak-vector"
+  ln -sf "$HOME_DIR/bin/cloakctl" "$BIN_DIR/cloakos"
   [[ "$OS" == "Darwin" ]] || return 0
-  local app="$HOME/Applications/Cloak Vector.app"
+  local app="$HOME/Applications/CloakOS.app"
   rm -rf "$app"
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-  cat >"$app/Contents/MacOS/Cloak Vector" <<EOF
+  cat >"$app/Contents/MacOS/CloakOS" <<EOF
 #!/bin/bash
 exec "$HOME_DIR/bin/cloakctl" open
 EOF
-  chmod 755 "$app/Contents/MacOS/Cloak Vector"
+  chmod 755 "$app/Contents/MacOS/CloakOS"
   cat >"$app/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Cloak Vector</string>
-  <key>CFBundleDisplayName</key><string>Cloak Vector</string>
-  <key>CFBundleIdentifier</key><string>org.usecloak.vector</string>
-  <key>CFBundleExecutable</key><string>Cloak Vector</string>
+  <key>CFBundleName</key><string>CloakOS</string>
+  <key>CFBundleDisplayName</key><string>CloakOS</string>
+  <key>CFBundleIdentifier</key><string>org.usecloak.cloakos</string>
+  <key>CFBundleExecutable</key><string>CloakOS</string>
+  <key>CFBundleGetInfoString</key><string>CloakOS Vector Edition</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -208,28 +219,47 @@ EOF
   touch "$app"
 }
 
+migrate_legacy() {   # an older "Cloak Vector" install: move it (settings, recordings, models) to CloakOS
+  [[ -d "$LEGACY_HOME" ]] || return 0
+  [[ -x "$LEGACY_HOME/bin/cloakctl" ]] && "$LEGACY_HOME/bin/cloakctl" stop >/dev/null 2>&1 || true
+  local label
+  for label in org.usecloak.vector org.usecloak.vector.update; do
+    # don't boot out the job we may be running inside (an update); it just won't come back
+    [[ -z "${CLOAK_FROM_UPDATER:-}" ]] && launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+    rm -f "$HOME/Library/LaunchAgents/$label.plist"
+  done
+  rm -rf "$HOME/Applications/Cloak Vector.app" "$BIN_DIR/cloak-vector"
+  if [[ -d "$NEW_HOME" ]]; then
+    printf '  %sBoth "Cloak Vector" and CloakOS folders exist; keeping CloakOS, leaving the old one at %s%s\n' "$DIM" "$LEGACY_HOME" "$RST"
+  else
+    mv "$LEGACY_HOME" "$NEW_HOME"
+    printf '  %sMoved your Cloak Vector install to CloakOS.%s\n' "$DIM" "$RST"
+  fi
+}
+
 # ── go ───────────────────────────────────────────────────────────────
 banner
 if [[ "$OS" != "Darwin" && -z "${CLOAK_ALLOW_LINUX:-}" ]]; then
   printf '  %sThis installer is for macOS.%s Set CLOAK_ALLOW_LINUX=1 to try it anyway.\n\n' "$RED" "$RST"
   exit 1
 fi
+[[ -z "${CLOAK_HOME:-}" || "${CLOAK_HOME:-}" == "$LEGACY_HOME" ]] && migrate_legacy
 mkdir -p "$HOME_DIR/logs"
 : >"$LOG"
 VERB="Installing"; [[ -d "$HOME_DIR/venv" ]] && VERB="Updating"
-printf '  %s%s into%s %s\n\n' "$DIM" "$VERB" "$RST" "${HOME_DIR/#$HOME/~}"
+printf '  %s%s into%s %s\n\n' "$DIM" "$VERB" "$RST" "${HOME_DIR/#"$HOME"/\~}"
 
 "$HOME_DIR/bin/cloakctl" stop >/dev/null 2>&1 || true
 
 step "Python toolchain (uv)"       need_uv
-step "Download Cloak for Vector"   get_app
+step "Download CloakOS"            get_app
 step "Install the brain"           python_env
 step "Voice model (~120 MB)"       voice_model
 step "Settings"                    settings
 if [[ "${CLOAK_WIREPOD:-}" == "skip" ]]; then STEP=$((STEP + 1)); else
 step "wire-pod"                    wirepod
 fi
-step "App + cloak-vector command"  launchers
+step "App + cloakos command"       launchers
 step "Auto-start + auto-update"    background
 if [[ -z "${CLOAK_NO_OPEN:-}" ]]; then
   step "Wake it up"                "$HOME_DIR/bin/cloakctl" start
@@ -244,8 +274,8 @@ if [[ -z "${CLOAK_NO_OPEN:-}" ]]; then
 else
   printf '\n\n'
 fi
-note "Open it any time:   Cloak Vector in Applications, or  cloak-vector open"
+note "Open it any time:   CloakOS in Applications, or  cloakos open"
 note "Updates install themselves in the background. Turn off in Settings."
-note "Other commands:     cloak-vector stop | status | logs | update | uninstall"
-case ":$PATH:" in *":$BIN_DIR:"*) ;; *) note "Add ~/.local/bin to your PATH to use cloak-vector from any terminal." ;; esac
+note "Other commands:     cloakos stop | status | logs | update | uninstall"
+case ":$PATH:" in *":$BIN_DIR:"*) ;; *) note "Add ~/.local/bin to your PATH to use cloakos from any terminal." ;; esac
 printf '\n'

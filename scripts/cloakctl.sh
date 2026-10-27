@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cloak-vector: control the installed app.
+# cloakos: control the installed CloakOS (Vector Edition).
 #   open | start | stop | restart | status | logs | update | auto-update | uninstall
 set -euo pipefail
 
@@ -26,15 +26,15 @@ start() {
   if running; then return 0; fi
   mkdir -p "$HOME_DIR/logs"
   cd "$HOME_DIR"
-  CLOAK_HOME="$HOME_DIR" CLOAK_ENV_FILE="$HOME_DIR/.env" nohup "$HOME_DIR/venv/bin/python" -m cloak_vector \
+  CLOAK_HOME="$HOME_DIR" CLOAK_ENV_FILE="$HOME_DIR/.env" nohup "$HOME_DIR/venv/bin/python" -m cloakos \
     --config "$HOME_DIR/config.yaml" >>"$LOGF" 2>&1 </dev/null &
   echo $! >"$PIDF"
   for _ in $(seq 1 120); do          # up to ~30 s (first start loads the voice model)
     up && return 0
-    running || { echo "Cloak stopped during startup. See: cloak-vector logs"; tail -n 20 "$LOGF"; return 1; }
+    running || { echo "CloakOS stopped during startup. See: cloakos logs"; tail -n 20 "$LOGF"; return 1; }
     sleep 0.25
   done
-  echo "Cloak is taking a while to start. See: cloak-vector logs"
+  echo "CloakOS is taking a while to start. See: cloakos logs"
   return 1
 }
 
@@ -82,30 +82,22 @@ auto_update() {      # auto-update [--now]: install a newer Cloak (and with it a
   else
     write_status "failed" "$latest"
   fi
-  [[ -n "$was_running" ]] && start || true
+  if [[ -n "$was_running" ]]; then
+    # an update can move an old "Cloak Vector" install to its CloakOS home; start it from there
+    if [[ -x "$HOME_DIR/venv/bin/python" ]]; then start; else "$(cloakos_home)/bin/cloakctl" start; fi
+  fi
 }
 
-uninstall() {
-  stop
-  read -r -p "Remove Cloak for Vector, its settings and recordings? [y/N] " yn </dev/tty
-  [[ "$yn" == [yY]* ]] || { echo "Kept."; return 0; }
-  local label
-  for label in org.usecloak.vector org.usecloak.vector.update; do
-    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-    rm -f "$HOME/Library/LaunchAgents/$label.plist"
-  done
-  if [[ -f "$HOME_DIR/wirepod.managed" ]]; then
-    read -r -p "Also remove WirePod (Cloak installed it; your paired robot settings go with it)? [y/N] " yn </dev/tty
-    if [[ "$yn" == [yY]* ]]; then
-      # shellcheck source=wirepod.sh
-      source "$HOME_DIR/bin/wirepod.sh"
-      wp_quit
-      rm -f "$WP_AGENT"
-      rm -rf "$WP_APP" 2>/dev/null || sudo rm -rf "$WP_APP"
-    fi
-  fi
-  rm -rf "$HOME/Applications/Cloak Vector.app" "$HOME/.local/bin/cloak-vector" "$HOME_DIR"
-  echo "Removed. (uv stays in ~/.local/bin if you want it; delete it there otherwise.)"
+cloakos_home() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then echo "$HOME/Library/Application Support/CloakOS"; else echo "$HOME/.local/share/cloakos"; fi
+}
+
+uninstall() {        # the standalone uninstaller does the work; run a copy, since it deletes this folder
+  local tmp; tmp="$(mktemp)"
+  if [[ -f "$HOME_DIR/bin/uninstall.sh" ]]; then cp "$HOME_DIR/bin/uninstall.sh" "$tmp"
+  else curl -fsSL "https://raw.githubusercontent.com/$REPO/main/uninstall.sh" -o "$tmp"; fi
+  CLOAK_HOME="$HOME_DIR" bash "$tmp" "$@"
+  rm -f "$tmp"
 }
 
 main() {
@@ -118,8 +110,8 @@ main() {
     logs)        tail -n 100 -f "$LOGF" ;;
     update)      auto_update --now ;;
     auto-update) auto_update "${2:-}" ;;
-    uninstall)   uninstall ;;
-    *) echo "usage: cloak-vector [open|start|stop|restart|status|logs|update|uninstall]"; exit 2 ;;
+    uninstall)   shift; uninstall "$@" ;;
+    *) echo "usage: cloakos [open|start|stop|restart|status|logs|update|uninstall]"; exit 2 ;;
   esac
 }
 

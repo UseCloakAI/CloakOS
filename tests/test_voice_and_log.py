@@ -4,9 +4,9 @@ import wave
 import numpy as np
 from PIL import Image
 
-from cloak_vector.datalog import Recorder
-from cloak_vector.voice.audio import to_vector_wav
-from cloak_vector.voice.llm import clean_line
+from cloakos.datalog import Recorder
+from cloakos.voice.audio import to_vector_wav
+from cloakos.voice.llm import clean_line
 
 
 def test_clean_line():
@@ -45,8 +45,8 @@ def test_recorder_writes_episode(tmp_path):
 
 
 def test_chirps_and_eyes():
-    from cloak_vector.expression import Eyes, chirp
-    from cloak_vector.expression.chirps import CHIRPS
+    from cloakos.expression import Eyes, chirp
+    from cloakos.expression.chirps import CHIRPS
 
     for name in CHIRPS:
         pcm = chirp(name)
@@ -63,7 +63,7 @@ def test_chirps_and_eyes():
 
 
 def test_setup_env_roundtrip(tmp_path):
-    from cloak_vector.web.setup_api import read_env, write_env
+    from cloakos.web.setup_api import read_env, write_env
 
     p = tmp_path / ".env"
     p.write_text("# comment\n# LLM_MODEL=old\nWIREPOD_URL=http://a:8080\nOTHER=keep\n")
@@ -74,7 +74,7 @@ def test_setup_env_roundtrip(tmp_path):
 
 
 def test_robot_ota_url_never_localhost(monkeypatch):
-    from cloak_vector.web import setup_api
+    from cloakos.web import setup_api
 
     monkeypatch.setattr(setup_api, "lan_ip", lambda: "192.168.1.20")
     assert setup_api.robot_ota_url("http://localhost:8080") == "http://192.168.1.20:8080/api/get_ota/vicos-2.0.1.6076ep.ota"

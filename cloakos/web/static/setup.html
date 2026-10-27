@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#131110">
-<title>Set up Cloak for Vector</title>
+<title>Set up CloakOS</title>
 <link rel="icon" type="image/svg+xml" href="/static/orb.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
@@ -74,8 +74,8 @@
   <div class="wiz">
     <div class="auth-card">
       <div class="brand">
-        <div class="brand-name">Cloak</div>
-        <div class="brand-tag">for Vector</div>
+        <div class="brand-name">CloakOS</div>
+        <div class="brand-tag">Vector Edition</div>
       </div>
       <div class="steps" aria-hidden="true" hidden><i></i><i></i><i></i></div>
 
@@ -90,7 +90,7 @@
           <div class="pairing">
             <div class="onboard-item" style="--k:0"><span class="onboard-num">1</span><div class="onboard-text">Put Vector on his charger, near this Mac.</div></div>
             <div class="onboard-item" style="--k:1"><span class="onboard-num">2</span><div class="onboard-text">Press <b>Pair Vector</b>. It's a few minutes of Bluetooth and Wi-Fi, done once. Use Chrome or Edge.</div></div>
-            <div class="onboard-item" style="--k:2"><span class="onboard-num">3</span><div class="onboard-text">Cloak picks him up the moment he's paired.</div></div>
+            <div class="onboard-item" style="--k:2"><span class="onboard-num">3</span><div class="onboard-text">CloakOS picks him up the moment he's paired.</div></div>
           </div>
           <a class="btn-primary btn-link" href="/pair">Pair Vector</a>
           <div class="help">Prefer wire-pod's own page? <a id="pod-open" href="http://localhost:8080" target="_blank" rel="noopener">Open wire-pod</a></div>
@@ -215,11 +215,11 @@ function show(r) {
     sub.textContent = 'Couldn\'t find it on this Mac or the network. Type its address.';
   } else if (r.state === 'pick') {
     t.textContent = 'Which Vector?';
-    sub.textContent = 'wire-pod knows more than one robot. Pick the one Cloak should live in.';
+    sub.textContent = 'wire-pod knows more than one robot. Pick the one CloakOS should live in.';
     S.bots = r.bots;
     renderBots();
   } else if (r.state === 'offline') {
-    wait.textContent = 'Waiting for Cloak…';
+    wait.textContent = 'Waiting for CloakOS…';
   }
 }
 function renderBots() {

@@ -2,8 +2,8 @@
 import asyncio
 import json
 
-from cloak_vector.app import Brain
-from cloak_vector.config import Config, load_config
+from cloakos.app import Brain
+from cloakos.config import Config, load_config
 
 from .fake_vector import GUID, SERIAL, make_cert, start_fake
 

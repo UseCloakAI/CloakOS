@@ -1,4 +1,4 @@
-"""Render the Cloak Vector app icon into a macOS .iconset folder (the installer runs iconutil on it).
+"""Render the CloakOS app icon into a macOS .iconset folder (the installer runs iconutil on it).
 
 Cloak's look: paper tile, hard ink border and offset shadow, rust orb, with two square
 eyes, the same ones Cloak draws on Vector's screen.

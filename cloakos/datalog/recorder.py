@@ -64,7 +64,7 @@ class Recorder:
         self.dir = self.root / f"{stamp}_{mode}"
         (self.dir / "frames").mkdir(parents=True, exist_ok=True)
         meta = {
-            "format": "cloak-vector/v1",
+            "format": "cloakos-vector/v1",
             "created": stamp,
             "mode": mode,
             "note": note,
