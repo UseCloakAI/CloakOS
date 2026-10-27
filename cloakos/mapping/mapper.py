@@ -37,6 +37,7 @@ class Mapper:
         self.hz = float(c.get("hz", 2.0))
         self.use_models = bool(c.get("models", True))          # depth + detector on the real robot
         self.detect_every = int(c.get("detect_every", 2))
+        self.sim_truth = bool(c.get("sim_truth", False))       # true = the sim hands over exact depth + labels (debug only)
         self.dir = Path((cfg.get("datalog", {}) or {}).get("dir", "data")) / "maps"
         self.link, self.world, self.bus = link, world, bus
         self.key: str | None = None
@@ -107,7 +108,11 @@ class Mapper:
                     if self.link.target == "sim" and self.link.sim is not None:
                         if self.vision_needed():
                             self.link.sim.touch()
-                        await self._from_sim()
+                        if self.sim_truth:
+                            await self._from_sim()
+                        else:                           # the same camera AI the real robot uses, on the sim's camera
+                            self.link.sim.want_depth = False
+                            await self._from_robot()
                     else:
                         await self._from_robot()
                 elif self.link.sim is not None:
@@ -145,7 +150,12 @@ class Mapper:
             return
         self._last_frame = w.frame_id
         p = self.link.pose
-        key = f"vector-{self.link.client.bot.serial}-{p['origin']}"
+        sim = self.link.sim if self.link.target == "sim" else None
+        if sim is not None and sim.scene_info is not None:
+            key = f"simcam-{sim.scene_info.world}-{sim.scene_info.seed}"
+            self.floor_z = sim.scene_info.floor_z
+        else:
+            key = f"vector-{self.link.client.bot.serial}-{p['origin']}"
         self._use(key, (p["pos"][0], p["pos"][1]))
         self.trail.append(tuple(round(v, 3) for v in p["pos"]))
         cam = camera_pose(p["pos"], quat_R(p["quat"]), p["head"])
@@ -182,7 +192,7 @@ class Mapper:
                 log.warning("object detector unavailable: %s", self.detector.error)
         await asyncio.to_thread(self._integrate, depth, cam, np.asarray(img), dets, 4)
         self.cam, self.dets, self.det_size = cam, dets, img.size
-        self.status = "mapping (camera depth)"
+        self.status = "mapping (camera AI" + (", simulator)" if sim is not None else ")")
 
     def _integrate(self, depth: np.ndarray, cam: CameraPose, rgb: np.ndarray, dets: list[dict], stride: int) -> None:
         pts, px = backproject(depth, cam, stride)
