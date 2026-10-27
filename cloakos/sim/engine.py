@@ -25,6 +25,10 @@ from .vector_model import HEAD_RANGE, LIFT_RANGE, MAX_WHEEL_MMPS, WHEEL_R, lift_
 
 log = logging.getLogger(__name__)
 
+# Vector's camera look, per room, between normal light and a dark room lit by one screen (the
+# dark end measured from a real frame: washed-out colour, crushed shadows, faint green-cyan cast)
+CAM_PROFILES = {"saturation": (0.55, 1.0), "contrast": (1.0, 2.2), "brightness": (0.95, 1.15)}
+CAM_CAST_DARK = np.array([0.96, 1.0, 1.03], np.float32)
 CAM_W, CAM_H = 640, 360           # what Vector's camera reports (rendering can be smaller)
 SURFACES = ("floor", "table", "rug")
 WHEELS = ("lf", "lm", "lb", "rf", "rm", "rb")
@@ -661,6 +665,18 @@ class Sim:
         self._gain = float(np.clip(self._gain + np.random.normal(0, 0.02), 0.75, 1.25))
         self._tint = np.clip(self._tint + np.random.normal(0, 0.004, 3), 0.94, 1.06).astype(np.float32)
         img = img * self._vig * self._gain * self._tint
+        if getattr(self, "_profile_for", None) != self.version:      # a new room: a new light level
+            t = float(np.random.random())                           # 0 = normal light .. 1 = dark room
+            lo_hi = lambda k: CAM_PROFILES[k][0] + (CAM_PROFILES[k][1] - CAM_PROFILES[k][0]) * (1 - t if k == "saturation" else t)
+            self._profile = {k: lo_hi(k) for k in CAM_PROFILES}
+            self._profile["cast"] = 1.0 + (CAM_CAST_DARK - 1.0) * t
+            self._profile_for = self.version
+        p = self._profile
+        lum = img @ np.array([0.299, 0.587, 0.114], np.float32)
+        img = lum[..., None] + (img - lum[..., None]) * p["saturation"]
+        m = float(lum.mean())
+        img = (img - m) * p["contrast"] + m * p["brightness"]
+        img = img * p["cast"]
         gz = abs(float(self.snapshot.get("gyro", (0, 0, 0))[2])) if self.snapshot else 0.0
         k = int(min(9, gz * 3))
         if k >= 2:
