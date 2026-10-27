@@ -11,6 +11,7 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);   // MuJoCo is z-up
 /* ── three.js scene ─────────────────────────────────────── */
 const canvas = $('#sim-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });   // never let the canvas size its own box
 renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -131,7 +132,7 @@ function badges(msg) {
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
   if (!r.width) return;
-  renderer.setSize(r.width, r.height, false);
+  renderer.setSize(Math.min(r.width, 4096), Math.min(r.height, 4096), false);
   camera.aspect = r.width / r.height;
   camera.updateProjectionMatrix();
 }

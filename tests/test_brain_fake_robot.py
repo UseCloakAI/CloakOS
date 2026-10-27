@@ -69,3 +69,15 @@ async def test_brain_end_to_end(tmp_path):
     assert {"obs", "drives", "behavior", "action", "events"} <= set(steps[0])
     assert "robot.connection" in seen and "mode.changed" in seen
     await server.stop(0)
+
+
+def test_ui_files_are_never_served_stale():
+    from fastapi.testclient import TestClient
+
+    from cloakos.web.server import create_app
+
+    brain = Brain(Config(load_config("config.yaml")))
+    c = TestClient(create_app(brain))
+    for path in ("/", "/static/vector.css", "/static/sim.js"):
+        r = c.get(path)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache", path

@@ -38,6 +38,15 @@ SIM_EVENTS = ("face_seen", "touched", "picked_up", "put_down", "cliff", "loud_so
 
 def create_app(brain: "Brain") -> FastAPI:
     app = FastAPI(title=FULL_NAME, docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def revalidate(request: Request, call_next):
+        # the UI changes with every update: always revalidate (cheap 304s via ETag), never serve stale files
+        resp = await call_next(request)
+        path = request.url.path
+        if path == "/" or path.startswith("/static/") or path in ("/setup", "/pair"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
     clients: set[WebSocket] = set()
     history: list[dict[str, Any]] = []
 
