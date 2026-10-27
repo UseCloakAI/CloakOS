@@ -1,16 +1,20 @@
 {
- "nous": "0.0.1",
- "min_app": "0.2.0",
+ "nous": "0.0.2",
+ "min_app": "0.3.0",
  "skills": {
   "goto": {
-   "policy.npz": "b924f9c7dec90e7be4745415594d416be8c8d4be64eedcddef2a10b053fe285b",
+   "exam.json": "bfba49784e7968ea632abb81b01e9f4b8c750a42a718c261294780c453e0718b",
    "meta.json": "9669a8f4bb9325bb9f162a1ae601ec2796271e707607da4ffb9a63221ec9f3e4",
-   "exam.json": "bfba49784e7968ea632abb81b01e9f4b8c750a42a718c261294780c453e0718b"
+   "policy.npz": "b924f9c7dec90e7be4745415594d416be8c8d4be64eedcddef2a10b053fe285b"
+  },
+  "vision": {
+   "visionnet.json": "c0df2eab5137dfb7d708ae29c58c5b760a9d424148b3814a4eda820a2be47ddb",
+   "visionnet.npz": "a3e35603af59cb6fc1274f1d9165e69b219b384d75a4da869c0749718e6ebf55"
   },
   "wander": {
-   "policy.npz": "1ff4c87d19423ff4a323eff1671799d45ecaa118aac77d23b709a913c15287d7",
+   "exam.json": "26d04a50b41fce1084d8e6cacf0197d7807e824a41ea48562df28c6801c23ef9",
    "meta.json": "24f8b95eb49eee483200fcd4063f208657edf480ed16aa3ea8eb23674ea6c762",
-   "exam.json": "26d04a50b41fce1084d8e6cacf0197d7807e824a41ea48562df28c6801c23ef9"
+   "policy.npz": "1ff4c87d19423ff4a323eff1671799d45ecaa118aac77d23b709a913c15287d7"
   }
  }
 }

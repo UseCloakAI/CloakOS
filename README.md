@@ -299,3 +299,9 @@ The mind of CloakOS Vector Edition. First shipped build.
 - **Opsis** (vision): live 3D map, object memory, depth, detector.
 - **Language**: Cloak models (pneuma, logos, kairos, linus) at api.usecloak.org.
 - Table edges: sensor reflex only on the real robot for now.
+
+## Nous v0.0.2
+
+- **Opsis vision net** (`rl/pretrained/vision`): a tiny camera-only net that reads one frame and estimates how far things are in 11 directions, including table edges. Trained on 21,600 simulator frames with real-camera effects (blur, grain, JPEG, vignetting, exposure drift, turn smear).
+  - Rooms it never saw: 11 cm average error (30 cm for guessing); says "clear" when something is within 30 cm 4% of the time, so the edge sensors stay the backstop.
+  - Shipped, not yet driving: it gets wired into the map once it's checked against real camera frames.
