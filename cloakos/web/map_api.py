@@ -58,12 +58,8 @@ def make_map_router(brain: "Brain") -> APIRouter:
         o = next((o for o in mp.objects if o["id"] == body.get("id")), None) or mp.find(str(body.get("query", "")))
         if o is None:
             return {"ok": False, "error": "I haven't seen one of those yet."}
-        brain.learned.goal = (o["pos"][0], o["pos"][1])
-        lp = brain.learned
-        if lp.spec is None or lp.spec.task != "goto":
-            return {"ok": True, "object": o, "note": "Goal set. Pick a trained goto policy in Training to drive there."}
-        if brain.mode != "learned":
-            await brain.set_mode("learned")
-        return {"ok": True, "object": o, "blocked": lp.deployable()}
+        if not await brain.go_to(o["id"]):
+            return {"ok": False, "error": "Connect Vector (or start the simulator) first."}
+        return {"ok": True, "object": o, "note": f"On my way to the {o['label']}."}
 
     return r
