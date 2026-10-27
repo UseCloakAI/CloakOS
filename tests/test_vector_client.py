@@ -4,8 +4,8 @@ import asyncio
 import httpx
 import pytest
 
-from cloak_vector.vector import BotInfo, VectorClient, discover, rgb565
-from cloak_vector.vector.discovery import cert_name
+from cloakos.vector import BotInfo, VectorClient, discover, rgb565
+from cloakos.vector.discovery import cert_name
 
 from .fake_vector import GUID, NAME, SERIAL, make_cert, start_fake
 

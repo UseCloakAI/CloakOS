@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#131110">
-<title>Cloak for Vector</title>
+<title>CloakOS</title>
 <link rel="icon" type="image/svg+xml" href="/static/orb.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
@@ -24,7 +24,7 @@
     <!-- ── SIDEBAR ── -->
     <div class="sidebar" id="sidebar">
       <div class="sb-logo">
-        <span class="sb-word" role="img" aria-label="Cloak"><span class="sb-c">C</span><span>L</span><span>O</span><span>A</span><span>K</span></span>
+        <span class="sb-word" role="img" aria-label="CloakOS"><span class="sb-c">C</span><span>L</span><span>O</span><span>A</span><span>K</span><span class="sb-os">OS</span></span>
       </div>
       <nav class="sb-nav" aria-label="Pages">
         <button class="sb-btn on" type="button" data-nav="live" aria-current="page" onclick="goPage('live')" title="Live">
@@ -236,6 +236,8 @@
           </div>
         </div>
         <div class="vs-scroll"><div class="vs">
+          <h2>About</h2>
+          <dl class="kv" id="kv-about"></dl>
           <h2>Robot</h2>
           <dl class="kv" id="kv-robot"></dl>
           <h2>Voice</h2>
@@ -247,7 +249,7 @@
             <button class="chip" onclick="checkUpdates()">Check now</button>
           </div>
           <h2>Stock animations</h2>
-          <p class="tele-note">Cloak plays its own emotes. These are Vector's built-ins, blended in at <code>expression.stock_blend</code>.</p>
+          <p class="tele-note">CloakOS plays its own emotes. These are Vector's built-ins, blended in at <code>expression.stock_blend</code>.</p>
           <div class="anim-form">
             <input id="anim-key" list="anim-list" placeholder="Trigger or keyword, e.g. Happy">
             <datalist id="anim-list"></datalist>
@@ -273,7 +275,7 @@
           <p class="tele-note">Fires the same event the robot would. Drives react, voice and behaviors follow.</p>
           <div class="chip-row" id="sim-row"></div>
           <h2>Play an emote</h2>
-          <p class="tele-note">Cloak's own eyes, motion and chirp. Needs control (Auto or Teleop).</p>
+          <p class="tele-note">CloakOS's own eyes, motion and chirp. Needs control (Auto or Teleop).</p>
           <div class="chip-row" id="emote-row"></div>
           <h2>Set drives</h2>
           <p class="tele-note">Drag to override. The value keeps decaying from wherever you drop it.</p>

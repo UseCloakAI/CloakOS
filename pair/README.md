@@ -2,8 +2,8 @@
 
 `src/` is the Bluetooth setup code from Digital Dream Labs' **vector-web-setup** (MIT, see
 `LICENSE`), taken from kercre123's fork at commit `b33baf1`. It's bundled into
-`cloak_vector/web/static/pair/rts.js` and driven by Cloak's own page,
-`cloak_vector/web/static/pair.html`.
+`cloakos/web/static/pair/rts.js` and driven by Cloak's own page,
+`cloakos/web/static/pair.html`.
 
 Changes from upstream (search `CLOAK:` in `src/main.js`):
 - settings load from `/static/pair/settings.json` (one stack, so the stack picker is skipped)

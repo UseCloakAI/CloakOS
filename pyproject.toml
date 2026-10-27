@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cloak-vector"
+name = "cloakos-vector-edition"
 version = "0.1.0"
-description = "Cloak for Vector: a living-creature brain for Anki/DDL Vector, running on your PC."
+description = "CloakOS Vector Edition: a living-creature brain for Anki/DDL Vector, running on your Mac or PC."
 requires-python = ">=3.11"
 dependencies = [
   "grpcio>=1.66.2",
@@ -29,13 +29,13 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 proto = ["grpcio-tools>=1.66.2"]
 
 [project.scripts]
-cloak-vector = "cloak_vector.__main__:main"
+cloakos = "cloakos.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["cloak_vector*"]
+include = ["cloakos*"]
 
 [tool.setuptools.package-data]
-cloak_vector = ["web/static/*", "web/static/pair/*", "vector/proto/*.proto"]
+cloakos = ["web/static/*", "web/static/pair/*", "vector/proto/*.proto"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

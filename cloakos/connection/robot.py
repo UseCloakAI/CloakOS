@@ -1,6 +1,6 @@
 """RobotLink: owns the robot connection. Discover via wire-pod, connect, watchdog, reconnect, clean shutdown.
 
-Built on our own gRPC client (cloak_vector.vector); no Anki SDK. Streams (events, camera,
+Built on our own gRPC client (cloakos.vector); no Anki SDK. Streams (events, camera,
 behavior control) run as tasks on the same asyncio loop as the brain.
 """
 from __future__ import annotations

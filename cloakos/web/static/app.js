@@ -1,4 +1,4 @@
-/* Cloak for Vector dashboard. One WebSocket: state at 5 Hz + events as they happen. */
+/* CloakOS (Vector Edition) dashboard. One WebSocket: state at 5 Hz + events as they happen. */
 'use strict';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -274,6 +274,7 @@ async function loadInfo() {
   const kv = (el, rows) => { $(el).innerHTML = rows.map(([k, v, cls]) => `<dt>${esc(k)}</dt><dd class="${cls || ''}">${esc(v ?? '—')}</dd>`).join(''); };
   kv('#kv-robot', [['wire-pod', info.wirepod], ['Connection', S ? S.connection : '—'], ['Name', info.robot.name], ['Serial', info.robot.serial], ['Address', info.robot.host], ['Control', S && S.has_control ? 'held by Cloak' : 'stock Vector']]);
   if (info.robot.name) $('#sb-name').textContent = info.robot.name;
+  if (info.product) kv('#kv-about', [['Product', info.product.name], ['Version', info.product.version]]);
   $('#emote-row').innerHTML = (info.emotes || []).map(e => `<button class="chip" onclick="sendWS({type:'emote',name:'${e}'})">${esc(e)}</button>`).join('');
   kv('#kv-voice', [['TTS', info.tts], ...(info.tts_error ? [['TTS error', info.tts_error, 'err']] : []), ['LLM endpoint', info.llm.base_url], ['LLM model', info.llm.model]]);
   const trigs = info.anim_triggers || [];
@@ -295,9 +296,9 @@ async function loadUpdates() {
   const when = st.checked_at ? new Date(st.checked_at * 1000).toLocaleString() : 'not yet';
   const short = x => (x || '').slice(0, 7) || '—';
   const rows = [
-    ['Cloak', `${short(upd.installed)} · ${upd.channel}`],
+    ['CloakOS', `${short(upd.installed)} · ${upd.channel}`],
     ['Last check', `${when}${st.result ? ' · ' + st.result : ''}`],
-    ['wire-pod', wp.managed ? `${wp.installed || '?'} · pinned ${wp.pinned}` : `yours · Cloak won't touch it (compatible: ${wp.pinned})`],
+    ['wire-pod', wp.managed ? `${wp.installed || '?'} · pinned ${wp.pinned}` : `yours · CloakOS won't touch it (compatible: ${wp.pinned})`],
   ];
   $('#kv-updates').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
   $('#upd-actions').hidden = false;
@@ -309,7 +310,7 @@ async function toggleAutoUpdate() {
 }
 async function checkUpdates() {
   await fetch('/api/setup/updates/check', { method: 'POST' });
-  $('#kv-updates').insertAdjacentHTML('beforeend', '<dt>Now</dt><dd>Checking… If there\'s an update, Cloak restarts by itself.</dd>');
+  $('#kv-updates').insertAdjacentHTML('beforeend', '<dt>Now</dt><dd>Checking… If there\'s an update, CloakOS restarts by itself.</dd>');
 }
 
 function playAnim() { const k = $('#anim-key').value.trim(); if (k) sendWS({ type: 'anim', key: k }); }

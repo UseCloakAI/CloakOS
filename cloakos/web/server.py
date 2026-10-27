@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from ..bus import Event
+from .. import FULL_NAME, __version__
 from ..drives import DRIVES
 from .setup_api import autoconfigure_loop, make_router, robot_ota_url
 
@@ -35,7 +36,7 @@ SIM_EVENTS = ("face_seen", "touched", "picked_up", "put_down", "cliff", "loud_so
 
 
 def create_app(brain: "Brain") -> FastAPI:
-    app = FastAPI(title="Cloak for Vector", docs_url=None, redoc_url=None)
+    app = FastAPI(title=FULL_NAME, docs_url=None, redoc_url=None)
     clients: set[WebSocket] = set()
     history: list[dict[str, Any]] = []
 
@@ -81,6 +82,7 @@ def create_app(brain: "Brain") -> FastAPI:
         c = brain.cfg
         bot = brain.link.client.bot if brain.link.client else None
         return JSONResponse({
+            "product": {"name": FULL_NAME, "version": __version__},
             "wirepod": (c.get("wirepod", {}) or {}).get("url"),
             "robot": {"name": bot.name if bot else None, "serial": bot.serial if bot else None,
                       "host": bot.host if bot else None},

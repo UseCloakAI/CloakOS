@@ -1,4 +1,4 @@
-# Cloak for Vector — tuning lives here. Secrets / per-machine values go in .env.
+# CloakOS Vector Edition — tuning lives here. Secrets / per-machine values go in .env.
 
 mode: auto            # starting mode: auto | teleop | idle
 tick_hz: 10

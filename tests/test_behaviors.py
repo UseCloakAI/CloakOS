@@ -1,12 +1,12 @@
 import asyncio
 import time
 
-from cloak_vector.behaviors import Obs, RulePolicy
-from cloak_vector.bus import Bus
-from cloak_vector.config import load_config
-from cloak_vector.connection import Action
-from cloak_vector.teleop import TeleopPolicy
-from cloak_vector.world import Face, World
+from cloakos.behaviors import Obs, RulePolicy
+from cloakos.bus import Bus
+from cloakos.config import load_config
+from cloakos.connection import Action
+from cloakos.teleop import TeleopPolicy
+from cloakos.world import Face, World
 
 
 class FakeBody:

@@ -1,7 +1,7 @@
 import math
 
-from cloak_vector.config import load_config
-from cloak_vector.drives import Context, DriveModel
+from cloakos.config import load_config
+from cloakos.drives import Context, DriveModel
 
 
 def model(**over):

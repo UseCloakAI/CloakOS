@@ -1,4 +1,4 @@
-"""Regenerate cloak_vector/vector/pb from the vendored .proto files.
+"""Regenerate cloakos/vector/pb from the vendored .proto files.
 
 The protos are Anki's Vector external interface (Apache-2.0), with the REST-gateway
 annotations stripped so nothing beyond protobuf is needed. Run after editing a proto:
@@ -11,8 +11,8 @@ import sys
 from grpc_tools import protoc
 
 root = pathlib.Path(__file__).resolve().parents[1]
-src = root / "cloak_vector/vector/proto"
-out = root / "cloak_vector/vector/pb"
+src = root / "cloakos/vector/proto"
+out = root / "cloakos/vector/pb"
 out.mkdir(exist_ok=True)
 for old in out.glob("*_pb2*.py"):
     old.unlink()
