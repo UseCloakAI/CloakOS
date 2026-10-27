@@ -48,7 +48,7 @@ class Brain:
         ex = cfg.get("expression", {}) or {}
         self.eyes = Eyes(cfg)
         self.eyes_on = bool(ex.get("eyes", True))
-        self.eye_fps = float(ex.get("eye_fps", 20))
+        self.eye_fps = min(12.0, float(ex.get("eye_fps", 10)))     # more crashes Vector's display process
         self.eye_frame = None                    # latest rendered eyes (PIL), for the dashboard too
         self.reactions: dict[str, str] = ex.get("reactions", {}) or {}
         self.body.emotes = Emotes(cfg, self.eyes)
@@ -258,7 +258,10 @@ class Brain:
 
     async def _eye_loop(self) -> None:
         """Render Cloak's eyes every frame; push them to the screen whenever we hold control."""
+        # Vector's display process (vic-anim) crashes (error 8xx) if it's flooded: send at most
+        # eye_fps, skip frames that didn't change, and slow down when Vector is slow to take them.
         period = 1.0 / self.eye_fps
+        sent, last_sent, slow = None, 0.0, 0
         while not self._stop.is_set():
             t0 = time.monotonic()
             face = self.world.face
@@ -267,7 +270,15 @@ class Brain:
             self.eyes.status = self.activity()
             self.eye_frame = self.eyes.frame(self.eyes.shape(self.drives.values, behavior, gaze))
             if self.eyes_on and self.body.ready:
-                await self.body.face(rgb565(self.eye_frame), int(3000 * period))
+                px = rgb565(self.eye_frame)
+                if px != sent or t0 - last_sent > 1.0:          # refresh now and then so it never times out
+                    await self.body.face(px, 2500)
+                    sent, last_sent = px, t0
+                    took = time.monotonic() - t0
+                    slow = slow + 1 if took > period * 0.8 else max(0, slow - 1)
+                    if slow > 5:                                 # Vector is struggling: back off
+                        period, slow = min(0.25, period * 1.3), 0
+                        log.info("eyes: Vector is slow to draw, now %.0f fps", 1 / period)
             await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
 
     ACTIVITY = {"wander": "Wandering", "look_around": "Looking around", "approach_face": "Coming to say hi"}
