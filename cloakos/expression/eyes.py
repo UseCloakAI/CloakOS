@@ -18,7 +18,9 @@ from dataclasses import dataclass, fields
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 W, H = 184, 96
-SS = 2   # supersample for smooth curves
+SS = 3   # supersample for smooth curves
+BASE_EYE = 52.0   # eye width in screen pixels (the screen is 184x96)
+EYE_GAP = 42.0    # distance of each eye from the middle
 
 
 def _hex(c: str) -> tuple[int, int, int]:
@@ -71,6 +73,7 @@ class Eyes:
         self._text_t0: float | None = None
         self._fonts: dict[int, object] = {}
         self._layouts: dict[str, tuple[list[str], int]] = {}
+        self._grads: dict[tuple, Image.Image] = {}
 
     def set_mood(self, mood: str, seconds: float) -> None:
         self.mood, self.mood_until = mood, time.time() + seconds
@@ -217,47 +220,71 @@ class Eyes:
         return x * x * (3 - 2 * x)                       # smoothstep
 
     def render(self, s: EyeShape, blink: float = 0.0, breathe: float = 0.0, overlay: float = 0.0, text: str = "") -> Image.Image:
-        img = Image.new("RGB", (W * SS, H * SS), self.bg)
-        eyes = Image.new("L", (W * SS, H * SS), 0)            # eye mask, lids cut out of it
+        S = SS
+        img = Image.new("RGB", (W * S, H * S), self.bg)
+        eyes = Image.new("L", (W * S, H * S), 0)              # eye mask, lids cut out of it
         dr = ImageDraw.Draw(eyes)
         jx = random.uniform(-s.jitter, s.jitter) if s.jitter > 0.05 else 0.0
         jy = random.uniform(-s.jitter, s.jitter) if s.jitter > 0.05 else 0.0
         # words take the screen: the eyes shrink away, then grow back with a little pop
         shrink = (1.0 - overlay) * (1.0 + 0.08 * math.sin(math.pi * min(1.0, overlay * 2))) if overlay < 1 else 0.0
-        lift = 0.0
         open_ = max(0.0, min(1.2, s.open)) * (1 - blink)
+        # squash and stretch: the eyes lengthen along fast gaze moves, like a real glance
+        vx, vy = self._vel.get("gaze_x", 0.0), self._vel.get("gaze_y", 0.0)
+        stretch_x = 1.0 + min(0.14, abs(vx) * 0.035)
+        stretch_y = 1.0 - min(0.08, abs(vx) * 0.02) + min(0.1, abs(vy) * 0.03)
         for side in (-1, 1):
-            size = 38 * max(0.4, s.scale) * (1 + breathe) * shrink * (1 + (s.asym if side > 0 else -s.asym * 0.5))
-            w = size * (1 + 0.12 * blink)                      # blinks squash a little wider
-            h = max(2.5, size * 1.15 * open_ * (1 - 0.25 * max(0.0, s.squint)))
-            cx = W / 2 + side * 36 * shrink + s.gaze_x * 15 + jx
-            cy = H / 2 + s.gaze_y * 10 + jy + lift
+            size = BASE_EYE * max(0.4, s.scale) * (1 + breathe) * shrink * (1 + (s.asym * 0.55 if side > 0 else -s.asym * 0.3))
+            w = size * (1 + 0.14 * blink) * stretch_x           # blinks squash a little wider
+            h = max(3.0, size * 1.22 * open_ * (1 - 0.25 * max(0.0, s.squint)) * stretch_y)
+            # the eye nearer the gaze direction is a touch bigger (cheap perspective)
+            persp = 1.0 + 0.05 * s.gaze_x * side
+            w, h = w * persp, h * persp
+            cx = W / 2 + side * EYE_GAP * shrink + s.gaze_x * 13 + jx
+            cy = H / 2 + s.gaze_y * 8 + jy
             box = [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2]
-            r = min(w, h) * 0.32
-            dr.rounded_rectangle([v * SS for v in box], radius=r * SS, fill=255)
-            # lids: cut shapes out of the mask
-            if s.happy > 0.05:
-                rr = w * 0.8
-                cut_y = box[3] - h * 0.45 * min(1.0, s.happy)
-                dr.ellipse([(cx - rr) * SS, cut_y * SS, (cx + rr) * SS, (cut_y + h * 1.4) * SS], fill=0)
+            r = min(w, h) * 0.36
+            dr.rounded_rectangle([v * S for v in box], radius=r * S, fill=255)
+            # lids: smooth cuts out of the mask
+            if s.happy > 0.05:                                   # lower lid pushes up in an arc: ^ ^
+                rr = w * 0.78
+                cut_y = box[3] - h * 0.5 * min(1.0, s.happy)
+                dr.ellipse([(cx - rr) * S, cut_y * S, (cx + rr) * S, (cut_y + h * 1.5) * S], fill=0)
             inner = box[0] if side > 0 else box[2]
             outer = box[2] if side > 0 else box[0]
-            if s.sad > 0.05:
-                drop = h * 0.55 * min(1.0, s.sad)
-                dr.polygon([(outer * SS, (box[1] - 3) * SS), (outer * SS, (box[1] + drop) * SS), (inner * SS, (box[1] - 3) * SS)], fill=0)
+            top = box[1] - 4
+            if s.sad > 0.05:                                     # upper lid drops toward the outside, with a soft curve
+                drop = h * 0.6 * min(1.0, s.sad)
+                dr.polygon([(outer * S, top * S), (outer * S, (box[1] + drop) * S),
+                            ((inner * 0.35 + outer * 0.65) * S, (box[1] + drop * 0.45) * S), (inner * S, top * S)], fill=0)
             if s.angry > 0.05:
-                drop = h * 0.5 * min(1.0, s.angry)
-                dr.polygon([(inner * SS, (box[1] - 3) * SS), (inner * SS, (box[1] + drop) * SS), (outer * SS, (box[1] - 3) * SS)], fill=0)
+                drop = h * 0.55 * min(1.0, s.angry)
+                dr.polygon([(inner * S, top * S), (inner * S, (box[1] + drop) * S),
+                            ((outer * 0.35 + inner * 0.65) * S, (box[1] + drop * 0.45) * S), (outer * S, top * S)], fill=0)
+        eyes = eyes.filter(ImageFilter.GaussianBlur(0.6 * S))   # softens the cut corners; the downscale does the rest
         bright = 1.0 - overlay
         color = tuple(int(c * bright + b * (1 - bright)) for c, b in zip(self.color, self.bg))
         if shrink > 0.02:
-            if self.glow:                                      # soft halo, like a lit screen
-                halo = eyes.filter(ImageFilter.GaussianBlur(5 * SS)).point(lambda v: int(v * 0.35))
+            if self.glow:                                        # soft halo, like a lit screen
+                halo = eyes.filter(ImageFilter.GaussianBlur(7 * S)).point(lambda v: int(v * 0.4))
                 img.paste(Image.new("RGB", img.size, color), (0, 0), halo)
-            img.paste(Image.new("RGB", img.size, color), (0, 0), eyes)
+            # gentle shading: full white on top easing to a soft grey-white at the bottom edge
+            grad = self._gradient(color)
+            img.paste(grad, (0, 0), eyes)
         if overlay > 0.02 and text:
             self._draw_text(img, text, overlay)
         return img.resize((W, H), Image.LANCZOS)
+
+    def _gradient(self, color) -> Image.Image:
+        key = tuple(color)
+        g = self._grads.get(key)
+        if g is None:
+            col = Image.linear_gradient("L").resize((W * SS, H * SS)).rotate(0)      # black top -> white bottom
+            lo = Image.new("RGB", (W * SS, H * SS), key)
+            hi = Image.new("RGB", (W * SS, H * SS), tuple(int(c * 0.86) for c in key))
+            g = Image.composite(hi, lo, col.point(lambda v: int(v * 0.9)))
+            self._grads[key] = g
+        return g
 
     def _font(self, px: int):
         if px not in self._fonts:
