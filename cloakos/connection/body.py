@@ -45,6 +45,7 @@ class Body:
         self.source = "none"          # who sent the last command: behavior name, "teleop", "policy"
         self.emotes: Any = None       # expression.Emotes, attached by the brain
         self._discrete: list[dict[str, Any]] = []
+        self._gen = -1                # link.control_gen our last command went out under
 
     @property
     def ready(self) -> bool:
@@ -77,6 +78,8 @@ class Body:
             self.source = source
         if not self.ready:
             return
+        if self._gen != self.link.control_gen:   # new control session: the robot was stopped, resend everything
+            self._gen, prev = self.link.control_gen, Action()
         if (a.left_mmps, a.right_mmps) != (prev.left_mmps, prev.right_mmps):
             await self._do("drive_wheels", a.left_mmps, a.right_mmps, 400)
         if a.head_rate != prev.head_rate:

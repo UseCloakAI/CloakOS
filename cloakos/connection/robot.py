@@ -40,6 +40,7 @@ class RobotLink:
         self.state = "disconnected"
         self.anim_triggers: list[str] = []
         self.hint: str | None = None          # a known, fixable reason the last connect failed
+        self.control_gen = 0                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
         self._stop = asyncio.Event()
 
@@ -169,6 +170,12 @@ class RobotLink:
                                                float(self.cfg.get("control_timeout_s", 10)))
         if not ok:
             log.warning("behavior control not granted yet")
+            return
+        self.control_gen += 1
+        try:                                  # a dropped session can leave the wheels running
+            await self.client.stop_all()
+        except Exception as e:
+            log.debug("stop on control grant: %s", e)
 
     # ── sensors ────────────────────────────────────────────────
 
