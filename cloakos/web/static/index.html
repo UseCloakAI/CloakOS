@@ -40,6 +40,10 @@
         <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
         <span class="sbl" id="sb-rec-label">Record episode</span>
       </button>
+      <a class="sb-btn sb-new" href="/pair" title="Pair Vector">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>
+        <span class="sbl">Pair Vector</span>
+      </a>
       <div class="sb-label">Recordings</div>
       <div class="conv-list" id="conv-list"></div>
 
@@ -114,6 +118,10 @@
         </div>
 
         <div class="vitals-wrap" id="vitals">
+          <div class="pair-cta" id="pair-cta" hidden>
+            <span class="pair-cta-text"><b>Vector isn't connected.</b> New robot, or not paired with wire-pod yet?</span>
+            <a class="pair-cta-btn" href="/pair">Pair Vector</a>
+          </div>
           <div class="vitals">
             <div class="cam cam-live" data-cam>
                 <div class="cam-empty"><img class="eyes-big" data-eyes alt="Vector's eyes"><span class="cam-msg">No camera yet · live eyes</span></div>
@@ -240,6 +248,10 @@
           <dl class="kv" id="kv-about"></dl>
           <h2>Robot</h2>
           <dl class="kv" id="kv-robot"></dl>
+          <div class="chip-row">
+            <a class="chip chip-link" href="/pair">Pair a Vector</a>
+            <a class="chip chip-link" id="wp-link" href="http://localhost:8080" target="_blank" rel="noopener">Open wire-pod</a>
+          </div>
           <h2>Voice</h2>
           <dl class="kv" id="kv-voice"></dl>
           <h2>Updates</h2>

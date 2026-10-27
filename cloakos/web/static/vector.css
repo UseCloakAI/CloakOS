@@ -191,3 +191,12 @@
 
 /* CloakOS wordmark: the OS unfolds last, in the accent */
 .sb-word>span.sb-os{--sb-d:.17s;color:var(--acc)}
+
+/* pairing: always one click away */
+.pair-cta{max-width:760px;margin:0 auto 14px;display:flex;align-items:center;gap:14px;padding:10px 12px 10px 14px;border:var(--bd);background:var(--yel);color:#0A0A0A;box-shadow:var(--shsm);animation:rvUp .4s var(--ease-out) backwards}
+.pair-cta-text{flex:1;font-size:12px;line-height:1.5}
+.pair-cta-btn{flex-shrink:0;height:32px;padding:0 14px;display:flex;align-items:center;background:var(--acc);color:#fff;border:2px solid #0A0A0A;box-shadow:2px 2px 0 #0A0A0A;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;text-decoration:none;transition:box-shadow var(--lift),transform var(--lift)}
+.pair-cta-btn:hover{box-shadow:4px 4px 0 #0A0A0A;transform:translate(-2px,-2px)}
+a.sb-btn{text-decoration:none}
+.chip-link{display:inline-flex;align-items:center;text-decoration:none}
+@media (max-width:640px){.pair-cta{flex-direction:column;align-items:stretch}.pair-cta-btn{justify-content:center}}

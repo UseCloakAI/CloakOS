@@ -39,6 +39,10 @@ function setConn(state) {
   const label = { connected: 'Connected', connecting: 'Connecting', waiting: 'Retrying', disconnecting: 'Closing', disconnected: 'Offline', server: 'No brain' }[state] || state;
   $$('.conn-label').forEach(l => l.textContent = label);
   $('#sb-email').textContent = label.toLowerCase();
+  // not connected for a while: offer pairing right on the Live page
+  clearTimeout(setConn.t);
+  if (on) $('#pair-cta').hidden = true;
+  else setConn.t = setTimeout(() => { $('#pair-cta').hidden = false; }, 8000);
 }
 
 function render(s) {
@@ -274,6 +278,7 @@ async function loadInfo() {
   const kv = (el, rows) => { $(el).innerHTML = rows.map(([k, v, cls]) => `<dt>${esc(k)}</dt><dd class="${cls || ''}">${esc(v ?? '—')}</dd>`).join(''); };
   kv('#kv-robot', [['wire-pod', info.wirepod], ['Connection', S ? S.connection : '—'], ['Name', info.robot.name], ['Serial', info.robot.serial], ['Address', info.robot.host], ['Control', S && S.has_control ? 'held by Cloak' : 'stock Vector']]);
   if (info.robot.name) $('#sb-name').textContent = info.robot.name;
+  if (info.wirepod) $('#wp-link').href = info.wirepod;
   if (info.product) kv('#kv-about', [['Product', info.product.name], ['Version', info.product.version]]);
   $('#emote-row').innerHTML = (info.emotes || []).map(e => `<button class="chip" onclick="sendWS({type:'emote',name:'${e}'})">${esc(e)}</button>`).join('');
   kv('#kv-voice', [['TTS', info.tts], ...(info.tts_error ? [['TTS error', info.tts_error, 'err']] : []), ['LLM endpoint', info.llm.base_url], ['LLM model', info.llm.model]]);
