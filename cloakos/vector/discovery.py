@@ -7,6 +7,7 @@ The cert's name (SAN or CN, e.g. "Vector-A1B2") is what TLS must verify against.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,17 @@ def cert_name(pem: bytes) -> str | None:
     return cn[0].value if cn else None
 
 
+def robot_cert(ip: str, timeout: float = 5.0) -> bytes | None:
+    """The robot's TLS certificate (PEM), read straight from its gRPC port."""
+    import ssl
+    host, _, port = ip.partition(":")
+    try:
+        return ssl.get_server_certificate((host, int(port or 443)), timeout=timeout).encode()
+    except (OSError, ValueError) as e:
+        log.debug("couldn't read cert from %s: %s", ip, e)
+        return None
+
+
 async def discover(cfg: dict, cert_dir: str | Path = "data/certs", transport: httpx.AsyncBaseTransport | None = None) -> BotInfo:
     """Resolve the robot from wire-pod, letting any robot.* value in config override it."""
     r = cfg.get("robot", {}) or {}
@@ -70,9 +82,17 @@ async def discover(cfg: dict, cert_dir: str | Path = "data/certs", transport: ht
         else:
             resp = await http.get(f"{pod}/session-certs/{serial}")
             if resp.status_code == 404:
-                raise LookupError(f"wire-pod has no cert for {serial} yet; finish setting the bot up in wire-pod's web UI")
-            resp.raise_for_status()
-            cert = resp.content
+                # wire-pod only saves the cert while the robot is being activated, so it can know the
+                # bot but not its cert (e.g. after its data was reset). The cert is the robot's own TLS
+                # certificate, so read it from the robot (wire-pod itself doesn't verify it at all).
+                cert = await asyncio.to_thread(robot_cert, ip)
+                if not cert:
+                    raise LookupError(f"wire-pod has no cert for {serial} and the robot didn't answer at {ip}; "
+                                      "pair it again (Pair Vector → Activate)")
+                log.info("got %s's certificate from the robot itself", serial)
+            else:
+                resp.raise_for_status()
+                cert = resp.content
             cert_file.parent.mkdir(parents=True, exist_ok=True)
             cert_file.write_bytes(cert)
 

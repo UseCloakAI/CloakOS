@@ -17,6 +17,19 @@ from ..world import CAMERA_H, CAMERA_W, Face, World
 log = logging.getLogger(__name__)
 
 
+def hint_for(error: str) -> str | None:
+    """Turn a connect error into something the UI can explain."""
+    e = error.lower()
+    if "no route to host" in e or "errno 65" in e:
+        # macOS: the robot answers ping but this app isn't allowed on the local network
+        return "local_network"
+    if "can't reach wire-pod" in e:
+        return "no_wirepod"
+    if "has no bot" in e or "no cert for" in e:
+        return "not_paired"
+    return None
+
+
 class RobotLink:
     def __init__(self, cfg: dict, bus: Bus, world: World) -> None:
         self.full_cfg = cfg
@@ -26,6 +39,7 @@ class RobotLink:
         self.client: VectorClient | None = None
         self.state = "disconnected"
         self.anim_triggers: list[str] = []
+        self.hint: str | None = None          # a known, fixable reason the last connect failed
         self._want_control = False
         self._stop = asyncio.Event()
 
@@ -50,7 +64,9 @@ class RobotLink:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                log.warning("robot link: %s", " ".join(str(e).split()) or type(e).__name__)
+                msg = " ".join(str(e).split()) or type(e).__name__
+                self.hint = hint_for(msg)
+                log.warning("robot link: %s", msg)
             finally:
                 await self._disconnect()
             if self._stop.is_set():
@@ -82,6 +98,7 @@ class RobotLink:
             self.anim_triggers = await client.anim_triggers()
         except Exception as e:
             log.warning("could not list animation triggers: %s", e)
+        self.hint = None
         self._set_state("connected", name=bot.name, serial=bot.serial, host=bot.host)
         log.info("connected to %s (%d anim triggers)", bot.name, len(self.anim_triggers))
         if self._want_control:

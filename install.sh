@@ -85,6 +85,8 @@ step() {
   printf '%s' "$SHOW"
 }
 
+tilde() { case "$1" in "$HOME"*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }   # bash 3.2-safe ~/path
+
 note() { printf '      %s%s%s\n' "$DIM" "$1" "$RST"; }
 
 # ── steps ────────────────────────────────────────────────────────────
@@ -247,7 +249,7 @@ fi
 mkdir -p "$HOME_DIR/logs"
 : >"$LOG"
 VERB="Installing"; [[ -d "$HOME_DIR/venv" ]] && VERB="Updating"
-printf '  %s%s into%s %s\n\n' "$DIM" "$VERB" "$RST" "${HOME_DIR/#"$HOME"/\~}"
+printf '  %s%s into%s %s\n\n' "$DIM" "$VERB" "$RST" "$(tilde "$HOME_DIR")"
 
 "$HOME_DIR/bin/cloakctl" stop >/dev/null 2>&1 || true
 

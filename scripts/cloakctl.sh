@@ -68,8 +68,12 @@ auto_update() {      # auto-update [--now]: install a newer Cloak (and with it a
   installed="$(cat "$HOME_DIR/app/.sha" 2>/dev/null || echo unknown)"
   latest="$(curl -fsSL -m 15 -H 'Accept: application/vnd.github.sha' \
     "https://api.github.com/repos/$REPO/commits/$(channel)" 2>/dev/null || true)"
-  if [[ ! "$latest" =~ ^[0-9a-f]{40}$ ]]; then write_status "offline" ""; return 0; fi
-  if [[ "$latest" == "$installed" ]]; then write_status "current" "$latest"; return 0; fi
+  if [[ ! "$latest" =~ ^[0-9a-f]{40}$ ]]; then
+    write_status "offline" ""; [[ "$force" == "--now" ]] && echo "Couldn't check for updates. Are you online?"; return 0
+  fi
+  if [[ "$latest" == "$installed" ]]; then
+    write_status "current" "$latest"; [[ "$force" == "--now" ]] && echo "CloakOS is up to date (${installed:0:7})."; return 0
+  fi
   # never interrupt a recording; try again next time
   if running && curl -fsS -m 3 "$URL/api/health" 2>/dev/null | grep -q '"recording": *true'; then
     write_status "postponed (recording)" "$latest"; return 0
