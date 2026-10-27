@@ -31,6 +31,17 @@ def make_map_router(brain: "Brain") -> APIRouter:
     async def voxels() -> Response:
         return Response(await asyncio.to_thread(mp.voxels_bin), media_type="application/octet-stream")
 
+    @r.get("/live")
+    async def live() -> dict[str, Any]:
+        out = mp.live()
+        sim = brain.link.sim
+        if brain.link.target == "sim" and sim is not None and sim.snapshot:
+            out["robot"] = {"pos": sim.snapshot["pos"], "yaw": sim.snapshot["yaw"]}
+        elif brain.link.pose:
+            out["robot"] = {"pos": brain.link.pose["pos"], "yaw": brain.world.pose[2] if brain.world.pose else 0.0}
+        out["goal"] = brain.learned.goal
+        return out
+
     @r.post("/clear")
     async def clear() -> dict[str, Any]:
         await asyncio.to_thread(mp.clear)

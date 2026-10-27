@@ -371,6 +371,18 @@
             <canvas id="map-canvas" aria-label="3D map Vector has built"></canvas>
             <div class="sim-empty" id="map-empty">Nothing mapped yet. Drive Vector around (or the sim) and the map fills in.</div>
             <div class="sim-badges" id="map-badges"></div>
+            <div class="sim-hud map-hud">
+              <div class="cam sim-cam" data-cam>
+                <div class="cam-empty">No camera yet</div>
+                <span class="cam-tag" hidden>What it sees</span>
+                <div class="det-layer" id="det-layer"></div>
+              </div>
+            </div>
+            <div class="sim-tools">
+              <button class="chip on" id="map-chase" onclick="mapChase()">Chase cam</button>
+              <button class="chip on" id="map-look" onclick="mapLook()">FSD look</button>
+              <button class="chip" id="map-cone" onclick="mapCone()">View cone</button>
+            </div>
           </div>
           <aside class="sim-side">
             <h2>Remembered</h2>
