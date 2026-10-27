@@ -7,3 +7,4 @@ venv/
 data/
 models/
 .pytest_cache/
+MUJOCO_LOG*.TXT
