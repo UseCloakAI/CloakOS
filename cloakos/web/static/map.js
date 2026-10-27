@@ -198,12 +198,12 @@ async function refreshSummary() {
 }
 const ago = t => { const s = Math.max(0, Date.now() / 1000 - t); return s < 60 ? `${s | 0}s ago` : s < 3600 ? `${(s / 60) | 0}m ago` : `${(s / 3600) | 0}h ago`; };
 
-window.mapGo = async id => { const r = await post('/api/map/goto', { id }); if (!r.ok) alert(r.error); else if (r.note || r.blocked) alert(r.note || r.blocked); };
+window.mapGo = async id => { const r = await post('/api/map/goto', { id }); if (!r.ok) alert(r.error); };
 window.mapFind = async () => {
   const q = $('#map-find').value.trim();
   if (!q) return;
   const r = await post('/api/map/goto', { query: q });
-  alert(r.ok ? `Found ${r.object.label} at ${r.object.pos.map(v => v.toFixed(2)).join(', ')} m.${r.note ? ' ' + r.note : r.blocked ? ' ' + r.blocked : ' On the way.'}` : r.error);
+  alert(r.ok ? `Found ${r.object.label} at ${r.object.pos.map(v => v.toFixed(2)).join(', ')} m.${r.note ? ' ' + r.note : ''}` : r.error);
 };
 window.mapClear = async () => { if (confirm('Forget this map and everything in it?')) { await post('/api/map/clear'); voxelVersion = -1; refreshSummary(); } };
 window.mapChase = () => { chase = !chase; $('#map-chase').classList.toggle('on', chase); };
