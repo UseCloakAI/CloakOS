@@ -52,8 +52,27 @@ def test_eyes_tween_and_show_status():
         t += 0.05
         img = e.frame(target, now=t)
     assert e._ov > 0.9 and img.size == (184, 96)
-    lower = img.crop((0, 70, 184, 96))
-    assert max(p[0] for p in lower.getdata()) > 150         # the words are on screen
+    lit = sum(1 for p in img.getdata() if p[0] > 150)
+    assert lit > 1500                                       # big words fill the screen
     e.status = None
     e.flash("Got there!", 1.0)
     assert e._text(t) == "Got there!"
+
+
+def test_new_activity_takes_the_screen_then_eyes_return():
+    e = Eyes({})
+    e._last = 0.0
+    e.status = "Wandering"
+    seen = []
+    t = 0.0
+    for _ in range(60):
+        t += 0.05
+        e.frame(EyeShape(), now=t)
+        seen.append(e._ov)
+    assert max(seen) == 1.0 and seen[-1] == 0.0          # words, then back to eyes while still wandering
+    e.status = "Going to the mug"                        # a new activity is announced again
+    t += 0.05
+    e.frame(EyeShape(), now=t)
+    t += 0.3
+    e.frame(EyeShape(), now=t)
+    assert e._ov > 0.9
