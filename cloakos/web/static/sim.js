@@ -1,0 +1,237 @@
+/* Simulator page: live 3D view of the MuJoCo world (three.js), world controls, tester. */
+import * as THREE from 'three';
+import { OrbitControls } from './vendor/OrbitControls.js';
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const post = (url, body = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);   // MuJoCo is z-up
+
+/* ── three.js scene ─────────────────────────────────────── */
+const canvas = $('#sim-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.005, 50);
+camera.position.set(0.55, -0.55, 0.45);
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(0, 0, 0.03);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.49;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444033, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(1.2, -0.8, 2.5);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -2, right: 2, top: 2, bottom: -2, near: 0.1, far: 6 });
+scene.add(sun);
+
+let bodies = [], version = -1, robotId = 1, follow = true, shown = false, screenTex = null;
+const world = new THREE.Group();
+scene.add(world);
+
+function bg() {
+  const css = getComputedStyle(document.documentElement);
+  scene.background = new THREE.Color(css.getPropertyValue('--p2').trim() || '#EAE5DB');
+}
+
+function checker(rgba, size) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const col = (k) => `rgb(${rgba.slice(0, 3).map(v => Math.round(v * 255 * k)).join(',')})`;
+  g.fillStyle = col(1); g.fillRect(0, 0, 64, 64);
+  g.fillStyle = col(0.86); g.fillRect(0, 0, 32, 32); g.fillRect(32, 32, 32, 32);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(size[0] * 4, size[1] * 4);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter;
+  return t;
+}
+
+function mesh(g) {
+  const [a, b, c] = g.size;
+  let geo;
+  switch (g.type) {
+    case 'plane': geo = new THREE.PlaneGeometry(2 * (a || 3), 2 * (b || 3)); break;
+    case 'box': geo = new THREE.BoxGeometry(2 * a, 2 * b, 2 * c); break;
+    case 'sphere': geo = new THREE.SphereGeometry(a, 24, 16); break;
+    case 'cylinder': geo = new THREE.CylinderGeometry(a, a, 2 * b, 28); geo.rotateX(Math.PI / 2); break;
+    case 'capsule': geo = new THREE.CapsuleGeometry(a, 2 * b, 6, 16); geo.rotateX(Math.PI / 2); break;
+    default: return null;
+  }
+  const color = new THREE.Color().setRGB(g.rgba[0], g.rgba[1], g.rgba[2], THREE.SRGBColorSpace);
+  const mat = g.type === 'plane'
+    ? new THREE.MeshStandardMaterial({ map: checker(g.rgba, [a || 3, b || 3]), roughness: 0.9 })
+    : new THREE.MeshStandardMaterial({ color, roughness: 0.65, metalness: 0.05, transparent: g.rgba[3] < 1, opacity: g.rgba[3] });
+  let m = new THREE.Mesh(geo, mat);
+  if (g.name === 'screen') {   // Vector's face: show the eyes CloakOS is drawing
+    screenTex = screenTex || new THREE.Texture();
+    screenTex.colorSpace = THREE.SRGBColorSpace;
+    const pg = new THREE.PlaneGeometry(2 * b, 2 * c);
+    pg.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)));
+    m = new THREE.Mesh(pg, new THREE.MeshBasicMaterial({ map: screenTex, color: 0xffffff }));
+    m.position.set(g.pos[0] + a + 0.0002, g.pos[1], g.pos[2]);
+    return m;
+  }
+  m.position.set(...g.pos);
+  m.quaternion.set(g.quat[1], g.quat[2], g.quat[3], g.quat[0]);
+  m.castShadow = g.type !== 'plane' && !(g.name || '').startsWith('wall');
+  m.receiveShadow = true;
+  return m;
+}
+
+async function loadScene() {
+  const sc = await (await fetch('/api/sim/scene')).json();
+  world.clear();
+  bodies = [];
+  for (let i = 0; i < (sc.nbody || 0); i++) { const grp = new THREE.Group(); bodies.push(grp); world.add(grp); }
+  for (const g of sc.geoms || []) { const m = mesh(g); if (m && bodies[g.body]) bodies[g.body].add(m); }
+  robotId = sc.robot || 1;
+  version = sc.version;
+  $('#sim-world').value = sc.world || 'room';
+  $('#sim-seed').placeholder = sc.seed ? `seed ${sc.seed}` : 'seed';
+}
+
+/* poses over a websocket, ~30 Hz */
+let ws = null, last = null;
+function connect() {
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/sim`);
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    last = msg;
+    if (msg.v !== version) { version = msg.v; loadScene(); return; }
+    const p = msg.p;
+    for (let i = 0; i < bodies.length && 7 * i + 6 < p.length; i++) {
+      const o = 7 * i;
+      bodies[i].position.set(p[o], p[o + 1], p[o + 2]);
+      bodies[i].quaternion.set(p[o + 4], p[o + 5], p[o + 6], p[o + 3]);
+    }
+    badges(msg);
+    running(msg.test);
+  };
+  ws.onclose = () => setTimeout(connect, 1500);
+}
+
+function badges(msg) {
+  const s = msg.s || {}, out = [];
+  if (msg.frozen) out.push(['Frozen', 'ice']);
+  if (s.picked_up) out.push(['Picked up', 'warn']);
+  if (s.cliff) out.push(['Cliff', 'warn']);
+  if (s.bump) out.push(['Bump', 'warn']);
+  if (s.upright != null && s.upright < 0.6) out.push(['Tipped', 'warn']);
+  if (s.pitch != null && Math.abs(s.pitch) > 0.25) out.push([`Pitch ${Math.round(s.pitch * 57.3)}°`, '']);
+  $('#sim-badges').innerHTML = out.map(([t, c]) => `<span class="sim-badge ${c}">${esc(t)}</span>`).join('');
+}
+
+function resize() {
+  const r = canvas.parentElement.getBoundingClientRect();
+  if (!r.width) return;
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / r.height;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvas.parentElement);
+
+const tmp = new THREE.Vector3();
+function frame() {
+  requestAnimationFrame(frame);
+  if (!shown) return;
+  if (follow && bodies[robotId]) {
+    tmp.copy(bodies[robotId].position);
+    tmp.z += 0.03;
+    const d = tmp.clone().sub(controls.target);
+    controls.target.add(d);
+    camera.position.add(d);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+frame();
+
+/* Vector's screen texture + the eyes inset, from /eyes.png */
+const eyesImg = new Image();
+eyesImg.onload = () => {
+  if (screenTex) { screenTex.image = eyesImg; screenTex.needsUpdate = true; }
+  $('#sim-eyes').src = eyesImg.src;
+};
+setInterval(() => { if (shown) eyesImg.src = '/eyes.png?' + Date.now(); }, 200);
+
+/* ── controls ───────────────────────────────────────────── */
+let status = null;
+async function refresh() {
+  try { status = await (await fetch('/api/sim')).json(); } catch { return; }
+  $$('.sim-target .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.target === status.target));
+  $('#sim-empty').hidden = status.target === 'sim' || version > 0;
+  const sel = $('#sim-world');
+  if (!sel.options.length) sel.innerHTML = Object.entries(status.worlds).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  if (status.world) sel.value = status.world;
+  scenarios(status.scenarios);
+  results(status.results);
+  running(status.running);
+  if (status.render_error) $('#sim-empty').textContent = status.render_error;
+}
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+
+window.setTarget = async t => { await post('/api/sim/target', { target: t }); refresh(); };
+window.resetWorld = async () => {
+  const seed = $('#sim-seed').value.trim();
+  if (status && status.target !== 'sim') await post('/api/sim/target', { target: 'sim' });
+  await post('/api/sim/reset', { world: $('#sim-world').value, seed: seed || null });
+  $('#sim-seed').value = '';
+  refresh();
+};
+window.simPoke = (action, triple) => post('/api/sim/poke', { action, triple: !!triple });
+window.simFollow = () => { follow = !follow; $('#sim-follow').classList.toggle('on', follow); };
+$('#sim-follow').classList.add('on');
+controls.addEventListener('start', () => { /* dragging keeps following; the target just moves with the robot */ });
+
+function scenarios(list) {
+  const el = $('#sim-scenarios');
+  if (el.dataset.n == list.length) return;
+  el.dataset.n = list.length;
+  el.innerHTML = list.map(s => `
+    <div class="sc-card">
+      <div class="sc-head"><b>${esc(s.title)}</b><span class="sc-meta">${esc(s.mode)} · ${Math.round(s.duration)} s</span></div>
+      <p>${esc(s.about)}</p>
+      <div class="sc-foot"><span class="sc-checks">${s.checks.map(esc).join(' · ')}</span>
+        <button class="chip" onclick="runTest('${s.id}')">Run</button></div>
+    </div>`).join('');
+}
+window.runTest = async id => {
+  const seed = $('#sim-seed').value.trim();
+  const r = await post('/api/sim/test', { scenario: id, seed: seed || null, record: $('#sim-record').checked });
+  if (!r.ok) alert('A test is already running.');
+  setTimeout(refresh, 300);
+};
+window.stopTest = () => post('/api/sim/test/stop').then(refresh);
+window.replay = (id, seed) => { $('#sim-seed').value = seed; runTest(id); };
+
+function running(t) {
+  const el = $('#sim-running');
+  el.hidden = !t;
+  if (!t) return;
+  const pct = Math.min(100, 100 * t.t / t.duration);
+  el.innerHTML = `<div class="sc-head"><b>Running: ${esc(t.title)}</b><span class="sc-meta">seed ${t.seed} · ${t.t.toFixed(0)}/${Math.round(t.duration)} s</span></div>
+    <div class="sim-bar"><i style="width:${pct}%"></i></div><button class="chip" onclick="stopTest()">Stop</button>`;
+}
+
+function results(list) {
+  if (!list || !list.length) return;
+  $('#sim-results').innerHTML = list.map(r => `
+    <div class="res ${r.passed ? 'pass' : 'fail'}">
+      <div class="sc-head"><span class="res-tag">${r.passed ? 'Pass' : r.status === 'stopped' ? 'Stopped' : 'Fail'}</span>
+        <b>${esc(r.title)}</b><span class="sc-meta">seed ${r.seed} · ${new Date(r.t * 1000).toLocaleTimeString()}</span>
+        <button class="chip" onclick="replay('${r.scenario}', ${r.seed})" title="Run again with the same room">Rerun</button></div>
+      <ul>${r.checks.map(c => `<li class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'} ${esc(c.name)} <span>${esc(c.detail)}</span></li>`).join('')}</ul>
+    </div>`).join('');
+}
+
+/* the app shell calls these when the page is shown/hidden; tests finishing refresh the list */
+window.simShown = on => { shown = on; if (on) { bg(); resize(); refresh(); if (!ws) connect(); } };
+window.simEvent = topic => { if (topic.startsWith('test.')) refresh(); };
+new MutationObserver(bg).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });

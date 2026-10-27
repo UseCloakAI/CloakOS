@@ -17,6 +17,29 @@ robot:                # all optional: blank = take it from wire-pod. Set serial 
   heartbeat_s: 3
   max_backoff_s: 30
 
+# ── freeze ─────────────────────────────────────────────
+# Tap Vector's back button `taps` times within `window_s` to freeze (all motors stop, it
+# holds still with calm eyes). Same again to unfreeze. Also a button in the UI.
+freeze:
+  taps: 3
+  window_s: 1.5
+
+# ── simulator ──────────────────────────────────────────
+# A physics Vector (MuJoCo) in procedurally generated rooms. Switch Robot / Sim in the
+# Simulator page; the whole brain runs against it unchanged.
+sim:
+  enabled: false        # start on the sim instead of the real robot (CLOAK_SIM=1)
+  world: room           # room | empty | table | person | goal | balance
+  seed: null            # null = new random room each reset
+  camera: true
+  render_width: 640     # rendered size; the feed is always delivered at 640x360 like the real one
+  render_height: 360
+  camera_fps: 15
+  camera_latency_s: 0.1
+  camera_noise: 4.0     # sensor noise (0-255 scale)
+  jpeg_quality: 40      # Vector's feed is heavily compressed
+  cliff_guard: true     # firmware-style stop at front cliffs, like the real robot at default priority
+
 # ── drives ─────────────────────────────────────────────
 # Each drive relaxes toward `baseline` with time constant `tau` (s).
 # `high` / `low` fire drive.<name>.high / .low once, re-arming after `hysteresis`.

@@ -58,6 +58,9 @@ function renderHint(hint) {
 function render(s) {
   S = s;
   setConn(s.connection);
+  if (s.target === 'sim') { clearTimeout(setConn.t); $('#pair-cta').hidden = true; }
+  $$('.freeze-btn, .freeze-chip').forEach(b => { b.classList.toggle('on', !!s.frozen); b.title = s.frozen ? 'Unfreeze' : 'Freeze (or triple-tap Vector\'s button)'; });
+  document.body.classList.toggle('is-frozen', !!s.frozen);
   renderHint(s.link_hint);
   setModeUI(s.mode);
   const lab = page === 'lab' && document.activeElement && document.activeElement.type === 'range';
@@ -145,9 +148,11 @@ const EV_TEXT = {
   'sense.picked_up': 'Picked up', 'sense.put_down': 'Put down', 'sense.cliff': 'Cliff ahead', 'sense.loud_sound': 'Loud sound',
   'sense.heard_wake_word': 'Heard "Hey Vector"', 'sense.button': 'Back button',
 };
+const FREEZE_TEXT = on => on ? 'Frozen. Triple-tap the button (or ❄) to unfreeze' : 'Unfrozen';
 let evGroup = null;
 function onEvent(m, quiet) {
   const t = m.topic, d = m.data || {};
+  if (window.simEvent) window.simEvent(t);
   if (t === 'voice.said') { evGroup = null; return addSay(d); }
   if (t === 'robot.connection' && d.state !== 'connected' && d.state !== 'disconnected') return;
   if (t === 'record.started' || t === 'record.stopped') loadInfo();
@@ -156,6 +161,8 @@ function onEvent(m, quiet) {
   else if (t.startsWith('drive.')) { const [, n, edge] = t.split('.'); text = `${n} ${edge === 'high' ? 'is high' : 'is low'} · ${(+d.value).toFixed(2)}`; }
   else if (t === 'behavior.changed') text = `→ ${d.name.replace('_', ' ')}`;
   else if (t === 'mode.changed') text = `Mode: ${d.mode}`;
+  else if (t === 'freeze.changed') text = FREEZE_TEXT(d.on);
+  else if (t === 'test.finished') text = `Sim test ${d.title}: ${d.passed ? 'pass' : d.status === 'stopped' ? 'stopped' : 'fail'}`;
   else if (t === 'robot.connection' && d.state === 'connected' && d.name) text = `Connected to ${d.name}`;
   else if (t === 'robot.connection') text = d.state === 'connected' ? 'Connected to Vector' : 'Disconnected';
   else if (t === 'record.started') text = 'Recording started';
@@ -241,6 +248,14 @@ function closeMenus() {
 }
 document.addEventListener('click', closeMenus);
 function toggleRecord() { sendWS({ type: 'record', on: !(S && S.recording && S.recording.on) }); }
+function toggleFreeze() { sendWS({ type: 'freeze', on: !(S && S.frozen) }); }
+async function deleteEpisode(ev, name) {
+  ev.stopPropagation();
+  if (!confirm(`Delete recording ${name}? This can't be undone.`)) return;
+  const r = await fetch('/api/episodes/' + encodeURIComponent(name), { method: 'DELETE' });
+  if (!r.ok) alert("Couldn't delete it (still recording?)");
+  loadInfo();
+}
 
 /* ── pages + shell (same behavior as Cloak chat) ────────── */
 function goPage(p) {
@@ -248,6 +263,7 @@ function goPage(p) {
   $$('.page').forEach(s => s.hidden = s.dataset.page !== p);
   $$('[data-nav]').forEach(b => { const on = b.dataset.nav === p; b.classList.toggle('on', on && b.closest('.sb-nav')); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (p === 'settings' || p === 'lab') loadInfo();
+  if (window.simShown) window.simShown(p === 'sim');
   if (p === 'settings') loadUpdates();
   if (window.innerWidth <= 640) closeMobileSidebar();
 }
@@ -311,7 +327,8 @@ async function loadInfo() {
   $('#conv-list').innerHTML = (info.episodes || []).map(ep => {
     const m = ep.name.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})\d{2}Z_(\w+)/);
     const label = m ? `${m[6]} · ${m[2]}/${m[3]} ${m[4]}:${m[5]}` : ep.name;
-    return `<div class="conv-item" title="${esc(ep.name)}"><div class="conv-label"><svg class="conv-icon" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg><span>${esc(label)}</span><span class="ep-n">${ep.steps}</span></div></div>`;
+    return `<div class="conv-item" title="${esc(ep.name)}"><div class="conv-label"><svg class="conv-icon" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg><span>${esc(label)}</span><span class="ep-n">${ep.steps}</span></div>` +
+      `<button class="conv-del" type="button" title="Delete recording" aria-label="Delete recording" onclick="deleteEpisode(event, '${esc(ep.name)}')"><svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div>`;
   }).join('') || '<div class="ep-empty">No episodes yet.</div>';
 }
 let upd = null;
@@ -354,6 +371,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.key.toLowerCase()]; if (k) keys.delete(k); paintKeys(); });
 addEventListener('blur', () => { keys.clear(); paintKeys(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { keys.clear(); paintKeys(); } });
 const paintKeys = () => $$('.key[data-k]').forEach(el => el.classList.toggle('on', keys.has(el.dataset.k)));
 
 let padIdx = null;
@@ -377,7 +395,7 @@ function teleopAxes() {
 }
 let wasActive = false;
 setInterval(() => {
-  if (!S || S.mode !== 'teleop') { wasActive = false; return; }
+  if (!S || S.mode !== 'teleop') { wasActive = false; keys.clear(); return; }
   const ax = teleopAxes();
   const active = Object.values(ax).some(v => v !== 0);
   if (active || wasActive) sendWS({ type: 'teleop', ...ax });   // keep-alive for the dead-man, plus one zero on release

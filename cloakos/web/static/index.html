@@ -35,6 +35,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="11" rx="0"/><path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 14h.01"/></svg>
           <span class="sbl">Teleop</span>
         </button>
+        <button class="sb-btn" type="button" data-nav="sim" onclick="goPage('sim')" title="Simulator">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/><path d="m3 7 9 5 9-5M12 12v10"/></svg>
+          <span class="sbl">Simulator</span>
+        </button>
       </nav>
       <button class="sb-btn sb-new" id="sb-rec" onclick="toggleRecord()" title="Record episode">
         <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
@@ -105,6 +109,9 @@
             <div class="status-pill"><span class="live-dot off"></span><span class="conn-label">Offline</span></div>
           </div>
           <div class="topbar-right">
+            <button class="icon-btn freeze-btn" type="button" onclick="toggleFreeze()" title="Freeze (or triple-tap Vector's button)" aria-label="Freeze">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M4.5 6.5l15 11M19.5 6.5l-15 11M9 4l3 2.5L15 4M9 20l3-2.5 3 2.5"/></svg>
+            </button>
             <button class="icon-btn rec-btn" type="button" onclick="toggleRecord()" title="Record episode" aria-label="Record episode">
               <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="var(--acc)"/></svg>
             </button>
@@ -281,6 +288,56 @@
       </section>
 
       <!-- LAB -->
+      <section class="page" id="page-sim" data-page="sim" aria-label="Simulator" tabindex="-1" hidden>
+        <div class="topbar">
+          <div class="topbar-left">
+            <button class="icon-btn sb-toggle" type="button" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-controls="sidebar">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            </button>
+            <h1 class="page-title">Simulator</h1>
+            <div class="seg sim-target" role="group" aria-label="Drive which robot">
+              <button class="seg-btn" data-target="real" onclick="setTarget('real')">Robot</button>
+              <button class="seg-btn" data-target="sim" onclick="setTarget('sim')">Sim</button>
+            </div>
+          </div>
+          <div class="topbar-right sim-world">
+            <select id="sim-world" class="sim-select" aria-label="World"></select>
+            <input id="sim-seed" class="sim-seed" type="text" inputmode="numeric" placeholder="seed" aria-label="Seed">
+            <button class="chip" onclick="resetWorld()">New room</button>
+          </div>
+        </div>
+        <div class="sim-wrap">
+          <div class="sim-stage">
+            <canvas id="sim-canvas" aria-label="3D view of the simulated Vector"></canvas>
+            <div class="sim-empty" id="sim-empty">Switch to <b>Sim</b> to start the simulator.</div>
+            <div class="sim-hud">
+              <div class="cam sim-cam" data-cam>
+                <div class="cam-empty">No camera yet</div>
+                <span class="cam-tag" hidden>Vector's camera</span>
+              </div>
+              <img class="sim-eyes" id="sim-eyes" alt="Vector's screen">
+            </div>
+            <div class="sim-tools">
+              <button class="chip" onclick="simPoke('knock')" title="Shove it">Knock</button>
+              <button class="chip" onclick="simPoke('pick_up')" title="Lift it up for a moment">Pick up</button>
+              <button class="chip" onclick="simPoke('tap_button', true)" title="Triple-tap the back button">Tap ×3</button>
+              <button class="chip" id="sim-follow" onclick="simFollow()">Follow</button>
+              <button class="chip freeze-chip" onclick="toggleFreeze()">Freeze</button>
+            </div>
+            <div class="sim-badges" id="sim-badges"></div>
+          </div>
+          <aside class="sim-side">
+            <h2>Tester</h2>
+            <p class="tele-note">Runs the real brain through a scenario in the sim and scores it. Same seed, same room.</p>
+            <label class="sim-rec"><input type="checkbox" id="sim-record"> Record runs as training episodes</label>
+            <div id="sim-running" class="sim-running" hidden></div>
+            <div id="sim-scenarios"></div>
+            <h2>Results</h2>
+            <div id="sim-results"><p class="tele-note">No runs yet.</p></div>
+          </aside>
+        </div>
+      </section>
+
       <section class="page settings-page" id="page-lab" data-page="lab" aria-label="Drive lab" tabindex="-1" hidden>
         <div class="topbar">
           <div class="topbar-left">
@@ -309,5 +366,7 @@
   </div>
 </div>
 <script src="/static/app.js"></script>
+<script type="importmap">{"imports": {"three": "/static/vendor/three.module.min.js"}}</script>
+<script type="module" src="/static/sim.js"></script>
 </body>
 </html>

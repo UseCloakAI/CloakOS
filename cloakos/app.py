@@ -63,6 +63,13 @@ class Brain:
         self.restart = False
         self._tick_events: list[dict[str, Any]] = []
         self._stop = asyncio.Event()
+        self.frozen = False
+        self.tester = None                       # sim.tester.Tester, made on first use
+        fz = cfg.get("freeze", {}) or {}
+        self.freeze_taps = int(fz.get("taps", 3))
+        self.freeze_window = float(fz.get("window_s", 1.5))
+        self._taps: list[float] = []
+        self.bus.on("raw.button_press", self._on_button)
         self.bus.on("sense.*", self._on_sense)
         self.bus.on("*", self._collect)
 
@@ -79,6 +86,28 @@ class Brain:
         self._emit_crossings(self.drives.impulse(name))
         if name in self.reactions and self.mode == "auto":
             self.react(self.reactions[name])
+
+    def _on_button(self, ev: Event) -> None:
+        """Triple tap on the back button toggles freeze."""
+        self._taps = [t for t in self._taps if ev.t - t < self.freeze_window] + [ev.t]
+        if len(self._taps) >= self.freeze_taps:
+            self._taps = []
+            asyncio.ensure_future(self.set_frozen(not self.frozen, source="button"))
+
+    async def set_frozen(self, on: bool, source: str = "ui") -> None:
+        """Freeze: every motor stops and stays stopped (behaviors, teleop, emotes all blocked).
+        Control is kept, so stock Vector doesn't wander off either. Eyes go still."""
+        if on == self.frozen:
+            return
+        self.frozen = self.body.frozen = self.eyes.frozen = on
+        if on:
+            if self.policy is not None:
+                await self.policy.stop()
+            await self.body.stop()
+        elif self.policy is not None:
+            await self.policy.start()
+        log.info("freeze %s (%s)", "on" if on else "off", source)
+        self.bus.emit("freeze.changed", on=on, source=source)
 
     def react(self, emote: str) -> None:
         """Fire-and-forget emote on top of whatever's running; skipped if one is already playing."""
@@ -149,7 +178,7 @@ class Brain:
             )
             self._emit_crossings(self.drives.update(dt, ctx))
             obs = Obs(time.time(), self.drives.values, w)
-            if self.policy is not None and self.link.has_control:
+            if self.policy is not None and self.link.has_control and not self.frozen:
                 try:
                     await self.policy.step(obs)
                 except Exception:
@@ -196,6 +225,8 @@ class Brain:
             "t": time.time(),
             "connection": self.link.state,
             "link_hint": self.link.hint,
+            "frozen": self.frozen,
+            "target": self.link.target,
             "volume": self.link.volume,
             "has_control": self.link.has_control,
             "mode": self.mode,

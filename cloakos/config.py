@@ -27,6 +27,7 @@ ENV_OVERRIDES = {
     "WEB_PORT": "web.port",
     "DATA_DIR": "datalog.dir",
     "CLOAK_VOLUME": "robot.volume",
+    "CLOAK_SIM": "sim.enabled",
 }
 
 

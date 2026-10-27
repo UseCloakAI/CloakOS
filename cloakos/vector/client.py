@@ -58,6 +58,7 @@ class VectorClient:
         self._tasks: list[asyncio.Task] = []
         self._audio_lock = asyncio.Lock()
         self._next_id = 1
+        self._bad_frames = 0
 
     # ── lifecycle ──────────────────────────────────────────────
 
@@ -112,7 +113,9 @@ class VectorClient:
                 img.load()
                 on_frame(img, resp.image_id)
             except Exception as e:
-                log.debug("bad camera frame: %s", e)
+                self._bad_frames += 1
+                if self._bad_frames in (1, 100):
+                    log.warning("camera frame %d undecodable (encoding %s): %s", self._bad_frames, resp.image_encoding, e)
 
     async def control_loop(self, priority: str = "default") -> None:
         """Hold the BehaviorControl stream. Use request_control()/release_control() to drive it."""
@@ -129,7 +132,7 @@ class VectorClient:
                 self.has_control = False
             else:
                 continue
-            log.debug("behavior control: %s", kind)
+            log.info("behavior control: %s", kind.replace("_", " "))
             self.control_changed.set()
             self.control_changed = asyncio.Event()
 

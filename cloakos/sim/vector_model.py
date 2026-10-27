@@ -16,13 +16,14 @@ TREAD_Y = 0.0235          # tread centreline from the middle (outer width ~60 mm
 TREAD_W = 0.011           # tread width
 WHEEL_R = 0.0105          # tread wheel radius (front and rear); treads wrap these
 AXLE_X = 0.0215           # front/rear axle offset from the origin (wheelbase ~43 mm)
+END_LIFT = 0.0008         # end wheels ride this much higher than the middle ones
 CHASSIS = (0.064, 0.036, 0.030)     # body block between the treads (l, w, h)
 CHASSIS_Z = 0.008                   # its underside, above the floor
 HEAD = (0.034, 0.046, 0.026)        # head block (l, w, h)
 HEAD_PIVOT = (-0.004, 0.0, 0.043)   # head hinge, relative to the origin
 LIFT_PIVOT = (-0.026, 0.0, 0.032)   # lift arm hinge (back of the body)
 LIFT_ARM = 0.064                    # hinge to fork
-MASS = {"chassis": 0.092, "wheel": 0.004, "head": 0.032, "lift": 0.013}   # total ~0.159 kg
+MASS = {"chassis": 0.088, "wheel": 0.002, "head": 0.032, "lift": 0.013}   # total ~0.159 kg
 
 HEAD_RANGE = (-22.0, 45.0)          # degrees, from the SDK
 LIFT_MM = (32.0, 92.0)              # fork height range, from the SDK
@@ -53,11 +54,13 @@ def vector_mjcf(pos: tuple[float, float, float] = (0, 0, 0), yaw: float = 0.0) -
     hl, hw, hh = HEAD
     wheels = []
     for side, y in (("l", TREAD_Y), ("r", -TREAD_Y)):
-        for end, x in (("f", AXLE_X), ("b", -AXLE_X)):
+        # treads carry the weight on the middle; the end wheels sit a hair higher and only
+        # bite when it rocks or tips (that's what lets a tread robot spin in place)
+        for end, x, lift in (("f", AXLE_X, END_LIFT), ("m", 0.0, 0.0), ("b", -AXLE_X, END_LIFT)):
             wheels.append(f"""
-      <body name="wheel_{side}{end}" pos="{_f(x, y, WHEEL_R)}">
+      <body name="wheel_{side}{end}" pos="{_f(x, y, WHEEL_R + lift)}">
         <joint name="wheel_{side}{end}" type="hinge" axis="0 1 0" damping="0.00002"/>
-        <geom name="wheel_{side}{end}" type="cylinder" size="{_f(WHEEL_R, TREAD_W / 2)}" euler="90 0 0"
+        <geom name="wheel_{side}{end}" type="cylinder" size="{_f(WHEEL_R, 0.0008)}" euler="90 0 0"
               mass="{MASS['wheel']}" friction="1.1 0.005 0.0001" rgba="0.12 0.12 0.13 1" group="3" contype="2" conaffinity="1"/>
       </body>""")
         # the rubber tread band between the wheels: looks right and catches the floor on a wheelie
@@ -104,7 +107,7 @@ def vector_mjcf(pos: tuple[float, float, float] = (0, 0, 0), yaw: float = 0.0) -
 def vector_actuators() -> str:
     wheels = "".join(
         f'\n    <velocity name="wheel_{s}{e}" joint="wheel_{s}{e}" kv="0.004" forcerange="-0.012 0.012"/>'
-        for s in "lr" for e in "fb")
+        for s in "lr" for e in "fmb")
     return f"""
   <actuator>{wheels}
     <position name="head" joint="head" kp="0.25" kv="0.01" forcerange="-0.08 0.08"/>

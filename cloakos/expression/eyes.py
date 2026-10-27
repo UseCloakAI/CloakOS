@@ -45,6 +45,7 @@ class Eyes:
         self._wander = (0.0, 0.0)
         self._next_wander = 0.0
         self.mood: str | None = None      # set by emotes for a moment ("happy", "scared", ...)
+        self.frozen = False               # freeze mode: eyes hold still, half-lidded, no blinking
         self.mood_until = 0.0
 
     def set_mood(self, mood: str, seconds: float) -> None:
@@ -66,6 +67,9 @@ class Eyes:
             s.sad, s.gaze_y = max(s.sad, 0.7), 0.6
         elif behavior == "startle":
             s.open, s.scale, s.jitter = 1.0, 1.15, max(s.jitter, 2.0)
+
+        if self.frozen:
+            return EyeShape(open=0.35, scale=0.95)
 
         mood = self.mood if now < self.mood_until else None
         if mood == "happy" or mood == "greet":

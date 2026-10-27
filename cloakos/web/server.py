@@ -24,6 +24,7 @@ from ..bus import Event
 from .. import FULL_NAME, __version__
 from ..drives import DRIVES
 from .setup_api import autoconfigure_loop, env_path, make_router, robot_ota_url, write_env
+from .sim_api import make_sim_router, sim_ws
 
 if TYPE_CHECKING:
     from ..app import Brain
@@ -60,6 +61,7 @@ def create_app(brain: "Brain") -> FastAPI:
     brain.bus.on("*", on_event)
 
     app.include_router(make_router(brain))
+    app.include_router(make_sim_router(brain))
 
     @app.get("/")
     async def index() -> FileResponse:
@@ -123,6 +125,15 @@ def create_app(brain: "Brain") -> FastAPI:
                 await asyncio.sleep(0.08)
         return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame")
 
+    @app.delete("/api/episodes/{name}")
+    async def delete_episode(name: str) -> JSONResponse:
+        ok = await asyncio.to_thread(brain.recorder.delete, name)
+        return JSONResponse({"ok": ok}, status_code=200 if ok else 404)
+
+    @app.websocket("/ws/sim")
+    async def ws_sim(ws: WebSocket) -> None:
+        await sim_ws(brain, ws)
+
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
         await ws.accept()
@@ -160,6 +171,8 @@ def create_app(brain: "Brain") -> FastAPI:
         elif kind == "volume":
             await brain.link.set_volume(int(msg.get("value", 80)))
             write_env(env_path(), {"CLOAK_VOLUME": str(brain.link.volume)})
+        elif kind == "freeze":
+            await brain.set_frozen(bool(msg.get("on")), source="ui")
         elif kind == "anim":
             asyncio.ensure_future(brain.body.anim(str(msg.get("key", ""))))
         elif kind == "emote":

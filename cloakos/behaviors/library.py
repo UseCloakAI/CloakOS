@@ -6,6 +6,7 @@ Expression goes through body.emote(): Cloak's own eyes + motion + chirp clips
 from __future__ import annotations
 
 import random
+import time
 
 from ..connection import Body
 from ..world import World
@@ -22,7 +23,16 @@ class Wander(Behavior):
     async def run(self, body: Body, w: World, d: dict):
         await body.head_angle(5)
         steer = 0.0
+        next_glance = time.time() + random.uniform(3, 7)
         while True:
+            if time.time() > next_glance and not held(w):
+                # look up now and then: faces are above a floor robot's eye line
+                await body.drive(0, 0, self.name)
+                await body.head_angle(random.uniform(25, 40), 6)
+                await sleep(1.2)
+                await body.head_angle(5, 6)
+                next_glance = time.time() + random.uniform(5, 10)
+                continue
             if held(w):
                 await body.drive(0, 0, self.name)
             elif blocked(w):

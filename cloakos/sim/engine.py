@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 
 CAM_W, CAM_H = 640, 360           # what Vector's camera reports (rendering can be smaller)
 SURFACES = ("floor", "table")
+WHEELS = ("lf", "lm", "lb", "rf", "rm", "rb")
 GEOM_TYPES = {0: "plane", 2: "sphere", 3: "capsule", 5: "cylinder", 6: "box"}
 
 
@@ -74,6 +75,11 @@ class Sim:
         self._frames: deque[tuple[float, bytes]] = deque()
         self._air_since: float | None = None
         self._m = self._d = None
+        # Vector's firmware stops forward driving the moment a front cliff sensor trips
+        # (unless the SDK holds override priority); emulate that so the brain sees what it would
+        self.cliff_guard = bool(c.get("cliff_guard", True))
+        self._edge = False
+        self._n = 0
 
     # ── lifecycle ──────────────────────────────────────────────
 
@@ -120,10 +126,9 @@ class Sim:
             self.wheels, self._wheel_cmd = (0.0, 0.0), np.zeros(2)
             self.head_target, self.head_rate = 0.0, 0.0
             self.lift_target, self.lift_rate = lift_angle(32), 0.0
-            self._hold_until, self._push, self._air_since = 0.0, None, None
+            self._hold_until, self._hold_pos, self._push, self._air_since = 0.0, None, None, None
             self._frames.clear()
             self.version += 1
-        self._renderer_for = None
         self._update_snapshot()
         self._loaded.set()
         log.info("sim world: %s (seed %d)", sc.world, sc.seed)
@@ -158,8 +163,8 @@ class Sim:
         self._bid = n(B, "vector")
         self._qadr = m.jnt_qposadr[n(J, "vector")]
         self._vadr = m.jnt_dofadr[n(J, "vector")]
-        self._wheel_act = {k: n(A, f"wheel_{k}") for k in ("lf", "lb", "rf", "rb")}
-        self._wheel_dof = {k: m.jnt_dofadr[n(J, f"wheel_{k}")] for k in ("lf", "lb", "rf", "rb")}
+        self._wheel_act = {k: n(A, f"wheel_{k}") for k in WHEELS}
+        self._wheel_dof = {k: m.jnt_dofadr[n(J, f"wheel_{k}")] for k in WHEELS}
         self._head_act, self._lift_act = n(A, "head"), n(A, "lift")
         self._head_q, self._lift_q = m.jnt_qposadr[n(J, "head")], m.jnt_qposadr[n(J, "lift")]
         self._sites = {k: n(S, k) for k in ("prox", "cliff_fl", "cliff_fr", "cliff_bl", "cliff_br", "imu")}
@@ -175,7 +180,7 @@ class Sim:
                     break
                 b = m.body_parentid[b]
         self._robot_geoms = robot
-        self._wheel_geoms = {n(G, f"wheel_{k}") for k in ("lf", "lb", "rf", "rb")}
+        self._wheel_geoms = {n(G, f"wheel_{k}") for k in WHEELS}
         self._accel = m.sensor_adr[n(mujoco.mjtObj.mjOBJ_SENSOR, "accel")]
         self._gyro = m.sensor_adr[n(mujoco.mjtObj.mjOBJ_SENSOR, "gyro")]
         self._cam = n(mujoco.mjtObj.mjOBJ_CAMERA, "eye")
@@ -301,9 +306,16 @@ class Sim:
             self._wheel_cmd += np.clip(target - self._wheel_cmd, -step, step)
         else:
             self._wheel_cmd = target
+        self._n += 1
+        if self.cliff_guard and self._n % 5 == 0:     # every 10 ms, like the firmware's sensor loop
+            R = d.xmat[self._bid].reshape(3, 3)
+            down = -R[:, 2]
+            self._edge = R[2, 2] > 0.7 and any(self._ray(m, d, self._sites[k], down) > 0.02 for k in ("cliff_fl", "cliff_fr"))
+        if self._edge and self._hold_pos is None:
+            self._wheel_cmd = np.minimum(self._wheel_cmd, 0.0)    # forward blocked, reversing allowed
         l, r = self._wheel_cmd / 1000.0 / WHEEL_R
-        for k, v in (("lf", l), ("lb", l), ("rf", r), ("rb", r)):
-            d.ctrl[self._wheel_act[k]] = v
+        for k in WHEELS:
+            d.ctrl[self._wheel_act[k]] = l if k[0] == "l" else r
         if self.head_rate:
             self.set_head(self.head_target + self.head_rate * dt, self.head_rate)
         if self.lift_rate:
@@ -351,7 +363,7 @@ class Sim:
             quat = d.qpos[a + 3:a + 7].copy()
             R = d.xmat[self._bid].reshape(3, 3)
             yaw = math.atan2(R[1, 0], R[0, 0])
-            pitch = math.asin(max(-1.0, min(1.0, -R[2, 0])))
+            pitch = math.asin(max(-1.0, min(1.0, R[2, 0])))         # + = nose up
             up = float(R[2, 2])
             fwd = R[:, 0]
             prox = self._ray(m, d, self._sites["prox"], fwd)
@@ -376,8 +388,8 @@ class Sim:
             else:
                 self._air_since = None
             held = self._hold_pos is not None and now < self._hold_until
-            wl = (d.qvel[self._wheel_dof["lf"]] + d.qvel[self._wheel_dof["lb"]]) / 2 * WHEEL_R * 1000
-            wr = (d.qvel[self._wheel_dof["rf"]] + d.qvel[self._wheel_dof["rb"]]) / 2 * WHEEL_R * 1000
+            wl = d.qvel[self._wheel_dof["lm"]] * WHEEL_R * 1000
+            wr = d.qvel[self._wheel_dof["rm"]] * WHEEL_R * 1000
             vel = d.qvel[v:v + 3]
             person = None
             if self._face_site >= 0:
