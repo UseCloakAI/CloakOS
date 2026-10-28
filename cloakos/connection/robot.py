@@ -53,6 +53,7 @@ class RobotLink:
         self.edge_until = 0.0                 # the back-off owns the wheels until then
         self.edge_v = -75.0
         self._drove_t = 0.0
+        self.edge_reacting = False            # Vector's own edge reaction is running: don't fight it
         self.last_edge: dict | None = None
         self.pose: dict | None = None         # latest full pose for the mapper: pos (m), quat, head, origin                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
@@ -189,7 +190,7 @@ class RobotLink:
             if client is None:
                 return
             await client.control_changed.wait()
-            if self._want_control and not client.has_control and self.client is client:
+            if self._want_control and not client.has_control and self.client is client and not self.edge_reacting:
                 await asyncio.sleep(0.05)
                 log.info("stock Vector took over; taking control back")
                 try:
@@ -324,7 +325,7 @@ class RobotLink:
             self.world.cliff = edge
             if edge:
                 self.world.edge_t = time.time()
-            if edge and not self._edge and self.has_control and time.time() > self.edge_until:
+            if edge and not self._edge and self.connected and time.time() > self.edge_until:
                 self.edge_events += 1
                 asyncio.ensure_future(self._edge_reflex())
                 self.bus.emit("raw.edge")
@@ -356,6 +357,24 @@ class RobotLink:
         if c is None:
             return
         l, r = w.left_mmps or 0.0, w.right_mmps or 0.0
+        # Vector's own edge reaction (a firmware safety behavior) can grab control at an edge and
+        # ignores our wheels while it runs: let it finish, then take over and back off
+        self.edge_reacting = True
+        try:
+            for _ in range(40):
+                if self.has_control:
+                    break
+                await asyncio.sleep(0.1)
+            if not self.has_control and self._want_control:
+                log.info("edge: Vector's own edge reaction still has control; asking for it back")
+                await self._request_control()
+        finally:
+            self.edge_reacting = False
+        if not self.has_control:
+            log.warning("edge: no control after Vector's edge reaction; can't back off")
+            self.last_edge = {"t": time.time(), "side": "ahead", "behind": False, "cleared": False}
+            self.bus.emit("edge.cleared", **self.last_edge)
+            return
         fwd, curve = (l + r) / 2, (r - l)                  # mm/s; curve > 0 = was turning left
         sign = 1.0 if fwd < -10 else -1.0                  # move away from where it was heading
         speed = 75.0
