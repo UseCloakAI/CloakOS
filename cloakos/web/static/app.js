@@ -286,7 +286,7 @@ function goPage(p) {
   if (window.simShown) window.simShown(p === 'sim');
   if (window.trainShown) window.trainShown(p === 'train');
   if (window.mapShown) window.mapShown(p === 'map');
-  if (p === 'settings') { loadUpdates(); loadNous(); }
+  if (p === 'settings') { loadUpdates(); loadNous(); if (window.calRefresh) window.calRefresh(); }
   syncCamera();
   if (window.innerWidth <= 640) closeMobileSidebar();
 }

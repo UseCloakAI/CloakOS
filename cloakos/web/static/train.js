@@ -92,8 +92,9 @@
   let calTimer = null;
   const calShow = async () => {
     const c = await (await fetch('/api/rl/calibration')).json();
-    $('#cal-status').textContent = c.running ? c.progress : (c.progress || '');
-    $('#cal-out').textContent = Object.keys(c.result || {}).length ? JSON.stringify(c.result, null, 1) : '';
+    const msg = c.running ? c.progress : (c.progress || ''), out = Object.keys(c.result || {}).length ? JSON.stringify(c.result, null, 1) : 'No results yet. Run one of the tests above.';
+    document.querySelectorAll('[data-cal-status]').forEach(el => { el.textContent = msg; });
+    document.querySelectorAll('[data-cal-out]').forEach(el => { el.textContent = out; });
     if (!c.running) { clearInterval(calTimer); calTimer = null; }
   };
   const calWatch = () => { clearInterval(calTimer); calTimer = setInterval(calShow, 1000); calShow(); };
@@ -102,8 +103,10 @@
     if (!r.ok) alert(r.error); else calWatch();
   };
   window.calStop = () => post('/api/rl/calibration/stop').then(calShow);
-  window.calCopy = () => navigator.clipboard.writeText($('#cal-out').textContent);
+  window.calCopy = () => navigator.clipboard.writeText(document.querySelector('[data-cal-out]').textContent);
+  window.calSend = async () => { const r = await post('/api/rl/calibration/send'); alert(r.ok ? 'Sent. Thanks!' : r.error); calShow(); };
 
+  window.calRefresh = calShow;
   window.trainShown = on => {
     if (on) calShow();
     clearInterval(timer);

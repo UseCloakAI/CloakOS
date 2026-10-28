@@ -36,6 +36,18 @@ def make_rl_router(brain: "Brain") -> APIRouter:
         why = brain.calibrator.start(str(body.get("kind")), float(body.get("seconds", 180)))
         return {"ok": why is None, "error": why}
 
+    @r.post("/calibration/send")
+    async def calibration_send() -> dict[str, Any]:
+        from .. import share
+        c = brain.calibrator
+        if not c.result:
+            return {"ok": False, "error": "Run a calibration first."}
+        try:
+            await asyncio.to_thread(share.upload_calibration, c.result, brain.link.target)
+        except Exception as e:
+            return {"ok": False, "error": f"Couldn't send: {e}"}
+        return {"ok": True}
+
     @r.post("/calibration/stop")
     async def calibration_stop() -> dict[str, Any]:
         if brain.calibrator.task:
