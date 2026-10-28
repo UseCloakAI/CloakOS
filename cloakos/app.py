@@ -49,7 +49,7 @@ class Brain:
         ex = cfg.get("expression", {}) or {}
         self.eyes = Eyes(cfg)
         self.eyes_on = bool(ex.get("eyes", True))
-        self.eye_fps = min(12.0, float(ex.get("eye_fps", 10)))     # more crashes Vector's display process
+        self.eye_fps = min(8.0, float(ex.get("eye_fps", 6)))        # vic-anim (face + sound) crashes if flooded: error 800
         self.eye_frame = None                    # latest rendered eyes (PIL), for the dashboard too
         self.reactions: dict[str, str] = ex.get("reactions", {}) or {}
         self.body.emotes = Emotes(cfg, self.eyes)
@@ -395,10 +395,10 @@ class Brain:
             audio = getattr(getattr(self.link, "client", None), "_audio_lock", None)
             busy = audio is not None and audio.locked()
             quiet = time.time() < self._edge_quiet_until or getattr(self.link, "edge_reacting", False)
-            if self.eyes_on and self.body.ready and not quiet and (not busy or t0 - last_sent >= 0.2):
+            if self.eyes_on and self.body.ready and not quiet and not busy:   # no frames while a sound plays
                 px = rgb565(self.eye_frame)
                 if px != sent or t0 - last_sent > 1.0:          # refresh now and then so it never times out
-                    await self.body.face(px, 2500)
+                    await self.body.face(px, 6000)               # long enough to cover a sound, when no frames go out
                     sent, last_sent = px, t0
                     took = time.monotonic() - t0
                     slow = slow + 1 if took > period * 0.8 else max(0, slow - 1)

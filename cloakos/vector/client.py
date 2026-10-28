@@ -57,6 +57,7 @@ class VectorClient:
         self._control_q: asyncio.Queue = asyncio.Queue()   # requests queue up until control_loop runs
         self._tasks: list[asyncio.Task] = []
         self._audio_lock = asyncio.Lock()
+        self._audio_done = 0.0
         self._next_id = 1
         self._bad_frames = 0
 
@@ -242,6 +243,9 @@ class VectorClient:
     async def play_pcm(self, pcm: bytes, rate: int = 16000, volume: int = 75) -> None:
         """Stream 16-bit mono PCM to the speaker. Paced to real time so the robot's buffer never overruns."""
         async with self._audio_lock:
+            gap = 0.3 - (asyncio.get_running_loop().time() - self._audio_done)
+            if gap > 0:                                 # a breath between sounds: vic-anim (error 800) chokes on back-to-back streams
+                await asyncio.sleep(gap)
             async def reqs():
                 yield m.ExternalAudioStreamRequest(audio_stream_prepare=m.ExternalAudioStreamPrepare(
                     audio_frame_rate=rate, audio_volume=max(0, min(100, volume))))
@@ -257,12 +261,15 @@ class VectorClient:
                         await asyncio.sleep(ahead - 0.5)
                 yield m.ExternalAudioStreamRequest(audio_stream_complete=m.ExternalAudioStreamComplete())
 
-            async for resp in self.stub.ExternalAudioStreamPlayback(reqs()):
-                kind = resp.WhichOneof("audio_response_type")
-                if kind == "audio_stream_playback_complete":
-                    return
-                if kind:
-                    raise RuntimeError(f"audio playback: {kind}")
+            try:
+                async for resp in self.stub.ExternalAudioStreamPlayback(reqs()):
+                    kind = resp.WhichOneof("audio_response_type")
+                    if kind == "audio_stream_playback_complete":
+                        return
+                    if kind:
+                        raise RuntimeError(f"audio playback: {kind}")
+            finally:
+                self._audio_done = asyncio.get_running_loop().time()
 
 
 def rgb565(img: Any) -> bytes:
