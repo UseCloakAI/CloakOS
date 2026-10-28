@@ -67,6 +67,8 @@ def _f(*v: float) -> str:
 
 
 def _free_spot(rng, room, taken, r, margin=0.08):
+    if min(room) <= r + margin:                          # doesn't fit (a big thing on a small desk)
+        return None
     for _ in range(200):
         x = rng.uniform(-room[0] + r + margin, room[0] - r - margin)
         y = rng.uniform(-room[1] + r + margin, room[1] - r - margin)
