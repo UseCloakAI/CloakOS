@@ -89,9 +89,9 @@ expression:
   eye_color: "#FFFFFF"
   eye_glow: true
   sfx: true             # reactive sound effects (picked up, petted, edges, found something, got there...)
-  sfx_volume: 60
+  sfx_volume: 100       # each sound's share of the master volume (the slider in the app)
   chirps: true
-  chirp_volume: 70
+  chirp_volume: 100
   chirp_pitch: 1.0
   stock_blend: 0.0    # chance an emote uses one of Vector's stock animations instead (0 = fully custom)
   reactions:          # sense -> emote, in auto mode, on top of the running behavior
@@ -115,7 +115,7 @@ behaviors:
 # ── voice ──────────────────────────────────────────────
 voice:
   enabled: true
-  volume: 75
+  volume: 100
   pitch: 1.15         # >1 = higher + faster, more creature
   cooldown_s: 8       # minimum gap between any two lines
   llm_ratio: 0.6      # chance to ask the LLM instead of a cached line

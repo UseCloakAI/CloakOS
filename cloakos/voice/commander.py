@@ -13,20 +13,26 @@ from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
-ACTIONS = ("go_to", "wander", "stop", "none")
+ACTIONS = ("go_to", "wander", "stop", "go_home", "moves", "none")
+MOVES = ("forward", "back", "turn", "head", "lift", "wait")
+MAX_MM, MAX_STEPS = 500, 10
 
 SYSTEM = """You are the mind of Vector, a small curious desk robot. Your human talks to you.
 Decide what to say and what to do. You can only do these actions:
 - "go_to": drive to one of the objects you remember (use its id from the list)
 - "wander": roam around exploring
 - "stop": stop moving and stay put
+- "go_home": drive back onto the charger
+- "moves": precise steps, done in order, e.g. [["back", 50], ["turn", 90], ["forward", 100]]:
+    forward/back <mm, up to 500>, turn <degrees, + = left, - = right>, head <degrees -20..45>,
+    lift <0 = down .. 1 = up>, wait <seconds>
 - "none": just talk
 
 Objects you remember (id, what it is, how far from you):
 {objects}
 
 Reply with ONLY a JSON object, nothing else:
-{{"say": "<1 to 8 words, warm and simple, no emoji>", "action": "go_to|wander|stop|none", "target": "<object id or null>"}}
+{{"say": "<1 to 8 words, warm and simple, no emoji>", "action": "go_to|wander|stop|go_home|moves|none", "target": "<object id or null>", "steps": [["forward", 100]]}}
 If they ask you to go to something you don't remember, say you haven't seen it and use "none"."""
 
 
@@ -36,6 +42,7 @@ class Decision:
     action: str
     target: str | None = None
     source: str = "llm"
+    steps: list | None = None
 
 
 def _objects_text(objects: list[dict], here: tuple[float, float] | None) -> str:
@@ -72,7 +79,60 @@ def parse(text: str, objects: list[dict]) -> Decision | None:
             if target is None:
                 action = "none"
     say = str(d.get("say") or "").strip() or None
-    return Decision(say, action, target)
+    steps = clean_steps(d.get("steps")) if action == "moves" else None
+    if action == "moves" and not steps:
+        action = "none"
+    return Decision(say, action, target, steps=steps)
+
+
+def clean_steps(raw) -> list | None:
+    """Only known moves, numbers clamped to safe ranges, at most MAX_STEPS."""
+    out = []
+    for st in (raw or [])[:MAX_STEPS]:
+        try:
+            kind, val = str(st[0]).lower(), float(st[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if kind not in MOVES:
+            continue
+        lim = {"forward": (0, MAX_MM), "back": (0, MAX_MM), "turn": (-360, 360), "head": (-20, 45),
+               "lift": (0, 1), "wait": (0, 5)}[kind]
+        out.append([kind, max(lim[0], min(lim[1], val))])
+    return out or None
+
+
+MOVE_RE = re.compile(r"\b(forward|ahead|back(?:\s*up)?|backward|backwards|reverse|turn\s+(?:left|right)|turn\s+around|"
+                     r"look\s+(?:up|down)|lift\s+(?:up|down)|raise\s+(?:your\s+)?lift|lower\s+(?:your\s+)?lift)"
+                     r"(?:\s+(?:by\s+)?(-?\d+(?:\.\d+)?)\s*(cm|centimeters?|mm|millimeters?|in|inch(?:es)?|deg(?:rees?)?|°)?)?", re.I)
+
+
+def moves_from_text(t: str) -> list | None:
+    """'back up 10 cm then turn left 90' -> [['back', 100], ['turn', 90]]. Missing numbers get gentle defaults."""
+    steps = []
+    for m in MOVE_RE.finditer(t):
+        word, num, unit = m.group(1).lower(), m.group(2), (m.group(3) or "").lower()
+        n = float(num) if num else None
+        mm = None
+        if n is not None:
+            mm = n * 10 if unit.startswith("c") or not unit else n if unit.startswith("m") else n * 25.4 if unit.startswith("in") else n
+        if word in ("forward", "ahead"):
+            steps.append(["forward", mm or 100])
+        elif word.startswith("back") or word == "reverse":
+            steps.append(["back", mm or 80])
+        elif "around" in word:
+            steps.append(["turn", 180])
+        elif word.startswith("turn"):
+            deg = n if n is not None else 90
+            steps.append(["turn", deg if "left" in word else -deg])
+        elif "look up" in word:
+            steps.append(["head", 35])
+        elif "look down" in word:
+            steps.append(["head", -15])
+        elif "up" in word or "raise" in word:
+            steps.append(["lift", 1])
+        else:
+            steps.append(["lift", 0])
+    return clean_steps(steps)
 
 
 GO_RE = re.compile(r"\b(?:go|drive|head|move|come)\s+(?:to|over to|toward|towards)\s+(?:the|my|a|that)?\s*(.+)|\bfind\s+(?:the|my|a)?\s*(.+)", re.I)
@@ -83,6 +143,11 @@ def fallback(text: str, objects: list[dict]) -> Decision:
     t = text.strip().lower().rstrip(".!?")
     if re.search(r"\b(stop|stay|freeze|halt|wait)\b", t):
         return Decision("Okay, stopping.", "stop", source="rules")
+    if re.search(r"\b(go home|go to (?:your )?(?:charger|home|bed)|go charge|charge yourself|dock)\b", t):
+        return Decision("Heading home.", "go_home", source="rules")
+    steps = moves_from_text(t)
+    if steps:
+        return Decision(None, "moves", steps=steps, source="rules")
     if re.search(r"\b(wander|explore|roam|go play|look around)\b", t):
         return Decision("Off I go!", "wander", source="rules")
     m = GO_RE.search(t)

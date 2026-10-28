@@ -30,7 +30,7 @@ class Emotes:
         self.stock_blend = float(c.get("stock_blend", 0.0))
         self.stock = {**DEFAULT_STOCK, **(c.get("stock") or {})}
         self.chirps = bool(c.get("chirps", True))
-        self.chirp_volume = int(c.get("chirp_volume", 70))
+        self.chirp_volume = int(c.get("chirp_volume", 100))
         self.pitch = float(c.get("chirp_pitch", 1.0))
         self._pcm = {name: chirp(name, self.pitch) for name in CHIRPS}
         self._clips: dict[str, Callable[["Body"], Awaitable[None]]] = {

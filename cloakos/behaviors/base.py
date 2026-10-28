@@ -64,8 +64,14 @@ async def sleep(s: float) -> None:
     await asyncio.sleep(s)
 
 
+def near_edge(w: World, within_s: float = 1.5) -> bool:
+    """An edge was felt just now (the reflex already backed off, so cliff itself may be clear)."""
+    import time
+    return w.cliff or time.time() - getattr(w, "edge_t", 0.0) < within_s
+
+
 def blocked(w: World, near_mm: float = 110) -> bool:
-    return w.cliff or (w.proximity_mm is not None and w.proximity_mm < near_mm)
+    return near_edge(w) or (w.proximity_mm is not None and w.proximity_mm < near_mm)
 
 
 def held(w: World) -> bool:

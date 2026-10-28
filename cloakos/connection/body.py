@@ -84,6 +84,8 @@ class Body:
             return
         if self._gen != self.link.control_gen:   # new control session: the robot was stopped, resend everything
             self._gen, prev, self._sent = self.link.control_gen, Action(), None
+        if getattr(self.link, "edge_events", 0) != getattr(self, "_edges", 0):   # the edge reflex moved the wheels
+            self._edges, self._sent = self.link.edge_events, None
         wheels = (a.left_mmps, a.right_mmps)
         if getattr(self.link.world, "cliff", False):  # edge under the nose: no forward (at override priority
             wheels = (min(0.0, wheels[0]), min(0.0, wheels[1]))   # Vector's own edge stop is off)
@@ -146,6 +148,14 @@ class Body:
             return                                      # never roll forward over an edge
         self._mark("straight", mm=mm)
         await self._do("straight", mm, speed_mmps)
+
+    async def go_home(self) -> bool:
+        self._mark("go_home")
+        return bool(await self._do("drive_on_charger"))
+
+    async def leave_home(self) -> None:
+        self._mark("leave_home")
+        await self._do("drive_off_charger")
 
     async def face(self, rgb565: bytes, duration_ms: int) -> None:
         """Draw a frame on the screen. Not logged: the eye renderer calls this ~10x/s."""

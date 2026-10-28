@@ -29,7 +29,7 @@ class Voice:
     def __init__(self, cfg: dict, bus: Bus, body: Body, drives: dict[str, float]) -> None:
         c = cfg.get("voice", {}) or {}
         self.enabled = bool(c.get("enabled", True))
-        self.volume = int(c.get("volume", 75))
+        self.volume = int(c.get("volume", 100))
         self.pitch = float(c.get("pitch", 1.15))
         self.cooldown_s = float(c.get("cooldown_s", 8))
         self.llm_ratio = float(c.get("llm_ratio", 0.6))

@@ -78,6 +78,10 @@ class Eyes:
     def set_mood(self, mood: str, seconds: float) -> None:
         self.mood, self.mood_until = mood, time.time() + seconds
 
+    def alert(self, kind: str, seconds: float = 1.5) -> None:
+        """A warning symbol takes over the screen: 'edge' (triangle) or 'stuck' (blocked wheel)."""
+        self._icon = (kind, time.time() + seconds)
+
     def flash(self, text: str, seconds: float = 2.0) -> None:
         """Show a line for a moment, over whatever status there is ("Got there!", "On it")."""
         self._flash = (text, time.time() + seconds)
@@ -120,9 +124,12 @@ class Eyes:
         elif mood == "angry":
             s.angry = 0.7
 
+        hint = getattr(self, "hint", None)
         if face is not None:
             s.gaze_x = (face[0] - 0.5) * 2
             s.gaze_y = (face[1] - 0.5) * 1.5
+        elif hint is not None and now < hint[2]:          # a behavior says where its attention is
+            s.gaze_x, s.gaze_y = hint[0], hint[1]
         elif behavior != "sulk":
             if now > self._next_wander:          # quick glances, held for a beat
                 self._wander = (random.uniform(-0.75, 0.75), random.uniform(-0.45, 0.35))
@@ -184,8 +191,37 @@ class Eyes:
         sleeping = target.open < 0.1
         blink = self._blink(now, sleeping)
         breathe = 0.0 if self.frozen else 0.018 * math.sin(now * 2 * math.pi * 0.22)
+        icon = getattr(self, "_icon", None)
+        if icon and now < icon[1]:                       # a warning beats everything
+            self._icon_ov = min(1.0, getattr(self, "_icon_ov", 0.0) + dt * 12)
+        else:
+            self._icon_ov = max(0.0, getattr(self, "_icon_ov", 0.0) - dt * 4)
+        if self._icon_ov > 0.01 and icon:
+            img = self.render(s, blink=blink, breathe=breathe, overlay=self._icon_ov, text="")
+            return self._draw_icon(img, icon[0], self._icon_ov, now)
         self._ov = self._announce(now)
         return self.render(s, blink=blink, breathe=breathe, overlay=self._ov, text=self._shown_text)
+
+    def _draw_icon(self, img: Image.Image, kind: str, a: float, now: float) -> Image.Image:
+        """Drawn at screen size (no supersample needed for flat shapes); pulses so it reads as an alarm."""
+        big = img.resize((W * SS, H * SS), Image.NEAREST)
+        dr = ImageDraw.Draw(big)
+        pulse = 0.85 + 0.15 * math.sin(now * 2 * math.pi * 3)
+        col = tuple(int(c * a * pulse) for c in ((255, 196, 0) if kind == "edge" else self.color))
+        cx, cy, r = W * SS / 2, H * SS / 2, H * SS * 0.42 * (0.9 + 0.1 * a)
+        if kind == "edge":                               # warning triangle with a "!"
+            pts = [(cx, cy - r), (cx + r * 1.1, cy + r * 0.85), (cx - r * 1.1, cy + r * 0.85)]
+            dr.polygon(pts, outline=col, width=int(6 * SS))
+            dr.rounded_rectangle([cx - 4 * SS, cy - r * 0.45, cx + 4 * SS, cy + r * 0.3], radius=3 * SS, fill=col)
+            dr.ellipse([cx - 4.5 * SS, cy + r * 0.45, cx + 4.5 * SS, cy + r * 0.45 + 9 * SS], fill=col)
+        else:                                            # stuck: a wheel with a bar through it
+            dr.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=int(6 * SS))
+            for k in range(6):
+                ang = k * math.pi / 3
+                dr.line([cx + math.cos(ang) * r * 0.25, cy + math.sin(ang) * r * 0.25,
+                         cx + math.cos(ang) * r * 0.8, cy + math.sin(ang) * r * 0.8], fill=col, width=int(4 * SS))
+            dr.line([cx - r * 1.05, cy + r * 1.05, cx + r * 1.05, cy - r * 1.05], fill=col, width=int(7 * SS))
+        return big.resize((W, H), Image.LANCZOS)
 
     # a new activity's name takes over the screen for a moment, then the eyes come back
     TEXT_IN, TEXT_HOLD, TEXT_OUT = 0.18, 1.5, 0.45
