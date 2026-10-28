@@ -30,6 +30,15 @@ CAM_LAG_STEPS = (2, 5)   # Vector's camera over Wi-Fi: a frame is 0.2-0.5 s old 
 CAM_DROP = 0.15          # and sometimes the next one doesn't make it in time
 
 
+def measured_drop(path: str = "data/calibration.json") -> float:
+    """Share of 0.1 s ticks with no new frame: from the Camera lag calibration's frame rate (5 fps -> half)."""
+    try:
+        fps = float(json.loads(Path(path).read_text())["camera"]["frames_per_s"])
+        return float(np.clip(1 - fps / 10, 0.0, 0.9))
+    except (OSError, ValueError, KeyError, TypeError):
+        return CAM_DROP
+
+
 def measured_lag(path: str = "data/calibration.json") -> tuple[int, int]:
     """Use the Camera lag calibration when there is one: its delay (in 0.1 s steps), give or take one."""
     try:
@@ -43,8 +52,8 @@ def measured_lag(path: str = "data/calibration.json") -> tuple[int, int]:
 class LaggyCamera:
     """The real stream as the brain sees it: late, sometimes stuck on the last frame."""
 
-    def __init__(self, rng, lag: tuple[int, int] = CAM_LAG_STEPS) -> None:
-        self.rng, self.lag_range = rng, lag
+    def __init__(self, rng, lag: tuple[int, int] = CAM_LAG_STEPS, drop: float = CAM_DROP) -> None:
+        self.rng, self.lag_range, self.drop = rng, lag, drop
         self.reset()
 
     def reset(self) -> None:
@@ -56,7 +65,7 @@ class LaggyCamera:
         """Feed this tick's render; returns (newest frame delivered, the one before it, is it new)."""
         self.shots.append(img)
         self.shots = self.shots[-(self.lag + 1):]
-        new = self.cur is None or self.rng.random() >= CAM_DROP
+        new = self.cur is None or self.rng.random() >= self.drop
         if new:
             self.prev, self.cur = self.cur, self.shots[0]
         return self.cur, self.prev if self.prev is not None else self.cur, new
@@ -74,7 +83,7 @@ def collect(job: tuple) -> dict:
     teacher = NumpyPolicy(Path(teacher_path))
     student = PixelNet(student_path) if student_path else None
     rng = np.random.default_rng(seed)
-    cam = LaggyCamera(rng, measured_lag())
+    cam = LaggyCamera(rng, measured_lag(), measured_drop())
     frames, cur, prev, proprio, labels, eps = [], [], [], [], [], []
     obs, _ = env.reset()
     n = by_student = 0
@@ -114,7 +123,7 @@ def exam(job: tuple) -> dict:
 
     env = VectorEnv("desk", "map", seed=0, worlds_per_reload=1)
     net = PixelNet(student_path)
-    cam = LaggyCamera(np.random.default_rng(1), measured_lag())
+    cam = LaggyCamera(np.random.default_rng(1), measured_lag(), measured_drop())
     rows = []
     for seed in seeds:
         obs, _ = env.reset(seed=seed)
