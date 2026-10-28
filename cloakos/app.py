@@ -129,19 +129,17 @@ class Brain:
             asyncio.ensure_future(self.set_frozen(not self.frozen, source="button"))
 
     async def set_frozen(self, on: bool, source: str = "ui") -> None:
-        """Freeze: every motor stops and stays stopped (behaviors, teleop, emotes all blocked).
-        Control is kept, so stock Vector doesn't wander off either. Eyes go still."""
+        """Freeze: the wheels and lift stop and stay stopped. The head, eyes, sounds and behaviors
+        carry on (it can still look around). Control is kept, so stock Vector doesn't wander off either."""
         if on == self.frozen:
             return
-        self.frozen = self.body.frozen = self.eyes.frozen = on
+        if on:
+            await self.body.drive(0, 0)                  # wheels stopped before the gate closes
+            await self.body.apply(type(self.body.cmd)(0, 0, self.body.cmd.head_rate, 0))
+        self.frozen = self.body.frozen = on
         if not on:
             self.stuck = False
-        if on:
-            if self.policy is not None:
-                await self.policy.stop()
-            await self.body.stop()
-        elif self.policy is not None:
-            await self.policy.start()
+            self.body._sent = None                      # resend the wheels once it's let go
         log.info("freeze %s (%s)", "on" if on else "off", source)
         self.bus.emit("freeze.changed", on=on, source=source)
 
@@ -347,7 +345,7 @@ class Brain:
             self._check_stuck(dt)
             self._charging_rules(w)
             obs = Obs(time.time(), self.drives.values, w)
-            if self.policy is not None and self.link.has_control and not self.frozen:
+            if self.policy is not None and self.link.has_control:
                 try:
                     await self.policy.step(obs)
                 except Exception:
