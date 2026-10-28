@@ -76,7 +76,9 @@ class Sim:
         self.head_rate = 0.0                # rad/s, overrides target while non-zero
         self.lift_target = lift_angle(32)
         self.lift_rate = 0.0
-        self._wheel_cmd = np.zeros(2)       # ramped wheel speeds actually sent
+        self._wheel_cmd = (0.0, 0.0)        # ramped wheel speeds actually sent
+        self._edge_back = False
+        self._gid = np.zeros(1, dtype=np.int32)       # mj_ray's geom-id out-param, reused
         self._hold_until = 0.0              # picked up by an invisible hand until then
         self._hold_pos: np.ndarray | None = None
         self._push: tuple[float, np.ndarray] | None = None
@@ -84,9 +86,10 @@ class Sim:
         self._frames: deque[tuple[float, bytes]] = deque()
         self._air_since: float | None = None
         self._m = self._d = None
-        # Vector's firmware stops forward driving the moment a front cliff sensor trips
-        # (unless the SDK holds override priority); emulate that so the brain sees what it would
-        self.cliff_guard = bool(c.get("cliff_guard", True))
+        # Vector's firmware stops forward driving the moment a front cliff sensor trips, unless the
+        # SDK holds override priority, which the brain does: so off by default, like the real thing
+        # (the brain's own edge reflex is the safety net). cliff_guard: true for default priority.
+        self.cliff_guard = bool(c.get("cliff_guard", False))
         # an optional fast controller run inside the physics loop (sim-only skills like balancing)
         self.controller = None
         self.controller_hz = 50.0
@@ -187,7 +190,7 @@ class Sim:
             self._m, self._d, self.scene_info = m, d, sc
             self.world, self.seed = sc.world, sc.seed
             self._ids(m)
-            self.wheels, self._wheel_cmd = (0.0, 0.0), np.zeros(2)
+            self.wheels, self._wheel_cmd = (0.0, 0.0), (0.0, 0.0)
             self.head_target, self.head_rate = 0.0, 0.0
             self.lift_target, self.lift_rate = lift_angle(32), 0.0
             self._hold_until, self._hold_pos, self._push, self._air_since = 0.0, None, None, None
@@ -258,6 +261,8 @@ class Sim:
         self._qadr = m.jnt_qposadr[n(J, "vector")]
         self._vadr = m.jnt_dofadr[n(J, "vector")]
         self._wheel_act = {k: n(A, f"wheel_{k}") for k in WHEELS}
+        self._left_acts = [self._wheel_act[k] for k in WHEELS if k[0] == "l"]
+        self._right_acts = [self._wheel_act[k] for k in WHEELS if k[0] == "r"]
         self._wheel_dof = {k: m.jnt_dofadr[n(J, f"wheel_{k}")] for k in WHEELS}
         self._head_act, self._lift_act = n(A, "head"), n(A, "lift")
         self._head_q, self._lift_q = m.jnt_qposadr[n(J, "head")], m.jnt_qposadr[n(J, "lift")]
@@ -452,28 +457,32 @@ class Sim:
             return None
 
     def _control(self, m, d, now: float) -> None:
+        # runs every 2 ms physics step: plain floats, no numpy temporaries (it was ~30% of training time)
         dt = m.opt.timestep
-        target = np.array(self.wheels)
+        tl, tr = self.wheels
+        cl, cr = self._wheel_cmd
         if self.wheel_accel > 0:
-            step = self.wheel_accel * dt
-            self._wheel_cmd += np.clip(target - self._wheel_cmd, -step, step)
+            st = self.wheel_accel * dt
+            cl += min(st, max(-st, tl - cl))
+            cr += min(st, max(-st, tr - cr))
         else:
-            self._wheel_cmd = target
+            cl, cr = tl, tr
         self._n += 1
         if self.cliff_guard and self._n % 5 == 0:     # every 10 ms, like the firmware's sensor loop
-            R = d.xmat[self._bid].reshape(3, 3)
-            down = -R[:, 2]
-            up = R[2, 2] > 0.7
+            R = d.xmat[self._bid]
+            down = np.array((-R[2], -R[5], -R[8]))
+            up = R[8] > 0.7
             self._edge = up and any(self._ray(m, d, self._sites[k], down) > 0.02 for k in ("cliff_fl", "cliff_fr"))
             self._edge_back = up and any(self._ray(m, d, self._sites[k], down) > 0.02 for k in ("cliff_bl", "cliff_br"))
         if self._hold_pos is None:
             if self._edge:
-                self._wheel_cmd = np.minimum(self._wheel_cmd, 0.0)    # forward blocked, reversing allowed
-            if getattr(self, "_edge_back", False):
-                self._wheel_cmd = np.maximum(self._wheel_cmd, 0.0)    # the rear sensors stop it backing off
-        l, r = self._wheel_cmd / 1000.0 / WHEEL_R
-        for k in WHEELS:
-            d.ctrl[self._wheel_act[k]] = l if k[0] == "l" else r
+                cl, cr = min(cl, 0.0), min(cr, 0.0)    # forward blocked, reversing allowed
+            if self._edge_back:
+                cl, cr = max(cl, 0.0), max(cr, 0.0)    # the rear sensors stop it backing off
+        self._wheel_cmd = (cl, cr)
+        k = 1.0 / 1000.0 / WHEEL_R
+        d.ctrl[self._left_acts] = cl * k
+        d.ctrl[self._right_acts] = cr * k
         if self.head_rate:
             self.set_head(self.head_target + self.head_rate * dt, self.head_rate)
         if self.lift_rate:
@@ -561,7 +570,7 @@ class Sim:
         else:
             d.qpos[a:a + 3] = [x, y, sc.floor_z + 0.0005]
             d.qpos[a + 3:a + 7] = [math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]
-        self.wheels, self._wheel_cmd = (0.0, 0.0), np.zeros(2)
+        self.wheels, self._wheel_cmd = (0.0, 0.0), (0.0, 0.0)
         self.head_target, self.head_rate, self.lift_rate = 0.0, 0.0, 0.0
         d.qpos[self._head_q] = 0.0
         self._hold_pos, self._push, self._air_since, self._edge, self._n = None, None, None, False, 0
@@ -589,8 +598,7 @@ class Sim:
     def _ray(self, m, d, site: int, direction: np.ndarray) -> float:
         import mujoco
 
-        gid = np.zeros(1, dtype=np.int32)
-        dist = mujoco.mj_ray(m, d, d.site_xpos[site], direction, self._rays, 1, -1, gid)
+        dist = mujoco.mj_ray(m, d, d.site_xpos[site], direction, self._rays, 1, -1, self._gid)
         return dist if dist >= 0 else math.inf
 
     def _update_snapshot(self) -> None:

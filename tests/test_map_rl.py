@@ -139,8 +139,8 @@ def test_learned_policy_needs_a_model_and_a_goal():
     assert lp.deployable() == "set a goal first"
     lp.goal = (1.0, 0.0)
     assert lp.deployable() is None
-    lp.spec = Spec("goto", "rays")
-    assert "sim-only" in lp.deployable()
+    lp.spec = Spec("desk", "map")                 # the desk teacher sees exact edges: sim only
+    assert "only runs in the sim" in lp.deployable()
 
 
 def test_numpy_policy_runs_without_torch(tmp_path):
@@ -215,3 +215,18 @@ def test_free_spot_too_big_for_desk():
     import numpy as np
     from cloakos.sim.rooms import _free_spot
     assert _free_spot(np.random.default_rng(0), (0.05, 0.05), [], 0.04, margin=0.04) is None
+
+
+def test_edge_reflex_matches_robot():
+    from cloakos.rl.envs import EdgeReflex
+    r = EdgeReflex(delay_steps=2, hz=10)
+    s = {"cliff": False, "left_mmps": 150.0, "right_mmps": 150.0}
+    assert r.step(s) is None
+    s = {**s, "cliff": True}
+    assert r.step(s) is None                     # Wi-Fi: the brain hears about it a little later
+    out = [r.step(s) for _ in range(15)]
+    assert out[0] is None and out[1] == -75.0    # was driving forward: reverses, at the robot's 75 mm/s
+    assert out.count(-75.0) >= 13                # 1.3 s at full speed in, then tries again while still on the edge
+    s2 = {**s, "cliff": False}
+    tail = [r.step(s2) for _ in range(30)]
+    assert 0.0 in tail and tail[-1] is None      # stops once clear, then gives the wheels back

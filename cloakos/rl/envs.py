@@ -72,12 +72,44 @@ def make_spec(task: str, sensors: str = "map") -> Spec:
     return Spec(task, sensors if sensors in SENSORS else "map", episode_s=40.0 if task == "wander" else 30.0)
 
 
-def reflex(spec: Spec, s: dict, a: np.ndarray) -> np.ndarray:
-    """Edge reflex, like the firmware's: when a front cliff sensor fires, back up and swing away
-    whatever the policy asked for. Runs on the robot side, after Wi-Fi, in training and on the real thing."""
-    if spec.task != "recover" and s.get("cliff"):
-        return np.array([-0.6, -0.25], np.float32)
-    return a
+class EdgeReflex:
+    """CloakOS's edge reflex exactly as the brain runs it on the robot (connection/robot.py
+    _edge_reflex), so training sees what really happens at an edge. The robot runs at override
+    priority, which turns Vector's own edge stop off: this reflex is the only safety net.
+
+    On a new edge: after the Wi-Fi delay, move away from where it was heading (reverse if it was
+    going forward) at 75 mm/s for 0.7-1.3 s (faster in = further out), up to 3 tries until the
+    sensor clears, then stop. While it runs it owns the wheels; the policy's commands are ignored."""
+    SPEED = 75.0
+
+    def __init__(self, delay_steps: int, hz: float) -> None:
+        self.delay, self.hz = max(1, delay_steps), hz
+        self.t, self.was, self.pending, self.until, self.tries, self.v, self.dur = 0, False, None, 0, 0, 0.0, 0
+
+    def step(self, s: dict) -> float | None:
+        """Call once per control step with the sensor snapshot; returns the wheel speed (mm/s, both
+        sides) while the reflex owns the wheels, else None."""
+        self.t += 1
+        edge = bool(s.get("cliff"))
+        if edge and not self.was and self.pending is None and not self.tries:
+            self.pending = (self.t + self.delay, (s["left_mmps"] + s["right_mmps"]) / 2)
+        self.was = edge
+        if self.pending and self.t >= self.pending[0]:
+            fwd = self.pending[1]
+            self.pending = None
+            self.v = (1.0 if fwd < -10 else -1.0) * self.SPEED
+            self.dur = max(1, round((0.7 + min(0.6, abs(fwd) / 150 * 0.6)) * self.hz))
+            self.tries, self.until = 1, self.t + self.dur
+        if self.tries:
+            if self.t < self.until:
+                return self.v
+            if edge and self.tries < 3:
+                self.tries += 1
+                self.until = self.t + self.dur
+                return self.v
+            self.tries = 0
+            return 0.0
+        return None
 
 
 def edge_rays(sn: dict, room, n: int) -> np.ndarray:
@@ -127,13 +159,14 @@ if gym is not None:
         metadata = {"render_modes": []}
 
         def __init__(self, task: str = "goto", sensors: str = "map", seed: int | None = None,
-                     worlds_per_reload: int = 8) -> None:
+                     worlds_per_reload: int = 8, hard: list[int] | None = None) -> None:
             super().__init__()
             self.spec_ = make_spec(task, sensors)
             n = self.spec_.obs_size
             self.observation_space = spaces.Box(-np.inf, np.inf, (n,), np.float32)
             self.action_space = spaces.Box(-1.0, 1.0, (3 if task == "recover" else 2,), np.float32)
-            self.sim = Sim({"sim": {"camera": False, "assets": False}})
+            # cliff_guard off: at override priority (what the brain uses) Vector's firmware edge stop is off
+            self.sim = Sim({"sim": {"camera": False, "assets": False, "cliff_guard": False}})
             self.rng = np.random.default_rng(seed)
             self.reload_every = worlds_per_reload
             self.episodes = 0
@@ -141,6 +174,7 @@ if gym is not None:
             self.last_action = np.zeros(2, np.float32)
             self.t = 0
             self.visited: set[tuple[int, int]] = set()
+            self.hard: list[int] = [int(x) for x in hard or []]   # world seeds earlier exams failed on
 
         # ── helpers ────────────────────────────────────────────
 
@@ -186,6 +220,13 @@ if gym is not None:
             m.cam_fovy[cam] = self._cam0[0] + self.rng.uniform(-4, 4)
             m.cam_pos[cam] = self._cam0[1] + self.rng.normal(0, 0.002, 3)
 
+        def hard_world(self, wseed: int) -> tuple[str, int]:
+            """An exam world (seed) for this task, rebuilt exactly as the exam built it."""
+            r = np.random.default_rng(wseed)
+            task = self.spec_.task
+            world = "empty" if task == "recover" else "desk" if task == "desk" else str(r.choice(["room", "room", "empty", "table"]))
+            return world, int(r.integers(1, 1_000_000))
+
         def _edge_rays(self, room) -> np.ndarray:
             return edge_rays(self.sim.snapshot, room, self.spec_.n_rays)
 
@@ -205,7 +246,10 @@ if gym is not None:
             task = self.spec_.task
             if self.sim.scene_info is None or self.episodes % self.reload_every == 0:
                 world = "empty" if task == "recover" else "desk" if task == "desk" else str(self.rng.choice(["room", "room", "empty", "table"]))
-                self.sim.load(world, int(self.rng.integers(1, 1_000_000)))
+                wseed = int(self.rng.integers(1, 1_000_000))
+                if self.hard and seed is None and self.rng.random() < 0.25:
+                    world, wseed = self.hard_world(int(self.rng.choice(self.hard)))
+                self.sim.load(world, wseed)
             self.episodes += 1
             sc = self.sim.scene_info
             if task == "recover":                  # dropped on its back, side or nose; let it land
@@ -235,7 +279,7 @@ if gym is not None:
                         self.goal = self._free_point(0.12)
                         if math.dist(self.goal, p0[:2]) > 0.25:
                             break
-            self.last_action = np.zeros(2, np.float32)
+            self.last_action = np.zeros(2, np.float32)       # what the brain last asked for (it knows that, not what landed)
             self.t = 0
             self.bumps = 0
             self.visited = set()
@@ -246,6 +290,7 @@ if gym is not None:
             self.obs_delay = int(self.rng.integers(0, 2))
             self.wheel_gain = float(self.rng.uniform(*REAL_WHEEL_GAIN))
             self._act_q = deque([np.zeros(3, np.float32)] * self.act_delay)
+            self.reflex = EdgeReflex(self.act_delay - 1, self.spec_.control_hz) if task != "recover" else None
             self._obs_q = deque(maxlen=self.obs_delay + 1)
             s = self.sim.snapshot
             self._prev_dist = math.dist(s["pos"][:2], self.goal) if self.goal else 0.0
@@ -255,24 +300,28 @@ if gym is not None:
         def step(self, action):
             spec, sim = self.spec_, self.sim
             a = np.clip(np.asarray(action, np.float32), -1, 1)
+            jerk = float(np.sum((a[:2] - self.last_action) ** 2))
+            self.last_action = a[:2].astype(np.float32)
             self._act_q.append(np.pad(a, (0, 3 - len(a))))
             a = self._act_q.popleft()[:len(a)]          # what actually reaches the robot this step
-            a = reflex(spec, sim.snapshot, a)
+            left, right = float(a[0]) * spec.max_speed, float(a[1]) * spec.max_speed
             if spec.task == "recover":
                 sim.set_lift(None, float(a[2]) * 3.0)
-                left, right = float(a[0]) * spec.max_speed, float(a[1]) * spec.max_speed
-                self.last_action = a[:2].astype(np.float32)
+                sim.set_wheels(left, right, 0.0)
             else:
-                left, right = float(a[0]) * spec.max_speed, float(a[1]) * spec.max_speed
-                left, right = left * self.wheel_gain, right * self.wheel_gain
-                self.last_action = a.astype(np.float32)
-            sim.set_wheels(left, right, 400.0 if spec.task != "recover" else 0.0)   # same ramp as Body.apply
+                v = self.reflex.step(sim.snapshot)
+                if v is not None:                          # the edge reflex owns the wheels (robot side)
+                    sim.set_wheels(v, v, 300.0)
+                else:
+                    sim.set_wheels(left * self.wheel_gain, right * self.wheel_gain, 400.0)   # same ramp as Body.apply
             sim.step(1.0 / spec.control_hz)
             self.t += 1
             s = sim.snapshot
             sc = sim.scene_info
             fell = s["pos"][2] < sc.floor_z - 0.03 or (s["upright"] < 0.3 and spec.task != "recover")
             reward, done, info = 0.0, False, {}
+            if spec.task != "recover":
+                reward -= 0.02 * jerk                          # smooth driving (no deploy-side smoothing to hide flicker)
             if spec.task == "goto":
                 dist = math.dist(s["pos"][:2], self.goal)
                 reward += 4.0 * (self._prev_dist - dist)           # progress
@@ -323,8 +372,7 @@ if gym is not None:
                     reward += 5.0
                     done, info["success"] = True, True
             if s.get("cliff") and spec.task != "recover":
-                fw = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
-                reward += 0.4 * max(0.0, -fw) - 0.15           # edge sensors fired: back off, don't sit and push
+                reward -= 0.3                                  # needing the reflex at all is a near-miss
                 info["cliff"] = True
             if fell:
                 reward -= 8.0

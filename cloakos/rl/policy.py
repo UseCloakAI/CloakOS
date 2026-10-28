@@ -1,8 +1,9 @@
 """LearnedPolicy: run a trained RL policy as one of the brain's modes ("learned").
 
-goto / explore run at the brain's 10 Hz tick through Body, so they work on the sim and on
-the real robot (robot-sensor policies only). balance needs 50 Hz, faster than Wi-Fi allows,
-so it runs inside the sim's physics thread and is sim-only.
+Every policy runs at the brain's 10 Hz tick through Body, on the sim or the real robot, and
+sees exactly what it saw in training: the same observation (envs.observe), ranges from the
+live map (or the sim), and its own last command. The edge reflex runs robot-side (RobotLink),
+the same reflex training models (envs.EdgeReflex).
 """
 from __future__ import annotations
 
@@ -20,8 +21,36 @@ from .envs import RAY_FOV, RAY_MAX, Spec, edge_rays, observe
 
 if TYPE_CHECKING:
     from ..connection import Body, RobotLink
+    from ..mapping.mapper import Mapper
+    from ..world import World
 
 log = logging.getLogger(__name__)
+
+
+def robot_snapshot(link: "RobotLink", world: "World") -> dict:
+    """The sensor dict policies are trained on, from the sim or the real robot."""
+    sim = link.sim
+    if link.target == "sim" and sim is not None and sim.snapshot:
+        return sim.snapshot
+    w = world
+    x, y, yaw = w.pose or (0.0, 0.0, 0.0)
+    ax, ay, az = w.accel or (0.0, 0.0, 9800.0)
+    g = math.sqrt(ax * ax + ay * ay + az * az) or 1.0
+    return {"pos": [x / 1000, y / 1000, 0.0], "yaw": yaw, "left_mmps": w.left_mmps or 0.0,
+            "right_mmps": w.right_mmps or 0.0, "prox_m": (w.proximity_mm / 1000) if w.proximity_mm else None,
+            "cliff": w.cliff, "upright": az / g if g > 1 else 1.0,
+            "pitch": math.asin(max(-1, min(1, ax / g))) if g > 1 else 0.0, "gyro": list(w.gyro or (0.0, 0.0, 0.0))}
+
+
+def ranges(link: "RobotLink", mapper: "Mapper | None", s: dict, n: int) -> np.ndarray | None:
+    """Ranges around the robot for "map" policies: from the live 3D map (the real robot's only
+    source), else straight from the sim. None (= all clear) only when there's neither."""
+    if mapper is not None and mapper.map is not None:
+        return mapper.rays(s["pos"], s["yaw"], n, RAY_FOV, RAY_MAX)
+    sim = link.sim
+    if link.target == "sim" and sim is not None:
+        return sim.rays(n, RAY_FOV, RAY_MAX)
+    return None
 
 
 class NumpyPolicy:
@@ -46,6 +75,7 @@ class LearnedPolicy(Policy):
 
     def __init__(self, body: "Body", link: "RobotLink") -> None:
         self.body, self.link = body, link
+        self.mapper: "Mapper | None" = None                # set by the brain once the mapper exists
         self.model: Any = None
         self.spec: Spec | None = None
         self.policy_name: str | None = None
@@ -78,8 +108,6 @@ class LearnedPolicy(Policy):
         """Why this policy can't drive the current target, or None if it can."""
         if self.spec is None:
             return "no policy loaded"
-        if self.link.target != "sim" and (self.spec.task == "balance" or self.spec.sensors == "rays"):
-            return "this policy is sim-only (needs 50 Hz control or sim depth rays)"
         if self.spec.task == "desk" and self.pixels is None and self.link.target != "sim":
             return "the desk teacher only runs in the sim (it sees exact edges); train a desk-pixels student from it"
         if self.spec.task == "goto" and self.goal is None:
@@ -90,23 +118,17 @@ class LearnedPolicy(Policy):
 
     async def start(self) -> None:
         self.last_action = np.zeros(2, np.float32)
-        if self.spec and self.spec.task == "balance" and self.link.target == "sim" and self.link.sim:
-            self.link.sim.controller = self._sim_controller
-            self.link.sim.controller_hz = self.spec.control_hz
 
     async def stop(self) -> None:
-        if self.link.sim is not None:
-            self.link.sim.controller = None
         await self.body.stop()
 
     async def step(self, obs: Obs) -> None:
         why = self.deployable()
-        if why or self.spec.task == "balance":
-            self.status = why or "balancing (in the physics loop)"
-            if why:
-                await self.body.drive(0, 0, "learned")
+        if why:
+            self.status = why
+            await self.body.drive(0, 0, "learned")
             return
-        s = self._snapshot(obs)
+        s = robot_snapshot(self.link, obs.world)
         if self.spec.task == "goto" and math.dist(s["pos"][:2], self.goal) < 0.06:
             self.status = "arrived"
             await self.body.drive(0, 0, "learned")
@@ -118,12 +140,13 @@ class LearnedPolicy(Policy):
                 await self.body.drive(0, 0, "learned")
                 return
         else:
-            rays = self.link.sim.rays(self.spec.n_rays) if self.spec.sensors == "rays" and self.link.sim else None
+            rays = None
             if self.spec.task == "desk" and self.link.sim and self.link.sim.scene_info:     # teacher: exact sim ranges
                 sim = self.link.sim
                 rays = np.minimum(sim.rays(self.spec.n_rays, RAY_FOV, RAY_MAX), edge_rays(s, sim.scene_info.room, self.spec.n_rays))
-            o = observe(self.spec, s, self.goal, rays, self.last_action)
-            a, _ = self.model.predict(o, deterministic=True)
+            elif self.spec.sensors == "map":
+                rays = ranges(self.link, self.mapper, s, self.spec.n_rays)
+            a, _ = self.model.predict(observe(self.spec, s, self.goal, rays, self.last_action), deterministic=True)
         a = np.clip(np.asarray(a, np.float32), -1, 1)
         self.last_action = a
         self.status = "driving"
@@ -141,24 +164,3 @@ class LearnedPolicy(Policy):
             prev, cur = cur, prepare(w.frame)
             self._frames = (w.frame_id, cur, prev)
         return self.pixels.act(cur, prev if prev is not None else cur, observe(self.spec, s, None, None, self.last_action))
-
-    def _snapshot(self, obs: Obs) -> dict:
-        """The same fields the sim snapshot has, from World (works on the real robot)."""
-        w = obs.world
-        if self.link.target == "sim" and self.link.sim and self.link.sim.snapshot:
-            return self.link.sim.snapshot
-        x, y, yaw = w.pose or (0.0, 0.0, 0.0)
-        ax, ay, az = w.accel or (0.0, 0.0, 9800.0)
-        g = math.sqrt(ax * ax + ay * ay + az * az) or 1.0
-        return {"pos": [x / 1000, y / 1000, 0.0], "yaw": yaw, "left_mmps": w.left_mmps or 0.0,
-                "right_mmps": w.right_mmps or 0.0, "prox_m": (w.proximity_mm / 1000) if w.proximity_mm else None,
-                "cliff": w.cliff, "upright": az / g, "pitch": math.asin(max(-1, min(1, ax / g))),
-                "gyro": list(w.gyro or (0.0, 0.0, 0.0))}
-
-    def _sim_controller(self, s: dict) -> tuple[float, float]:
-        """Called from the physics thread at control_hz (balance)."""
-        o = observe(self.spec, s, None, None, self.last_action)
-        a, _ = self.model.predict(o, deterministic=True)
-        v = float(np.clip(a[0], -1, 1))
-        self.last_action = np.array([v, v], np.float32)
-        return v * self.spec.max_speed, v * self.spec.max_speed

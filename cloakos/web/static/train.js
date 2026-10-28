@@ -99,11 +99,13 @@
     const ex = p.exam, tag = p.training ? (p.stopping ? 'Saving' : 'Training') : p.can_continue ? 'Paused'
       : ex && ex.passed != null ? (ex.passed ? 'Passed' : 'Failed exam') : p.ready ? 'Ready' : 'Empty';
     const cls = ex && !p.training && !p.can_continue && ex.passed != null ? (ex.passed ? 'res pass' : 'res fail') : '';
-    const checks = ex && ex.checks ? Object.entries(ex.checks).map(([k, c]) => `${c.ok ? '✓' : '✗'} ${k.replace(/_/g, ' ')} ${c.value ?? '—'} (want ${c.want})`).join(' · ') : '';
+    const checks = ex && ex.checks ? [Object.entries(ex.checks).map(([k, c]) => `${c.ok ? '✓' : '✗'} ${k.replace(/_/g, ' ')} ${c.value ?? '—'} (want ${c.want})`).join(' · '),
+      ex.picked === 'best' && `kept its best moment (${num(ex.picked_steps || 0)} steps), it drove better than the end`,
+      ex.parent && `${ex.beats_parent ? '▲ beats' : '▼ worse than'} ${ex.parent.name} (score ${ex.score != null ? Math.round(ex.score) : '—'} vs ${Math.round(ex.parent.score)})`].filter(Boolean).join('\n') : '';
     return `<div class="sc-card ${cls} ${p.name === chartName ? 'sel' : ''}">
       <div class="sc-head"><b>${esc(p.task)}</b><span class="res-tag">${tag}</span>
         <span class="sc-meta">${p.task.startsWith('desk') || p.task === 'recover' ? '' : `${esc(p.sensors)} sensors · `}${p.built_on || p.resumed_from ? `built on ${esc(p.built_on || p.resumed_from)} · ` : ''}${p.teacher ? `teacher ${esc(p.teacher)} · ` : ''}${new Date((p.created || 0) * 1000).toLocaleString()}</span></div>
-      <p>${esc(stats || (p.training ? 'warming up…' : 'stopped before the first checkpoint'))}${checks ? `<br>${esc(checks)}` : ''}</p>
+      <p>${esc(stats || (p.training ? 'warming up…' : 'stopped before the first checkpoint'))}${checks ? `<br>${esc(checks).replace(/\n/g, '<br>')}` : ''}</p>
       <div class="sc-foot"><span class="sc-checks">${esc(p.name)}</span>
         <button class="chip" onclick="rlChart('${p.name}')">Chart</button>
         ${p.can_continue && !st.running ? `<button class="chip" onclick="rlContinue('${p.name}')">Continue</button>` : ''}

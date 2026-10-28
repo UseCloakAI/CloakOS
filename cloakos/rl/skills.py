@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .envs import RAY_FOV, RAY_MAX, Spec, make_spec, observe, reflex
-from .policy import NumpyPolicy
+from .envs import Spec, make_spec, observe
+from .policy import NumpyPolicy, ranges, robot_snapshot
 
 if TYPE_CHECKING:
     from ..connection import RobotLink
@@ -36,11 +36,9 @@ class Skill:
         self.model = NumpyPolicy(folder / "policy.npz")
         self.exam = json.loads((folder / "exam.json").read_text()) if (folder / "exam.json").exists() else None
         self.last_action = np.zeros(2, np.float32)
-        self.smooth: np.ndarray | None = None
 
     def reset(self) -> None:
         self.last_action = np.zeros(2, np.float32)
-        self.smooth = None
 
 
 class Skills:
@@ -75,43 +73,21 @@ class Skills:
 
     def snapshot(self) -> dict:
         """The sensor dict the skills were trained on, from the sim or the real robot."""
-        sim = self.link.sim
-        if self.link.target == "sim" and sim is not None and sim.snapshot:
-            return sim.snapshot
-        w = self.world
-        x, y, yaw = w.pose or (0.0, 0.0, 0.0)
-        ax, ay, az = w.accel or (0.0, 0.0, 9800.0)
-        g = math.sqrt(ax * ax + ay * ay + az * az) or 1.0
-        return {"pos": [x / 1000, y / 1000, 0.0], "yaw": yaw, "left_mmps": w.left_mmps or 0.0,
-                "right_mmps": w.right_mmps or 0.0, "prox_m": (w.proximity_mm / 1000) if w.proximity_mm else None,
-                "cliff": w.cliff, "upright": az / g if g > 1 else 1.0,
-                "pitch": math.asin(max(-1, min(1, ax / g))) if g > 1 else 0.0, "gyro": list(w.gyro or (0.0, 0.0, 0.0))}
-
-    def rays(self, s: dict, n: int) -> np.ndarray | None:
-        """Ranges around the robot from the live map (the real robot's only source of them)."""
-        if self.mapper is not None and self.mapper.map is not None:
-            return self.mapper.rays(s["pos"], s["yaw"], n, RAY_FOV, RAY_MAX)
-        sim = self.link.sim
-        if self.link.target == "sim" and sim is not None:
-            return sim.rays(n, RAY_FOV, RAY_MAX)
-        return None
+        return robot_snapshot(self.link, self.world)
 
     def act(self, task: str, goal: tuple[float, float] | None = None) -> tuple[float, float, dict]:
-        """One 10 Hz decision: wheel speeds (mm/s) plus a little info for the UI."""
+        """One 10 Hz decision: wheel speeds (mm/s) plus a little info for the UI. Exactly the
+        training loop's path (the edge reflex runs robot-side, in RobotLink, like in training)."""
         sk = self.skills[task]
         s = self.snapshot()
-        r = self.rays(s, sk.spec.n_rays) if sk.spec.sensors == "map" else None
-        o = observe(sk.spec, s, goal, r, sk.last_action)
-        a, _ = sk.model.predict(o)
+        r = ranges(self.link, self.mapper, s, sk.spec.n_rays) if sk.spec.sensors == "map" else None
+        a, _ = sk.model.predict(observe(sk.spec, s, goal, r, sk.last_action))
         a = np.clip(np.asarray(a, np.float32), -1, 1)
         sk.last_action = a[:2]
-        a = reflex(sk.spec, s, a)
-        # smooth what reaches the wheels: trained policies flick between choices every tick
-        sk.smooth = a[:2] if sk.smooth is None or s.get("cliff") else sk.smooth + 0.35 * (a[:2] - sk.smooth)
         info: dict[str, Any] = {}
         if goal is not None:
             info["dist"] = math.dist(s["pos"][:2], goal)
-        return float(sk.smooth[0]) * sk.spec.max_speed, float(sk.smooth[1]) * sk.spec.max_speed, info
+        return float(a[0]) * sk.spec.max_speed, float(a[1]) * sk.spec.max_speed, info
 
     def summary(self) -> dict:
         return {t: {"name": s.name, "exam": {k: v for k, v in (s.exam or {}).items() if k not in ("runs",)}}

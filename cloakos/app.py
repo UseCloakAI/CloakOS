@@ -73,6 +73,7 @@ class Brain:
         from .behaviors.goto import GoToPolicy
         from .rl.skills import Skills
         self.skills = Skills(self.link, self.world, self.mapper)
+        self.policies["learned"].mapper = self.mapper
         self.body.skills = self.skills
         self.policies["goto"] = GoToPolicy(self.body, self.skills, self.bus)
         self._goto_return = "auto"

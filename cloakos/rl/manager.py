@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .envs import SENSORS, TASKS
+from .envs import SENSORS, TASKS, make_spec
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class Trainer:
                 eps = Path(self.root.parent) / "episodes"
                 cmd += ["--real", *[str(eps / Path(r).name) for r in real]]
             return self._launch(name, out, cmd)
-        name = f"{task}-{sensors if task != 'balance' else 'robot'}-{time.strftime('%Y%m%d-%H%M%S')}"
+        name = f"{task}-{make_spec(task, sensors).sensors}-{time.strftime('%Y%m%d-%H%M%S')}"
         out = self.root / name
         out.mkdir(parents=True, exist_ok=True)
         cmd = [sys.executable, "-m", "cloakos.rl.train", "--task", task, "--sensors",
@@ -180,7 +180,7 @@ class Trainer:
             x = json.loads(p.read_text())
         except (OSError, ValueError):
             return None
-        return {"passed": x.get("passed"), "checks": x.get("checks")}
+        return {k: x.get(k) for k in ("passed", "checks", "score", "picked", "picked_steps", "parent", "beats_parent")}
 
     @staticmethod
     def _tail(p: Path, n: int = 6) -> str:
