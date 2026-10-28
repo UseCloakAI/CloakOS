@@ -271,6 +271,20 @@ body.is-frozen .live-dot{background:#3B82F6!important}
 .rl-form .chip{height:30px}
 .rl-chart-wrap{border:var(--bd);background:var(--surf);box-shadow:var(--shsm);padding:8px;margin:12px 0}
 #rl-chart{width:100%;height:220px;display:block}
+.rl-run{border:var(--bd);background:var(--surf);box-shadow:var(--shsm);padding:10px 12px;margin:12px 0}
+.rl-run-head{display:flex;align-items:center;gap:8px;font-size:13px}
+.rl-run-head b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rl-run.stopping .res-tag{background:var(--acc);color:#fff}
+.rl-bar{height:10px;border:var(--bd);margin:10px 0 8px;position:relative;overflow:hidden}
+.rl-bar i{position:absolute;inset:0 auto 0 0;width:0;background:var(--acc);transition:width .6s var(--ease-out,ease)}
+.rl-bar.wait i{width:30%!important;animation:rlWait 1.2s ease-in-out infinite alternate}
+@keyframes rlWait{from{left:0}to{left:70%}}
+.rl-run-stats{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px}
+.rl-run-stats span b{font-weight:800}
+.rl-run .tele-note{margin:6px 0 0}
+.sb-btn .sb-dot{width:7px;height:7px;background:var(--acc);margin-left:auto;animation:sbDot 1.4s ease-in-out infinite}
+@keyframes sbDot{50%{opacity:.25}}
+.rl-form .chip:disabled{opacity:.5;cursor:wait}
 .rl-chart-legend{font-size:11px;font-weight:700;display:flex;gap:12px;align-items:center}
 .sc-card.sel{outline:2px solid var(--acc);outline-offset:-2px}
 .err{color:var(--acc)}

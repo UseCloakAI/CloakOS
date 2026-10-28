@@ -308,6 +308,11 @@ function goPage(p) {
   syncCamera();
   if (window.innerWidth <= 640) closeMobileSidebar();
 }
+window.trainDot = on => {
+  const b = $('[data-nav="train"]'); let d = $('.sb-dot', b);
+  if (on && !d) { d = document.createElement('i'); d.className = 'sb-dot'; d.title = 'Training is running'; b.append(d); }
+  else if (!on && d) d.remove();
+};
 function toggleSidebar() {
   const el = $('#sidebar');
   if (window.innerWidth <= 640) { const open = !el.classList.contains('collapsed'); el.classList.toggle('collapsed', open); $('#sb-overlay').classList.toggle('show', !open); }
@@ -326,23 +331,25 @@ function toggleDark() {
   const fitC = () => { if (c && c.offsetWidth) $('.sb-word', sb).style.setProperty('--c-w', c.offsetWidth + 'px'); };
   fitC(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitC);
   if (window.innerWidth <= 640) sb.classList.add('collapsed');
-  const ink = document.createElement('i'); ink.className = 'sb-ink'; ink.setAttribute('aria-hidden', 'true'); nav.prepend(ink);
-  let at = null;
-  const place = () => {
-    if (!nav.offsetHeight) return;
-    const on = $('.sb-btn.on', nav);
-    if (!on) { ink.classList.remove('show'); at = null; return; }
-    const t = on.offsetTop, b = nav.clientHeight - t - on.offsetHeight;
-    if (at === null) { ink.classList.add('jump'); ink.classList.remove('up', 'down'); }
-    else { ink.classList.toggle('down', t > at); ink.classList.toggle('up', t < at); }
-    ink.style.setProperty('--ink-t', t + 'px'); ink.style.setProperty('--ink-b', b + 'px');
-    if (at === null) { void ink.offsetWidth; ink.classList.remove('jump'); }
-    ink.classList.add('show'); at = t;
-  };
-  const mo = new MutationObserver(place);
-  $$('.sb-btn', nav).forEach(b => mo.observe(b, { attributes: true, attributeFilter: ['class'] }));
-  if ('ResizeObserver' in window) new ResizeObserver(() => { fitC(); place(); }).observe(nav);
-  place();
+  $$('.sb-nav', sb).forEach(nav => {             // one ink per nav block (main pages, Advanced)
+    const ink = document.createElement('i'); ink.className = 'sb-ink'; ink.setAttribute('aria-hidden', 'true'); nav.prepend(ink);
+    let at = null;
+    const place = () => {
+      if (!nav.offsetHeight) return;
+      const on = $('.sb-btn.on', nav);
+      if (!on) { ink.classList.remove('show'); at = null; return; }
+      const t = on.offsetTop, b = nav.clientHeight - t - on.offsetHeight;
+      if (at === null) { ink.classList.add('jump'); ink.classList.remove('up', 'down'); }
+      else { ink.classList.toggle('down', t > at); ink.classList.toggle('up', t < at); }
+      ink.style.setProperty('--ink-t', t + 'px'); ink.style.setProperty('--ink-b', b + 'px');
+      if (at === null) { void ink.offsetWidth; ink.classList.remove('jump'); }
+      ink.classList.add('show'); at = t;
+    };
+    const mo = new MutationObserver(place);
+    $$('.sb-btn', nav).forEach(b => mo.observe(b, { attributes: true, attributeFilter: ['class'] }));
+    if ('ResizeObserver' in window) new ResizeObserver(() => { fitC(); place(); }).observe(nav);
+    place();
+  });
   // the footer band is as tall as the composer, like Cloak
   const ia = $('.input-area');
   const sync = () => { const h = ia.getBoundingClientRect().height; if (h) sb.style.setProperty('--input-h', h + 'px'); };

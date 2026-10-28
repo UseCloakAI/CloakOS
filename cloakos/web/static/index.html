@@ -426,10 +426,10 @@
         </div>
         <div class="vs-scroll"><div class="vs">
           <h2>Train a skill</h2>
-          <p class="tele-note">Reinforcement learning (PPO) in the simulator, many rooms in parallel, much faster than real time. It runs in the background; the brain keeps working.</p>
+          <p class="tele-note" id="rl-desc">Trains in the simulator, many rooms at once, much faster than real time. It runs in the background; the brain keeps working.</p>
           <div class="rl-form">
             <label>Skill <select id="rl-task" class="sim-select"></select></label>
-            <label>Sensors <select id="rl-sensors" class="sim-select"></select></label>
+            <label id="rl-sensors-row">Sensors <select id="rl-sensors" class="sim-select"></select></label>
             <label>Build on <select id="rl-resume" class="sim-select"><option value="">Start fresh</option></select></label>
             <label id="rl-teacher-row" hidden>Teacher <select id="rl-teacher" class="sim-select"></select></label>
             <label id="rl-real-row" hidden>Real desk drives <select id="rl-real" class="sim-select" multiple size="3"></select></label>
@@ -445,10 +445,16 @@
             <button class="chip" id="rl-stop" onclick="rlStop()" hidden>Stop and save</button>
           </div>
           <p class="tele-note err" id="rl-missing" hidden></p>
+          <div class="rl-run" id="rl-run" hidden>
+            <div class="rl-run-head"><b id="rl-run-name"></b><span class="res-tag" id="rl-run-tag"></span></div>
+            <div class="rl-bar"><i id="rl-bar-fill"></i></div>
+            <div class="rl-run-stats" id="rl-run-stats"></div>
+            <p class="tele-note" id="rl-run-phase"></p>
+          </div>
           <div class="rl-chart-wrap"><canvas id="rl-chart" height="220"></canvas><div class="rl-chart-legend" id="rl-legend"></div></div>
           <h2>Driving now</h2>
           <dl class="kv" id="kv-rl-active"></dl>
-          <p class="tele-note">Goto policies drive to a goal: double-click the floor in the Simulator to set one.</p>
+          <p class="tele-note" id="rl-goal-note" hidden>Goto policies drive to a goal: double-click the floor in the Simulator to set one.</p>
           <h2>Calibrate to the real thing</h2>
           <p class="tele-note">Measures how the real pipeline differs from the training sim, so training can match it. Takes a few minutes. Then copy the numbers and paste them to Claude.</p>
           <div class="chip-row">

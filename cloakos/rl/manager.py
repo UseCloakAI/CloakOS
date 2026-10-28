@@ -11,6 +11,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -31,10 +32,12 @@ class Trainer:
         self.root = Path(data_dir) / "policies"
         self.proc: subprocess.Popen | None = None
         self.job: str | None = None
+        self.started = 0.0
+        self.stopping = False
 
     def running(self) -> str | None:
         if self.proc is not None and self.proc.poll() is not None:
-            self.proc, self.job = None, None
+            self.proc, self.job, self.stopping = None, None, False
         return self.job
 
     def start(self, task: str, sensors: str = "robot", steps: int = 300_000, envs: int | None = None,
@@ -106,17 +109,38 @@ class Trainer:
             cmd = ["caffeinate", "-ims", *cmd]           # keep the Mac awake while it trains (lid open / plugged in)
         log.info("training: %s", " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdout=(out / "train.log").open("a" if append else "w"), stderr=subprocess.STDOUT)
-        self.job = name
+        self.job, self.started, self.stopping = name, time.time(), False
         return name
 
     def stop(self) -> None:
-        if not self.running():
+        """Returns at once: the run saves and exits on its own (a few seconds); stuck ones get killed."""
+        if not self.running() or self.stopping:
             return
-        (self.root / self.job / "STOP").touch()          # finishes the rollout and saves
+        self.stopping = True
+        (self.root / self.job / "STOP").touch()
+        proc = self.proc
+
+        def reap() -> None:
+            try:
+                proc.wait(45)
+            except subprocess.TimeoutExpired:
+                proc.terminate()                         # its last checkpoint is at most a minute old
+                try:
+                    proc.wait(10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        threading.Thread(target=reap, daemon=True).start()
+
+    def last_row(self, name: str) -> dict | None:
+        """Just the newest progress line, without reading a marathon run's whole file."""
         try:
-            self.proc.wait(30)
-        except subprocess.TimeoutExpired:
-            self.proc.terminate()
+            with (self.root / name / "progress.jsonl").open("rb") as f:
+                f.seek(0, 2)
+                f.seek(max(0, f.tell() - 4096))
+                lines = [x for x in f.read().splitlines() if x.strip()]
+            return json.loads(lines[-1]) if lines else None
+        except (OSError, ValueError):
+            return None
 
     def progress(self, name: str, last: int = 400) -> list[dict]:
         p = self.root / name / "progress.jsonl"
@@ -131,19 +155,32 @@ class Trainer:
         out = []
         if not self.root.exists():
             return out
-        for d in sorted(self.root.iterdir(), reverse=True):
+        for d in self.root.iterdir():
             try:
                 meta = json.loads((d / "meta.json").read_text())
             except (OSError, ValueError):
                 continue
-            rows = self.progress(d.name, last=1)
+            last = self.last_row(d.name)
+            training = d.name == self.running()
             out.append({"name": d.name, **{k: meta.get(k) for k in ("task", "sensors", "steps", "trained_steps", "created", "finished",
                                                                     "teacher", "built_on", "resumed_from")},
-                        "ready": (d / "policy.npz").exists(), "training": d.name == self.running(),
-                        "can_continue": not meta.get("finished") and d.name != self.running()
+                        "ready": (d / "policy.npz").exists(), "training": training,
+                        "stopping": training and self.stopping,
+                        "since": self.started if training else None,
+                        "can_continue": not meta.get("finished") and not training
                         and ((d / "model.zip").exists() or (d / "student.pt").exists()),
-                        "last": rows[-1] if rows else None, "log_tail": self._tail(d / "train.log")})
+                        "exam": self._json(d / "exam.json"),
+                        "last": last, "log_tail": self._tail(d / "train.log")})
+        out.sort(key=lambda p: (p["training"], p.get("created") or 0), reverse=True)   # running first, then newest
         return out
+
+    @staticmethod
+    def _json(p: Path) -> Any:
+        try:
+            x = json.loads(p.read_text())
+        except (OSError, ValueError):
+            return None
+        return {"passed": x.get("passed"), "checks": x.get("checks")}
 
     @staticmethod
     def _tail(p: Path, n: int = 6) -> str:

@@ -71,6 +71,7 @@ def main(argv: list[str] | None = None) -> None:
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     progress = (out / "progress.jsonl").open("a")
 
+    print("starting the simulator rooms", flush=True)
     vec = make_vec_env(VectorEnv, n_envs=a.envs, seed=a.seed, vec_env_cls=SubprocVecEnv if a.envs > 1 else None,
                        env_kwargs={"task": a.task, "sensors": a.sensors})
 
@@ -140,6 +141,7 @@ def finish(out: Path) -> None:
     import sys
 
     if meta_task(out) in ("goto", "wander", "desk"):
+        print("taking the exam", flush=True)
         subprocess.run([sys.executable, "-m", "cloakos.rl.evaluate", str(out)], capture_output=True, timeout=1800)
     from .. import share
     if share.enabled():

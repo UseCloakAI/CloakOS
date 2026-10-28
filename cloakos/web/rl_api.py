@@ -27,6 +27,10 @@ def make_rl_router(brain: "Brain") -> APIRouter:
                 "active": {"name": lp.policy_name, "task": lp.spec.task if lp.spec else None, "goal": lp.goal,
                            "status": lp.status, "on": brain.mode == "learned", "blocked": lp.deployable()}}
 
+    @r.get("/running")
+    async def running() -> dict[str, Any]:
+        return {"running": t.running()}
+
     @r.get("/calibration")
     async def calibration() -> dict[str, Any]:
         c = brain.calibrator
