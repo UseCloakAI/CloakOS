@@ -209,3 +209,9 @@ def test_pixel_student_matches_torch_and_reads_recordings(tmp_path):
     part = load_real([str(rec)])
     assert part["frames"].shape == (3, 3, 54, 96) and np.allclose(part["labels"][0], [0.5, -0.5])
     assert list(part["prev"]) == [0, 0, 2]          # the frame after a gap has no "before"
+
+
+def test_free_spot_too_big_for_desk():
+    import numpy as np
+    from cloakos.sim.rooms import _free_spot
+    assert _free_spot(np.random.default_rng(0), (0.05, 0.05), [], 0.04, margin=0.04) is None
