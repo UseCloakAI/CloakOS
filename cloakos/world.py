@@ -25,6 +25,7 @@ class World:
     picked_up: bool = False
     held: bool = False
     cliff: bool = False
+    edge_t: float = 0.0              # when an edge was last felt (the reflex backs off, so cliff clears fast)
     touching: bool = False
     button: bool = False
     on_charger: bool = False

@@ -159,6 +159,13 @@ class SimClient(VectorClient):
 
     # ── animations, screen, speaker, misc ──────────────────────
 
+    async def drive_on_charger(self) -> bool:
+        await asyncio.sleep(1.0)                  # the sim has no charger yet
+        return False
+
+    async def drive_off_charger(self) -> None:
+        await self.straight(-60, 60)
+
     async def anim_triggers(self) -> list[str]:
         return list(ANIMS)
 

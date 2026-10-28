@@ -28,7 +28,7 @@ from .world import World
 
 log = logging.getLogger(__name__)
 
-MODES = ("auto", "teleop", "idle", "learned", "goto")
+MODES = ("auto", "teleop", "idle", "learned", "goto", "home")
 # sense events that count as "something happened" for boredom
 NON_STIMULI = {"face_lost", "put_down"}
 
@@ -75,6 +75,9 @@ class Brain:
         self.body.skills = self.skills
         self.policies["goto"] = GoToPolicy(self.body, self.skills, self.bus)
         self._goto_return = "auto"
+        self.stuck = False                       # froze itself because it was stuck
+        self._stuck_s = 0.0
+        self._stuck_ping = 0.0
         self.bus.on("goto.*", self._on_goto)
         self.mode = "idle"
         self.policy: Policy | None = None
@@ -91,6 +94,7 @@ class Brain:
         self.freeze_window = float(fz.get("window_s", 1.5))
         self._taps: list[float] = []
         self.bus.on("raw.button_press", self._on_button)
+        self.bus.on("raw.edge", lambda ev: self.eyes.alert("edge", 1.6))
         self.bus.on("sense.*", self._on_sense)
         self.bus.on("*", self._collect)
 
@@ -125,6 +129,8 @@ class Brain:
         if on == self.frozen:
             return
         self.frozen = self.body.frozen = self.eyes.frozen = on
+        if not on:
+            self.stuck = False
         if on:
             if self.policy is not None:
                 await self.policy.stop()
@@ -148,6 +154,10 @@ class Brain:
                 d.say = d.say or "I can't get there right now."
         elif d.action == "stop":
             await self.set_frozen(True, source="voice")
+        elif d.action == "go_home":
+            asyncio.ensure_future(self.go_home())
+        elif d.action == "moves" and d.steps:
+            asyncio.ensure_future(self.run_moves(d.steps))
         elif d.action == "wander":
             if self.frozen:
                 await self.set_frozen(False, source="voice")
@@ -156,6 +166,37 @@ class Brain:
             asyncio.ensure_future(self.voice.say(d.say, trigger="reply", source=d.source))
         self.bus.emit("command", text=text, say=d.say, action=d.action, target=d.target, source=d.source)
         return {"say": d.say, "action": d.action, "target": d.target, "source": d.source}
+
+    MOVE_WORDS = {"forward": "Forward", "back": "Backing up", "turn": "Turning", "head": "Looking", "lift": "Lift", "wait": "Waiting"}
+
+    async def run_moves(self, steps: list) -> None:
+        """Precise steps from a command or the LLM, one after another. Autonomy pauses meanwhile (teleop
+        holds control without driving); the edge stop still guards every forward step."""
+        if not self.link.connected:
+            return
+        if self.frozen:
+            await self.set_frozen(False, source="moves")
+        back_to = self.mode if self.mode in ("auto", "idle", "teleop") else "auto"
+        await self.set_mode("teleop")
+        try:
+            for kind, val in steps:
+                if self.frozen:                          # "stop" (or stuck) cancels the rest
+                    break
+                self.eyes.flash(self.MOVE_WORDS.get(kind, kind), 1.2)
+                if kind == "forward":
+                    await self.body.straight(val, 80)
+                elif kind == "back":
+                    await self.body.straight(-val, 80)
+                elif kind == "turn":
+                    await self.body.turn(val, 90)
+                elif kind == "head":
+                    await self.body.head_angle(val, 8)
+                elif kind == "lift":
+                    await self.body.lift_height(val, 8)
+                elif kind == "wait":
+                    await asyncio.sleep(val)
+        finally:
+            await self.set_mode(back_to)
 
     async def go_to(self, object_id: str) -> bool:
         obj = next((o for o in self.mapper.objects if o["id"] == object_id), None) or self.mapper.find(object_id)
@@ -247,6 +288,9 @@ class Brain:
                 battery_low=w.battery_low,
             )
             self._emit_crossings(self.drives.update(dt, ctx))
+            self._check_stuck(dt)
+            if w.battery_low and self.mode == "auto" and not w.on_charger and not self.frozen:
+                asyncio.ensure_future(self.go_home())          # tired: go charge (Vector's own dock, our eyes)
             obs = Obs(time.time(), self.drives.values, w)
             if self.policy is not None and self.link.has_control and not self.frozen:
                 try:
@@ -281,13 +325,62 @@ class Brain:
                         log.info("eyes: Vector is slow to draw, now %.0f fps", 1 / period)
             await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
 
+    def _check_stuck(self, dt: float) -> None:
+        """Wheels told to move but nothing happens: pushing against something, or a tread caught.
+        Two signs: the wheels themselves don't turn, or it's told to turn and the gyro says it isn't.
+        Then everything stops (freeze) and it pings for help until someone unfreezes it."""
+        w, cmd = self.world, self.body.cmd
+        if self.frozen:
+            if self.stuck and time.time() - self._stuck_ping > 3.0:     # keep calling for help
+                self._stuck_ping = time.time()
+                self.bus.emit("stuck")
+                self.eyes.alert("stuck", 2.5)
+            self._stuck_s = 0.0
+            return
+        want = (abs(cmd.left_mmps) + abs(cmd.right_mmps)) / 2
+        got = (abs(w.left_mmps or 0.0) + abs(w.right_mmps or 0.0)) / 2
+        want_turn = abs(cmd.right_mmps - cmd.left_mmps) > 60 and abs(cmd.right_mmps + cmd.left_mmps) < 40
+        turning = abs((w.gyro or (0, 0, 0))[2]) > 0.08
+        stalled = want > 40 and got < 0.25 * want
+        spun_out = want_turn and not turning
+        moving_mode = (self.mode in ("auto", "goto", "learned") and self.link.has_control and not w.picked_up
+                       and not w.cliff and time.time() - w.edge_t > 1.5)        # the edge stop holds wheels on purpose
+        self._stuck_s = self._stuck_s + dt if (moving_mode and (stalled or spun_out)) else 0.0
+        if self._stuck_s > 1.8:
+            self._stuck_s = 0.0
+            self.stuck = True
+            self._stuck_ping = time.time()
+            log.warning("stuck (%s): stopping everything", "wheels stalled" if stalled else "not turning")
+            asyncio.ensure_future(self.set_frozen(True, source="stuck"))
+            self.bus.emit("stuck")
+            self.eyes.alert("stuck", 2.5)
+
+    async def go_home(self) -> bool:
+        """Back to the charger with Vector's own docking, while CloakOS keeps the eyes and holds control.
+        Stays in 'home' mode (resting) afterwards; switch to Auto to head out again."""
+        if self.mode == "home" or not self.link.connected:
+            return False
+        if self.frozen:
+            await self.set_frozen(False, source="go_home")
+        await self.set_mode("home")
+        self._homing = True
+        try:
+            ok = await self.body.go_home()
+        finally:
+            self._homing = False
+        self.eyes.flash("Home!" if ok or self.world.on_charger else "Couldn't find home", 2.0)
+        self.react("happy" if ok or self.world.on_charger else "sad")
+        return ok
+
     ACTIVITY = {"wander": "Wandering", "look_around": "Looking around", "approach_face": "Coming to say hi"}
 
     def activity(self) -> str | None:
         """What it's doing, in a few words, for the screen. None = just eyes."""
         w = self.world
         if self.frozen:
-            return "Frozen"
+            return "Stuck!" if self.stuck else "Frozen"
+        if self.mode == "home":
+            return "Going home" if getattr(self, "_homing", False) else ("Charging" if w.charging else None)
         if w.on_charger and (abs(w.left_mmps or 0) > 5 or abs(w.right_mmps or 0) > 5):
             return "Undocking"
         if self.calibrator.running:

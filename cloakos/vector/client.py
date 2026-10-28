@@ -195,6 +195,14 @@ class VectorClient:
         await self.stub.DriveStraight(m.DriveStraightRequest(
             speed_mmps=abs(speed_mmps), dist_mm=mm, should_play_animation=False, id_tag=self._tag()), timeout=15)
 
+    async def drive_on_charger(self) -> bool:
+        """Vector's own dock: finds the charger's marker and backs on. Can take a minute or two."""
+        r = await self.stub.DriveOnCharger(m.DriveOnChargerRequest(), timeout=180)
+        return getattr(getattr(r, "result", None), "code", 0) in (0, 1)
+
+    async def drive_off_charger(self) -> None:
+        await self.stub.DriveOffCharger(m.DriveOffChargerRequest(), timeout=30)
+
     # ── animations, screen, speaker, misc ──────────────────────
 
     async def anim_triggers(self) -> list[str]:

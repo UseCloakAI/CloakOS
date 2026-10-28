@@ -47,6 +47,8 @@ class RobotLink:
         self.volume = max(0, min(100, int(self.cfg.get("volume", 80))))   # 0..100, 0 = Cloak's sounds muted
         self.control_gen = 0
         self._button = False
+        self._edge = False
+        self.edge_events = 0                  # bumps each time the edge reflex fires
         self.pose: dict | None = None         # latest full pose for the mapper: pos (m), quat, head, origin                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
         self._stop = asyncio.Event()
@@ -305,6 +307,17 @@ class RobotLink:
             if down and not self._button:
                 self.bus.emit("raw.button_press")
             self._button = down
+            # edge reflex, right where the sensor data lands (not on the next brain tick): at override
+            # priority Vector's own edge stop is off, so every millisecond here is centimetres saved
+            edge = bool(msg.status & 0x4000) and not bool(msg.status & 0x8)         # cliff, not picked up
+            self.world.cliff = edge
+            if edge:
+                self.world.edge_t = time.time()
+            if edge and not self._edge and self.has_control:
+                self.edge_events += 1
+                asyncio.ensure_future(self._edge_reflex())
+                self.bus.emit("raw.edge")
+            self._edge = edge
         elif kind == "robot_observed_face":
             if msg.pose.origin_id:                 # Vector also knows where the face is in the room
                 fp = msg.pose
@@ -319,6 +332,20 @@ class RobotLink:
             ))
         elif kind == "wake_word" and msg.WhichOneof("wake_word_type") == "wake_word_begin":
             self.bus.emit("raw.wake_word")
+
+    async def _edge_reflex(self) -> None:
+        """Stop now, then roll back ~2 cm so the nose is off the edge. The brain decides what next."""
+        c = self.client
+        if c is None:
+            return
+        try:
+            await c.drive_wheels(0, 0, 0)
+            await c.drive_wheels(-60, -60, 0)
+            await asyncio.sleep(0.35)
+            await c.drive_wheels(0, 0, 0)
+        except Exception as e:
+            log.debug("edge reflex: %s", e)
+        log.info("edge: stopped and backed off")
 
     def _on_frame(self, img: Any, image_id: int) -> None:
         self.world.frame = img

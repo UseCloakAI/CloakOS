@@ -36,12 +36,20 @@ def note(f0: float, f1: float, dur: float, sr: int = SR) -> np.ndarray:
     return (wave * env).astype(np.float32)
 
 
-def chirp(name: str, pitch: float = 1.0, gain: float = 0.6) -> bytes:
+def loud(x: np.ndarray, target: float = 0.97) -> np.ndarray:
+    """Make it as loud as Vector's tiny speaker allows: normalise, then a soft limiter so the body of
+    the sound sits near full scale instead of one peak doing so."""
+    x = x / max(1e-6, float(np.max(np.abs(x))))
+    x = np.tanh(2.2 * x) / np.tanh(2.2)
+    return (x * target).astype(np.float32)
+
+
+def chirp(name: str, pitch: float = 1.0, gain: float = 0.97) -> bytes:
     parts = []
     for f0, f1, dur, gap in CHIRPS[name]:
         parts.append(note(f0 * pitch, f1 * pitch, dur))
         if gap:
             parts.append(np.zeros(int(gap * SR), np.float32))
     x = np.concatenate(parts)
-    x = x / max(1e-6, float(np.max(np.abs(x)))) * gain
+    x = loud(x, gain)
     return (x * 32767).astype("<i2").tobytes()
