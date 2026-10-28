@@ -80,7 +80,7 @@ class Eyes:
 
     def alert(self, kind: str, seconds: float = 1.5) -> None:
         """A warning symbol takes over the screen: 'edge' (triangle) or 'stuck' (blocked wheel)."""
-        self._icon = (kind, time.time() + seconds)
+        self._icon, self._icon_len = (kind, time.time() + seconds), seconds
 
     def flash(self, text: str, seconds: float = 2.0) -> None:
         """Show a line for a moment, over whatever status there is ("Got there!", "On it")."""
@@ -206,9 +206,17 @@ class Eyes:
         """Drawn at screen size (no supersample needed for flat shapes); pulses so it reads as an alarm."""
         big = img.resize((W * SS, H * SS), Image.NEAREST)
         dr = ImageDraw.Draw(big)
-        pulse = 0.85 + 0.15 * math.sin(now * 2 * math.pi * 3)
-        col = tuple(int(c * a * pulse) for c in ((255, 196, 0) if kind == "edge" else self.color))
-        cx, cy, r = W * SS / 2, H * SS / 2, H * SS * 0.42 * (0.9 + 0.1 * a)
+        age = now - (self._icon[1] - self._icon_len) if getattr(self, "_icon_len", None) else 1.0
+        if kind == "edge":                               # alarm: flashes yellow/red, shakes, slams in
+            flash = math.sin(now * 2 * math.pi * 5) > 0
+            base = (255, 196, 0) if flash else (255, 70, 30)
+            pulse = 0.8 + 0.2 * abs(math.sin(now * 2 * math.pi * 5))
+            shake = 3 * SS * math.exp(-age * 2.5) * math.sin(now * 2 * math.pi * 23)
+            slam = 1.0 + 0.35 * math.exp(-age * 9)       # starts big, snaps down to size
+        else:
+            base, pulse, shake, slam = self.color, 0.85 + 0.15 * math.sin(now * 2 * math.pi * 3), 0.0, 1.0
+        col = tuple(int(c * a * pulse) for c in base)
+        cx, cy, r = W * SS / 2 + shake, H * SS / 2, H * SS * 0.42 * (0.9 + 0.1 * a) * slam
         if kind == "edge":                               # warning triangle with a "!"
             pts = [(cx, cy - r), (cx + r * 1.1, cy + r * 0.85), (cx - r * 1.1, cy + r * 0.85)]
             dr.polygon(pts, outline=col, width=int(6 * SS))

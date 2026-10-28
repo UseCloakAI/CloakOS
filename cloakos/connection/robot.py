@@ -49,6 +49,7 @@ class RobotLink:
         self._button = False
         self._edge = False
         self.edge_events = 0                  # bumps each time the edge reflex fires
+        self.edge_until = 0.0                 # the back-off owns the wheels until then
         self.pose: dict | None = None         # latest full pose for the mapper: pos (m), quat, head, origin                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
         self._stop = asyncio.Event()
@@ -333,19 +334,24 @@ class RobotLink:
         elif kind == "wake_word" and msg.WhichOneof("wake_word_type") == "wake_word_begin":
             self.bus.emit("raw.wake_word")
 
+    EDGE_BACK_S, EDGE_BACK_MMPS = 1.0, -70.0          # ~7 cm: far enough to turn away safely
+
     async def _edge_reflex(self) -> None:
-        """Stop now, then roll back ~2 cm so the nose is off the edge. The brain decides what next."""
+        """Stop now and reverse ~7 cm. For that second the back-off owns the wheels (Body enforces it),
+        so a behavior's next "stop" can't cancel it; then the brain decides where to go."""
         c = self.client
         if c is None:
             return
+        self.edge_until = time.time() + self.EDGE_BACK_S
         try:
-            await c.drive_wheels(0, 0, 0)
-            await c.drive_wheels(-60, -60, 0)
-            await asyncio.sleep(0.35)
-            await c.drive_wheels(0, 0, 0)
+            await c.drive_wheels(self.EDGE_BACK_MMPS, self.EDGE_BACK_MMPS, 0)
+            await asyncio.sleep(self.EDGE_BACK_S)
+            if time.time() >= self.edge_until - 0.05:
+                await c.drive_wheels(0, 0, 0)
         except Exception as e:
             log.debug("edge reflex: %s", e)
-        log.info("edge: stopped and backed off")
+        self.bus.emit("edge.cleared")
+        log.info("edge: backed off")
 
     def _on_frame(self, img: Any, image_id: int) -> None:
         self.world.frame = img

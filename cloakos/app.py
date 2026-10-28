@@ -94,7 +94,7 @@ class Brain:
         self.freeze_window = float(fz.get("window_s", 1.5))
         self._taps: list[float] = []
         self.bus.on("raw.button_press", self._on_button)
-        self.bus.on("raw.edge", lambda ev: self.eyes.alert("edge", 1.6))
+        self.bus.on("raw.edge", self._on_edge)
         self.bus.on("sense.*", self._on_sense)
         self.bus.on("*", self._collect)
 
@@ -212,6 +212,10 @@ class Brain:
         else:
             await gp.start()
         return True
+
+    def _on_edge(self, ev: Event) -> None:
+        self.eyes.alert("edge", 0.9)                    # alarm first, then say what it's doing
+        self.eyes.flash("Backing up", 2.0)
 
     def _on_goto(self, ev: Event) -> None:
         how = ev.topic.split(".", 1)[1]

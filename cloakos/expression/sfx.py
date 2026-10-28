@@ -58,6 +58,17 @@ def _ping(f: float, dur: float) -> np.ndarray:
     return (x * np.minimum(1, t / 0.003)).astype(np.float32)
 
 
+def _beep(f: float, dur: float) -> np.ndarray:
+    """A truck reversing beep, but chirpy: bright square-ish tone with a little upward lilt."""
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    freq = f * (1 + 0.06 * t / dur)
+    ph = 2 * np.pi * np.cumsum(freq) / SR
+    x = np.tanh(3.0 * np.sin(ph)) + 0.25 * np.sin(2 * ph)
+    env = np.minimum(1, t / 0.006) * np.minimum(1, (dur - t) / 0.02)
+    return (x * env).astype(np.float32)
+
+
 def _seq(parts: list[tuple[str, tuple]], vibrato: float = 0.0) -> np.ndarray:
     out = []
     for kind, a in parts:
@@ -77,6 +88,8 @@ def _seq(parts: list[tuple[str, tuple]], vibrato: float = 0.0) -> np.ndarray:
             out.append(_sting(*a))
         elif kind == "ping":
             out.append(_ping(*a))
+        elif kind == "beep":
+            out.append(_beep(*a))
     return np.concatenate(out)
 
 
@@ -99,6 +112,9 @@ SOUNDS = {
     "bump":     lambda p, s: [("noise", (0.07, 0.0)), ("n", (300 * p, 220 * p, 0.08))],                # oof
     "edge":     lambda p, s: [("sting", (392.0, 0.16)), ("gap", (0.09,)), ("sting", (370.0, 0.42))],     # dun dun!
     "stuck":    lambda p, s: [("ping", (1760.0, 0.7))],                                                 # sonar ping
+    # reversing beeper, the way a big truck does it, but in Cloak's chirpy voice
+    "backup":   lambda p, s: [("beep", (1180 * p, 0.17)), ("gap", (0.13,)), ("beep", (1180 * p, 0.17)), ("gap", (0.13,)),
+                              ("beep", (1180 * p, 0.17)), ("gap", (0.13,)), ("beep", (1180 * p, 0.17))],
     "yawn":     lambda p, s: [("n", (500 * p, 750 * p, 0.3 * s)), ("n", (750 * p, 350 * p, 0.5 * s))],
     "look":     lambda p, s: [("n", (850 * p, 780 * p, 0.08 * s)), ("n", (780 * p, 1100 * p, 0.14 * s))],
 }
@@ -108,7 +124,7 @@ EVENTS = {
     "sense.picked_up": ("pickup", 1.0), "sense.put_down": ("putdown", 1.0), "sense.touched": ("pet", 4.0),
     "sense.cliff": ("cliff", 2.0), "sense.button": ("button", 0.3), "sense.face_seen": ("face", 20.0),
     "sense.heard_wake_word": ("hm", 2.0), "map.object": ("found", 8.0), "goto.arrived": ("arrived", 1.0),
-    "goto.failed": ("failed", 1.0), "command": ("ack", 1.0), "raw.edge": ("edge", 1.5), "stuck": ("stuck", 2.5),
+    "goto.failed": ("failed", 1.0), "command": ("ack", 1.0), "stuck": ("stuck", 2.5),
 }
 BEHAVIOR_START = {"wander": ("go", 15.0), "nap": ("yawn", 60.0), "look_around": ("look", 15.0), "approach_face": ("face", 20.0)}
 
@@ -134,22 +150,34 @@ class Sfx:
         for topic in EVENTS:
             bus.on(topic, self._on)
         bus.on("behavior.changed", self._on_behavior)
+        bus.on("raw.edge", self._on_edge)
         bus.on("freeze.changed", lambda ev: self.play("freeze" if ev.data.get("on") else "unfreeze", 0.5))
 
     def _on(self, ev: "Event") -> None:
         name, cooldown = EVENTS[ev.topic]
         self.play(name, cooldown)
 
+    def _on_edge(self, ev: "Event") -> None:
+        """Dun dun! then the reversing beeper while it backs away."""
+        if self.play("edge", 1.5, force=True):
+            async def beeps():
+                await asyncio.sleep(0.45)
+                self.play("backup", 0.0, force=True)
+            asyncio.ensure_future(beeps())
+
     def _on_behavior(self, ev: "Event") -> None:
         hit = BEHAVIOR_START.get(ev.data.get("name"))
         if hit:
             self.play(*hit)
 
-    def play(self, name: str, cooldown: float = 1.0) -> bool:
+    def play(self, name: str, cooldown: float = 1.0, force: bool = False) -> bool:
+        """force: safety sounds skip the global gap (but still respect their own cooldown)."""
         now = time.time()
-        if not self.on or not self.body.ready or now - self._any < 0.35 or now - self._last.get(name, 0) < cooldown:
+        if not self.on or not self.body.ready or now - self._last.get(name, 0) < cooldown:
             return False
-        if now < getattr(self.body, "speaking_until", 0.0):         # never talk over itself
+        if not force and now - self._any < 0.35:
+            return False
+        if not force and now < getattr(self.body, "speaking_until", 0.0):   # never talk over itself (safety sounds may)
             return False
         self._last[name] = self._any = now
         pcm = render(name, getattr(self.drives, "values", None))
