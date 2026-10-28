@@ -130,7 +130,6 @@ voice:
     face_seen:        {hint: "you just spotted your human", cooldown_s: 30, lines: ["Hi!", "Oh! You!", "There you are."]}
     picked_up:        {hint: "someone just lifted you into the air", cooldown_s: 15, lines: ["Whoa!", "Up we go!", "Put me down?"]}
     touched:          {hint: "someone is petting your back", cooldown_s: 25, chance: 0.6, lines: ["Mmm.", "Nice.", "Hehe."]}
-    cliff:            {hint: "you almost fell off an edge", cooldown_s: 20, lines: ["Nope!", "Too high!"]}
     fear.high:        {hint: "you are scared", cooldown_s: 20, lines: ["Eek!", "Scary."]}
     boredom.high:     {hint: "nothing has happened for a long time, you are bored", cooldown_s: 90, lines: ["So bored.", "Hmm. Nothing.", "Play with me?"]}
     curiosity.high:   {hint: "you are very curious about your surroundings", cooldown_s: 60, chance: 0.5, lines: ["What's that?", "Ooh."]}
