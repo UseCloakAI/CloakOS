@@ -1885,50 +1885,76 @@ $("#txtAccountPw").keypress(function (e) {
 // chipper/pkg/wirepod/setup/ble.go AuthRobot). No DDL account involved.
 const WIREPOD_SESSION_TOKEN = "2vMhFgktH3Jrbemm2WHkfGN";
 
+// Vector answers only after it has reached wire-pod itself over Wi-Fi. If it can't (different
+// network, a hotspot that hides escapepod.local, wire-pod stopped) it never answers, so every
+// try gets a time limit instead of a spinner that never ends.
+const ACTIVATE_TRY_MS = 25000;
+const ACTIVATE_STUCK = "Vector didn't answer. It has to reach wire-pod over Wi-Fi itself, and it couldn't. " +
+  "Check that Vector joined the same Wi-Fi as this Mac (on an iPhone hotspot, turn on Maximize Compatibility), " +
+  "and that wire-pod is running. Then try Activate again. If it still won't, put Vector back on its charger, " +
+  "double-press its back button to show the pairing screen, and pair again from the start.";
+
+function withTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
+}
+
 function activateWithWirepod(attempt) {
-  return rtsHandler.doAnkiAuth(WIREPOD_SESSION_TOKEN).then(function (msg) {
+  return withTimeout(rtsHandler.doAnkiAuth(WIREPOD_SESSION_TOKEN), ACTIVATE_TRY_MS).then(function (msg) {
     if (msg.value.success || attempt >= 3) return msg;
     return new Promise((r) => setTimeout(r, 2500)).then(() => activateWithWirepod(attempt + 1));
   });
 }
 
+function wirepodReachable() {
+  return $.ajax({ url: "/api/setup/scan", method: "POST", contentType: "application/json", data: "{}", timeout: 8000 })
+    .then((r) => !!(r && r.found), () => true);     // can't ask (old server): don't block on it
+}
+
 $("#btnConnectCloud").click(function () {
   setPhase("containerLoading");
 
-  Promise.resolve({ session: { session_token: WIREPOD_SESSION_TOKEN } }).then(
-    function (data) {
-      cloudSession.sesionToken = data.session.session_token;
-
-      activateWithWirepod(0).then(function (msg) {
-        if (msg.value.success) {
-          cloudSession.clientToken = msg.value.clientTokenGuid;
-
-          // adjust default timezone
-          let tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          let jqtz = $("#selectTimeZone option[value='" + tz + "']");
-          jqtz.prop("selected", "selected");
-
-          toggleIcon("iconAccount", true);
-          setPhase("containerSettings");
-          enableLogPanel();
-        } else {
-          handleLoginError("wire-pod didn't accept Vector yet. Make sure wire-pod is running on this network, wait 20 seconds and try again.");
-        }
-      });
-    },
-    function (data) {
-      let msg = "Error logging in. Please try again.";
-      console.log(data);
-      if (
-        data.status == 403 &&
-        data.responseJSON.code == "invalid_username_or_password"
-      ) {
-        msg = data.responseJSON.message;
-      }
-
-      handleLoginError(msg);
+  wirepodReachable().then(function (ok) {
+    if (!ok) {
+      handleLoginError("CloakOS can't find wire-pod on this Mac or network. Start wire-pod, wait until its page loads, then try Activate again.");
+      return;
     }
-  );
+    Promise.resolve({ session: { session_token: WIREPOD_SESSION_TOKEN } }).then(
+      function (data) {
+        cloudSession.sesionToken = data.session.session_token;
+
+        activateWithWirepod(0).then(function (msg) {
+          if (msg.value.success) {
+            cloudSession.clientToken = msg.value.clientTokenGuid;
+
+            // adjust default timezone
+            let tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            let jqtz = $("#selectTimeZone option[value='" + tz + "']");
+            jqtz.prop("selected", "selected");
+
+            toggleIcon("iconAccount", true);
+            setPhase("containerSettings");
+            enableLogPanel();
+          } else {
+            handleLoginError("wire-pod didn't accept Vector yet. Make sure wire-pod is running on this network, wait 20 seconds and try again.");
+          }
+        }, function () {
+          handleLoginError(ACTIVATE_STUCK);
+        });
+      },
+      function (data) {
+        let msg = "Error logging in. Please try again.";
+        console.log(data);
+        if (
+          data.status == 403 &&
+          data.responseJSON.code == "invalid_username_or_password"
+        ) {
+          msg = data.responseJSON.message;
+        }
+
+        handleLoginError(msg);
+      }
+    );
+  });
 });
 
 function handleLoginError(msg) {
