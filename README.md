@@ -21,7 +21,7 @@ A living-creature brain for an OEM Anki/DDL Vector, part of [Cloak](https://usec
 - **It does what you tell it.** Type (or say) "go to the mug". Clear commands act instantly; anything else goes to Cloak's AI (`logos`), which decides what to say and do. Vector drives to the mug around whatever's in the way, then goes back to wandering.
 - **Stop it any time:** triple-tap its back button, or the ❄ button.
 
-The driving brains ship pre-trained and pass an exam on rooms they never trained in (see `cloakos/rl/pretrained/*/exam.json`). You don't need to train anything. **Advanced** (Simulator, Training) is there if you want to.
+Nous v0.0.0 ships with no trained skills: the old ones were cleared to start fresh on the desk teacher → pixel student pipeline. Until new ones ship, Auto drives with its simple built-in controllers. Train your own under **Training**.
 
 ## Install (macOS)
 
@@ -315,6 +315,5 @@ The mind of CloakOS Vector Edition. First shipped build.
 
 ## Nous v0.0.2
 
-- **Opsis vision net** (`rl/pretrained/vision`): a tiny camera-only net that reads one frame and estimates how far things are in 11 directions, including table edges. Trained on 21,600 simulator frames with real-camera effects (blur, grain, JPEG, vignetting, exposure drift, turn smear).
   - Rooms it never saw: 11 cm average error (30 cm for guessing); says "clear" when something is within 30 cm 4% of the time, so the edge sensors stay the backstop.
   - Shipped, not yet driving: it gets wired into the map once it's checked against real camera frames.

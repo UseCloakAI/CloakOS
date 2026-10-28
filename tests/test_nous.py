@@ -23,16 +23,18 @@ def test_newer_download_wins(tmp_path, monkeypatch):
     monkeypatch.setenv("CLOAK_HOME", str(tmp_path))
     assert nous.active_dir() == PRETRAINED
     (tmp_path / "nous").mkdir()
-    (tmp_path / "nous" / "manifest.json").write_text(json.dumps({"nous": "9.0.0", "min_app": "0.1.0", "skills": {}}))
+    (tmp_path / "nous" / "manifest.json").write_text(json.dumps({"nous": "9.0.0", "epoch": 1, "min_app": "0.1.0", "skills": {}}))
     assert nous.active_dir() == tmp_path / "nous"
-    (tmp_path / "nous" / "manifest.json").write_text(json.dumps({"nous": "9.0.0", "min_app": "99.0.0", "skills": {}}))
+    (tmp_path / "nous" / "manifest.json").write_text(json.dumps({"nous": "9.0.0", "epoch": 1, "min_app": "99.0.0", "skills": {}}))
     assert nous.active_dir() == PRETRAINED          # needs a newer app than this one
+    (tmp_path / "nous" / "manifest.json").write_text(json.dumps({"nous": "0.0.2", "min_app": "0.1.0", "skills": {}}))
+    assert nous.active_dir() == PRETRAINED          # from before the reset to v0.0.0: ignored
 
 
 def test_update_installs_and_verifies(tmp_path, monkeypatch):
     monkeypatch.setenv("CLOAK_HOME", str(tmp_path))
     blob = b"policy"
-    man = {"nous": "9.0.0", "min_app": "0.1.0", "skills": {"goto": {"policy.npz": hashlib.sha256(blob).hexdigest()}}}
+    man = {"nous": "9.0.0", "epoch": 1, "min_app": "0.1.0", "skills": {"goto": {"policy.npz": hashlib.sha256(blob).hexdigest()}}}
 
     class Resp:
         def __init__(self, data): self.data = data

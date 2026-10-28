@@ -345,8 +345,7 @@ class Brain:
             )
             self._emit_crossings(self.drives.update(dt, ctx))
             self._check_stuck(dt)
-            if w.battery_low and self.mode == "auto" and not w.on_charger and not self.frozen:
-                asyncio.ensure_future(self.go_home())          # tired: go charge (Vector's own dock, our eyes)
+            self._charging_rules(w)
             obs = Obs(time.time(), self.drives.values, w)
             if self.policy is not None and self.link.has_control and not self.frozen:
                 try:
@@ -451,6 +450,35 @@ class Brain:
         asyncio.ensure_future(self.set_frozen(True, source="stuck"))
         self.bus.emit("stuck")
         self.eyes.alert("stuck", 2.5)
+
+    def _charging_rules(self, w) -> None:
+        """Never fight Vector's charging. Low in Auto: go home. On the charger in Auto and not full:
+        stay put and rest (no wandering off half charged). Full again: back to Auto. Picking Auto yourself
+        while it's on the charger with some battery still lets it drive off."""
+        if self.frozen or getattr(self, "_mode_busy", False):
+            return
+        full = w.battery_level == 3 and not w.charging
+        docked_now = w.on_charger and not getattr(self, "_was_on_charger", w.on_charger)
+        self._was_on_charger = w.on_charger
+        # just landed on the charger (Vector docked itself, or you put it there), or sitting on it nearly empty
+        if self.mode == "auto" and w.on_charger and not full and (docked_now or w.battery_level == 1):
+            self._auto_after_charge = True
+            self._switch_mode("home", "Charging")
+        elif self.mode == "auto" and w.battery_low and not w.on_charger:
+            self._auto_after_charge = True
+            self._mode_busy = True
+            fut = asyncio.ensure_future(self.go_home())          # tired: go charge (Vector's own dock, our eyes)
+            fut.add_done_callback(lambda _: setattr(self, "_mode_busy", False))
+        elif self.mode == "home" and getattr(self, "_auto_after_charge", False) and w.on_charger and full:
+            self._auto_after_charge = False
+            self._switch_mode("auto", "Charged!")
+
+    def _switch_mode(self, mode: str, flash: str) -> None:
+        self._mode_busy = True
+        log.info("charging: %s -> %s (battery %s, charging %s)", self.mode, mode, self.world.battery_level, self.world.charging)
+        self.eyes.flash(flash, 2.0)
+        fut = asyncio.ensure_future(self.set_mode(mode))
+        fut.add_done_callback(lambda _: setattr(self, "_mode_busy", False))
 
     async def go_home(self) -> bool:
         """Back to the charger with Vector's own docking, while CloakOS keeps the eyes and holds control.
