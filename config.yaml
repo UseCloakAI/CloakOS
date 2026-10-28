@@ -143,7 +143,8 @@ llm:                  # Cloak by default (api.usecloak.org, no key needed); or a
   base_url: null      # cloak: https://api.usecloak.org · openai: e.g. http://localhost:11434/v1 (Ollama)
   api_key: null
   model: null         # cloak: pneuma (fast lines) · openai: your model name
-  chat_model: null    # cloak: logos (understands commands like "go to the mug")
+  chat_model: null    # cloak: logos (chat)
+  command_model: null # cloak: kairos (drives the body: sees all sensors, plans precise moves)
   timeout_s: 2.5
   temperature: 1.0
   max_words: 6

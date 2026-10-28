@@ -44,6 +44,7 @@ async def step(p, d, w):
 
 async def test_picks_face_when_visible_then_startle_interrupts():
     cfg = load_config("config.yaml")
+    cfg["behaviors"]["temperature"] = 1e-4          # deterministic pick for the test
     d, w, bus = drives(), World(), Bus()
     seen = []
     bus.on("behavior.changed", lambda ev: seen.append(ev.data["name"]))

@@ -39,10 +39,12 @@ class LineWriter:
             self.base_url = (c.get("base_url") or "https://api.usecloak.org").rstrip("/")
             self.model = c.get("model") or "pneuma"
             self.chat_model = c.get("chat_model") or "logos"
+            self.command_model = c.get("command_model") or "kairos"      # the deep one drives the body
         else:
             self.base_url = (c.get("base_url") or "").rstrip("/")
             self.model = c.get("model", "")
             self.chat_model = c.get("chat_model") or self.model
+            self.command_model = c.get("command_model") or self.chat_model
         self.enabled = bool(c.get("enabled", True)) and bool(self.base_url)
         self.api_key = c.get("api_key") or ""
         self.timeout = float(c.get("timeout_s", 2.5))

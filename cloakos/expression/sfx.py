@@ -154,7 +154,7 @@ class Sfx:
         for topic in EVENTS:
             bus.on(topic, self._on)
         bus.on("behavior.changed", self._on_behavior)
-        bus.on("raw.edge", self._on_edge)
+        bus.on("edge.alarm", self._on_edge)              # after the back-off, not during (error 800)
         bus.on("freeze.changed", lambda ev: self.play("freeze" if ev.data.get("on") else "unfreeze", 0.5))
 
     def _on(self, ev: "Event") -> None:
@@ -162,7 +162,7 @@ class Sfx:
         self.play(name, cooldown)
 
     def _on_edge(self, ev: "Event") -> None:
-        """Dun dun! then the reversing beeper while it backs away."""
+        """Dun dun! then the reversing beeper, once it's safely backed off."""
         self.play("edge_alarm", 2.0, force=True)
 
     def _on_behavior(self, ev: "Event") -> None:

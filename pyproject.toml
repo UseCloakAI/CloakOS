@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloakos-vector-edition"
-version = "0.6.0"
+version = "0.6.1"
 description = "CloakOS Vector Edition: a living-creature brain for Anki/DDL Vector, running on your Mac or PC."
 requires-python = ">=3.11"
 dependencies = [

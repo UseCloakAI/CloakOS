@@ -60,8 +60,11 @@ class RulePolicy(Policy):
             else:
                 f -= dt / (b.typical_s * 1.5)
             self.fatigue[b.name] = max(0.0, min(1.5, f))
+        pref = getattr(self, "_prefer", None)
+        boost = pref[0] if pref and now < pref[1] else None
         self.scores = {b.name: round(b.weight * b.score(obs.drives, obs.world)
-                                     - (0.0 if b.interrupt else self.tiring * self.fatigue[b.name]), 3)
+                                     - (0.0 if b.interrupt else self.tiring * self.fatigue[b.name])
+                                     + (1.0 if b.name == boost else 0.0), 3)
                        for b in self.behaviors}
         best = max(self.behaviors, key=lambda b: self.scores[b.name])
         if cur is None or self._task is None or self._task.done():
@@ -77,6 +80,10 @@ class RulePolicy(Policy):
             nxt = self._pick(cur)
             if nxt is not cur:
                 await self._switch(nxt)
+
+    def prefer(self, name: str, seconds: float) -> None:
+        """Someone asked for this (e.g. "look around"): favour it for a while."""
+        self._prefer = (name, time.time() + seconds)
 
     def _pick(self, cur: Behavior | None) -> Behavior:
         """Softmax over the non-reflex options: usually a top one, sometimes the runner-up."""
