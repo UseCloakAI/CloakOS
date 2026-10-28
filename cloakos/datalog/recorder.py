@@ -132,6 +132,13 @@ class Recorder:
         shutil.rmtree(d)
         return True
 
+    def delete_all(self) -> int:
+        """Every recording except one being written right now."""
+        n = 0
+        for e in self.list_episodes(limit=100_000):
+            n += self.delete(e["name"])
+        return n
+
     def list_episodes(self, limit: int = 30) -> list[dict[str, Any]]:
         if not self.root.exists():
             return []

@@ -38,11 +38,16 @@ def _manifest(folder: Path) -> dict:
         return {}
 
 
+def _newer(a: dict, b: dict) -> bool:
+    """Nous a is newer than b: a later epoch (a fresh start), or the same epoch and a higher version."""
+    return (a.get("epoch", 0), _vkey(a.get("nous", "0"))) > (b.get("epoch", 0), _vkey(b.get("nous", "0")))
+
+
 def active_dir() -> Path:
     """The folder skills load from: a downloaded set if it's newer than the packaged one."""
     o, p = override_dir(), PRETRAINED
     mo, mp = _manifest(o), _manifest(p)
-    if mo and _vkey(mo.get("nous", "0")) > _vkey(mp.get("nous", "0")) and _vkey(mo.get("min_app", "0")) <= _vkey(__version__):
+    if mo and _newer(mo, mp) and _vkey(mo.get("min_app", "0")) <= _vkey(__version__):
         return o
     return p
 
@@ -62,7 +67,7 @@ def check(timeout: float = 15.0) -> dict:
         out["error"] = f"couldn't check ({type(e).__name__}). Are you online?"
         return out
     out.update(latest=m.get("nous"), sha=sha, manifest=m)
-    if _vkey(m.get("nous", "0")) > _vkey(out["installed"]):
+    if _newer(m, _manifest(active_dir())):
         if _vkey(m.get("min_app", "0")) > _vkey(__version__):
             out["needs_app_update"] = True
         else:

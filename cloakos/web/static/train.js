@@ -98,6 +98,12 @@
     if (!r.ok) alert(r.error); else chartName = name;
     refresh();
   };
+  window.rlWipe = async () => {
+    if (!confirm('Delete ALL training data on this computer? Every policy, every recording and downloaded Nous models. Calibration is kept. This can\'t be undone.')) return;
+    const r = await post('/api/rl/wipe');
+    alert(r.ok ? `Deleted ${r.policies} policies and ${r.recordings} recordings.` : r.error);
+    chartName = null; refresh();
+  };
   window.rlStop = async () => { await post('/api/rl/stop'); refresh(); };
   window.rlChart = name => { chartName = name; refresh(); };
   window.rlUse = async name => {

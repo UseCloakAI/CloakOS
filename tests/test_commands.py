@@ -83,3 +83,49 @@ async def test_go_to_drives_there_in_the_sim(tmp_path):
     brain.request_stop()
     await asyncio.wait_for(task, 10)
     sim.stop()
+
+
+def test_charging_rules_never_wander_off_half_charged():
+    import types
+
+    from cloakos.app import Brain
+
+    modes = []
+
+    class Fake:
+        _charging_rules = Brain._charging_rules
+        _switch_mode = Brain._switch_mode
+        frozen = False
+        mode = "auto"
+        eyes = types.SimpleNamespace(flash=lambda *a: None)
+
+        async def set_mode(self, m):
+            modes.append(m)
+            self.mode = m
+
+        async def go_home(self):
+            modes.append("go_home")
+
+    async def run():
+        b = Fake()
+        b.world = w = types.SimpleNamespace(on_charger=False, charging=False, battery_level=2, battery_low=False)
+        b._charging_rules(w)
+        await asyncio.sleep(0)
+        assert modes == []                              # driving around with a fine battery: leave it be
+        w.on_charger, w.charging = True, True           # Vector docks itself
+        b._charging_rules(w)
+        await asyncio.sleep(0.01)
+        assert modes == ["home"]
+        b._charging_rules(w)
+        await asyncio.sleep(0.01)
+        assert modes == ["home"]                        # stays home while charging
+        w.battery_level, w.charging = 3, False
+        b._charging_rules(w)
+        await asyncio.sleep(0.01)
+        assert modes == ["home", "auto"]                # full: off it goes
+        w.on_charger, w.battery_level, w.battery_low = False, 1, True
+        b._charging_rules(w)
+        await asyncio.sleep(0.01)
+        assert modes[-1] == "go_home"
+
+    asyncio.run(run())

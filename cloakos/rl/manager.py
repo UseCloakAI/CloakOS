@@ -152,6 +152,20 @@ class Trainer:
         except OSError:
             return ""
 
+    def delete_all(self) -> int:
+        """Every policy, plus downloaded Nous models and vision training data. Not while training."""
+        if self.running():
+            raise RuntimeError("stop the training run first")
+        n = 0
+        if self.root.exists():
+            for d in self.root.iterdir():
+                shutil.rmtree(d, ignore_errors=True) if d.is_dir() else d.unlink()
+                n += 1
+        from ..nous import override_dir
+        for d in (override_dir(), self.root.parent / "vision"):
+            shutil.rmtree(d, ignore_errors=True)
+        return n
+
     def delete(self, name: str) -> bool:
         d = (self.root / name).resolve()
         if d.parent != self.root.resolve() or not d.is_dir() or name == self.running():
