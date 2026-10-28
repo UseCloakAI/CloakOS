@@ -7,6 +7,7 @@ discrete events.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 import time
@@ -97,7 +98,11 @@ class Body:
         if getattr(self.link, "edge_events", 0) != getattr(self, "_edges", 0):   # the edge reflex moved the wheels
             self._edges, self._sent = self.link.edge_events, None
         wheels = (a.left_mmps, a.right_mmps)
-        if getattr(self.link.world, "cliff", False):  # edge under the nose: no forward (at override priority
+        backing = time.time() < getattr(self.link, "edge_until", 0.0)
+        if backing:                                   # the edge back-off owns the wheels right now
+            v = getattr(self.link, "EDGE_BACK_MMPS", -70.0)
+            wheels = (v, v)
+        elif getattr(self.link.world, "cliff", False):  # edge under the nose: no forward (at override priority
             wheels = (min(0.0, wheels[0]), min(0.0, wheels[1]))   # Vector's own edge stop is off)
         if wheels != getattr(self, "_sent", None):
             await self._do("drive_wheels", wheels[0], wheels[1], 400)
@@ -150,10 +155,17 @@ class Body:
         await self._do("lift_height", h, speed)
 
     async def turn(self, deg: float, speed_dps: float = 90) -> None:
+        await self._after_backoff()
         self._mark("turn", deg=deg)
         await self._do("turn", deg, speed_dps)
 
+    async def _after_backoff(self) -> None:
+        wait = getattr(self.link, "edge_until", 0.0) - time.time()
+        if wait > 0:                                     # let the edge back-off finish first
+            await asyncio.sleep(wait + 0.05)
+
     async def straight(self, mm: float, speed_mmps: float = 80) -> None:
+        await self._after_backoff()
         if mm > 0 and getattr(self.link.world, "cliff", False):
             return                                      # never roll forward over an edge
         self._mark("straight", mm=mm)
