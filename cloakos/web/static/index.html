@@ -333,11 +333,6 @@
               <button class="seg-btn" data-target="sim" onclick="setTarget('sim')">Sim</button>
             </div>
           </div>
-          <div class="topbar-right sim-world">
-            <select id="sim-world" class="sim-select" aria-label="World"></select>
-            <input id="sim-seed" class="sim-seed" type="text" inputmode="numeric" placeholder="seed" aria-label="Seed">
-            <button class="chip" onclick="resetWorld()">New room</button>
-          </div>
         </div>
         <div class="sim-wrap">
           <div class="sim-stage">
@@ -361,13 +356,61 @@
             <div class="sim-badges" id="sim-badges"></div>
           </div>
           <aside class="sim-side">
-            <h2>Tester</h2>
-            <p class="tele-note">Runs the real brain through a scenario in the sim and scores it. Same seed, same room.</p>
-            <label class="sim-rec"><input type="checkbox" id="sim-record"> Record runs as training episodes</label>
-            <div id="sim-running" class="sim-running" hidden></div>
-            <div id="sim-scenarios"></div>
-            <h2>Results</h2>
-            <div id="sim-results"><p class="tele-note">No runs yet.</p></div>
+            <div class="sim-tabs" role="tablist" aria-label="Simulator panel">
+              <button class="sim-tab active" role="tab" data-simtab="world" onclick="simTab('world')">World</button>
+              <button class="sim-tab" role="tab" data-simtab="desk" onclick="simTab('desk')">Desk</button>
+              <button class="sim-tab" role="tab" data-simtab="test" onclick="simTab('test')">Tester</button>
+            </div>
+
+            <div class="sim-pane" data-pane="world">
+              <h2>World</h2>
+              <p class="tele-note">Pick a world and roll a new one. Same seed, same room.</p>
+              <div class="sim-row">
+                <select id="sim-world" class="sim-select" aria-label="World"></select>
+              </div>
+              <div class="sim-row">
+                <input id="sim-seed" class="sim-seed" type="text" inputmode="numeric" placeholder="seed" aria-label="Seed">
+                <button class="chip" onclick="resetWorld()">New room</button>
+              </div>
+              <p class="tele-note">Drag to orbit, scroll to zoom. Double-click the floor to set a goal for goto policies.</p>
+            </div>
+
+            <div class="sim-pane" data-pane="desk" hidden>
+              <h2>Your desk</h2>
+              <p class="tele-note">Build a desk, put things on it, then let a trained desk policy drive it. Add or remove things while it runs.</p>
+              <div class="sim-row">
+                <label class="sim-num">Width <input id="desk-w" type="number" min="20" max="300" step="5" value="80"> cm</label>
+                <label class="sim-num">Depth <input id="desk-d" type="number" min="20" max="300" step="5" value="50"> cm</label>
+              </div>
+              <div class="sim-row">
+                <button class="chip" onclick="deskSize()">Build desk</button>
+                <button class="chip" onclick="deskRandom()">Random desk</button>
+              </div>
+              <h2>Things on it</h2>
+              <p class="tele-note" id="desk-hint">Pick a thing, then click the desk to drop it there.</p>
+              <div class="desk-palette" id="desk-palette"></div>
+              <div id="desk-objects"></div>
+              <div class="sim-row"><button class="chip" onclick="deskClear()">Clear desk</button></div>
+              <h2>Drive it</h2>
+              <div class="sim-row">
+                <select id="desk-policy" class="sim-select" aria-label="Desk policy"></select>
+              </div>
+              <div class="sim-row">
+                <button class="chip" id="desk-go" onclick="deskRun()">Run</button>
+                <button class="chip" id="desk-stop" onclick="deskStop()" hidden>Stop</button>
+              </div>
+              <div id="desk-score"></div>
+            </div>
+
+            <div class="sim-pane" data-pane="test" hidden>
+              <h2>Tester</h2>
+              <p class="tele-note">Runs the real brain through a scenario in the sim and scores it. Same seed, same room.</p>
+              <label class="sim-rec"><input type="checkbox" id="sim-record"> Record runs as training episodes</label>
+              <div id="sim-running" class="sim-running" hidden></div>
+              <div id="sim-scenarios"></div>
+              <h2>Results</h2>
+              <div id="sim-results"><p class="tele-note">No runs yet.</p></div>
+            </div>
           </aside>
         </div>
       </section>

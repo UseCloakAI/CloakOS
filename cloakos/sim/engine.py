@@ -50,6 +50,7 @@ class Sim:
         self.latency = float(c.get("camera_latency_s", 0.1))
         self.camera_on = bool(c.get("camera", True))
         self.world = c.get("world", "room")
+        self.layout: dict | None = None             # hand-made desk (Simulator page), else random
         self.assets = None
         if c.get("assets", True):
             from .assets import Assets
@@ -116,6 +117,34 @@ class Sim:
             self._render_thread.start()
         self._loaded.wait(10)
 
+    def set_layout(self, layout: dict) -> rooms.Scene | None:
+        """Rebuild the desk with this size and these things on it; Vector stays where it is if it still fits."""
+        s = self.snapshot or {}
+        keep = (s.get("pos"), s.get("yaw")) if self.world == "desk" else None
+        self.layout = layout
+        sc = self.load("desk", self.seed if self.world == "desk" else None)
+        if keep and keep[0] and sc and abs(keep[0][0]) < sc.room[0] - 0.04 and abs(keep[0][1]) < sc.room[1] - 0.04 \
+                and keep[0][2] > sc.floor_z - 0.02:
+            with self._lock:
+                self.place_robot(keep[0][0], keep[0][1], keep[1] or 0.0)
+        return sc
+
+    def desk_layout(self) -> dict:
+        """What's on the desk now (size in cm, things and where they are)."""
+        sc = self.scene_info
+        if sc is None or sc.world != "desk":
+            return {"size": None, "objects": []}
+        live = {}
+        with self._lock:
+            import mujoco
+            for body in sc.objects:
+                b = mujoco.mj_name2id(self._m, mujoco.mjtObj.mjOBJ_BODY, body)
+                if b >= 0:
+                    live[body] = self._d.xpos[b][:3].tolist()
+        objs = [{"id": k, "name": sc.labels.get(k, k), "x": round(live.get(k, (*xy, 0))[0], 3), "y": round(live.get(k, (*xy, 0))[1], 3),
+                 "fell": live.get(k, (0, 0, sc.floor_z))[2] < sc.floor_z - 0.03} for k, xy in sc.objects.items()]
+        return {"size": [round(sc.room[0] * 200), round(sc.room[1] * 200)], "floor_z": sc.floor_z, "objects": objs}
+
     def touch(self, seconds: float = 4.0) -> None:
         """Someone (a page, the brain) needs camera/depth frames for the next few seconds."""
         self._interest = max(self._interest, time.monotonic() + seconds)
@@ -147,7 +176,7 @@ class Sim:
 
         world, seed, rid = self._load_req or (self.world, None, 0)
         self._load_req = None
-        sc = rooms.build(world, seed, self.assets)
+        sc = rooms.build(world, seed, self.assets, layout=self.layout if world == "desk" else None)
         m = mujoco.MjModel.from_xml_string(sc.xml)
         d = mujoco.MjData(m)
         if sc.start_pitch:
@@ -775,7 +804,7 @@ class Sim:
                                    "specular": float(m.mat_specular[mat]), "shininess": float(m.mat_shininess[mat]),
                                    "reflectance": float(m.mat_reflectance[mat])}
                 geoms.append(info)
-            return {"version": self.version, "world": sc.world, "seed": sc.seed, "room": sc.room,
+            return {"version": self.version, "world": sc.world, "seed": sc.seed, "room": sc.room, "floor_z": sc.floor_z,
                     "nbody": int(m.nbody), "robot": int(self._bid), "geoms": geoms,
                     "objects": sc.objects, "labels": sc.labels, "person": sc.person, "goal": sc.goal}
 

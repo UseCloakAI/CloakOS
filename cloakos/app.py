@@ -95,6 +95,7 @@ class Brain:
         from .calibrate import Calibrator
         self.calibrator = Calibrator(self)
         self.tester = None                       # sim.tester.Tester, made on first use
+        self.deskrun = None                      # sim.deskrun.DeskRun (Simulator desk), made on first use
         fz = cfg.get("freeze", {}) or {}
         self.freeze_taps = int(fz.get("taps", 3))
         self.freeze_window = float(fz.get("window_s", 1.5))
@@ -151,6 +152,8 @@ class Brain:
                 self.calibrator.task.cancel()
             if self.tester is not None and getattr(self.tester, "running", False):
                 self.tester.stop()
+            if self.deskrun is not None and self.deskrun.running:
+                self.deskrun.stop_task()
             self.policy, self.mode = self.policies.get("teleop"), "teleop"     # nothing autonomous comes back
             self.bus.emit("mode.changed", mode="teleop")
             self._estop_ping = 0.0

@@ -46,6 +46,18 @@ canvas.addEventListener('dblclick', e => {        // double-click the floor: set
   if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lastFloorZ || 0)), hit)) post('/api/rl/goal', { x: hit.x, y: hit.y });
 });
 let lastFloorZ = 0;
+// single click (not a drag) on the desk drops the picked thing there
+let downAt = null;
+canvas.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('click', e => {
+  if (!placing || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+  const r = canvas.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hit = new THREE.Vector3();
+  if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), -lastFloorZ), hit)) deskEdit({ add: { name: placing, x: hit.x, y: hit.y } });
+});
 
 function bg() {
   const css = getComputedStyle(document.documentElement);
@@ -172,7 +184,7 @@ async function loadScene() {
   for (let i = 0; i < (sc.nbody || 0); i++) { const grp = new THREE.Group(); bodies.push(grp); world.add(grp); }
   for (const g of sc.geoms || []) { const m = mesh(g); if (m && bodies[g.body]) bodies[g.body].add(m); }
   robotId = sc.robot || 1;
-  lastFloorZ = sc.world === 'table' ? 0.38 : 0;
+  lastFloorZ = sc.floor_z || 0;
   version = sc.version;
   $('#sim-world').value = sc.world || 'room';
   $('#sim-seed').placeholder = sc.seed ? `seed ${sc.seed}` : 'seed';
@@ -319,7 +331,67 @@ function results(list) {
     </div>`).join('');
 }
 
+/* ── panel tabs + desk builder ─────────────────────────── */
+let tab = 'world', placing = null, desk = null, deskTimer = null;
+window.simTab = t => {
+  tab = t;
+  $$('.sim-tabs .sim-tab').forEach(b => { const on = b.dataset.simtab === t; b.classList.toggle('active', on); b.setAttribute('aria-selected', on); });
+  $$('.sim-pane').forEach(p => { p.hidden = p.dataset.pane !== t; });
+  clearInterval(deskTimer);
+  if (t !== 'desk') setPlacing(null);
+  if (t === 'desk' && shown) { deskRefresh(); deskTimer = setInterval(deskRefresh, 1000); }
+};
+function setPlacing(name) {
+  placing = name;
+  $$('#desk-palette .chip').forEach(b => b.classList.toggle('on', b.dataset.obj === name));
+  $('.sim-stage').classList.toggle('placing', !!name);
+  $('#desk-hint').textContent = name ? `Click the desk to drop the ${name}. Click it again in the list to stop.` : 'Pick a thing, then click the desk to drop it there.';
+}
+window.deskPick = name => setPlacing(placing === name ? null : name);
+async function deskEdit(body) {
+  const r = await post('/api/sim/desk', body);
+  if (!r.ok) alert(r.error || 'Couldn\'t change the desk.');
+  deskRefresh(); refresh();
+}
+window.deskSize = () => deskEdit({ size: [+$('#desk-w').value, +$('#desk-d').value] });
+window.deskRandom = () => deskEdit({ random: true });
+window.deskClear = () => deskEdit({ clear: true });
+window.deskRemove = id => deskEdit({ remove: id });
+window.deskRun = async () => {
+  const pol = $('#desk-policy').value;
+  if (!pol) return alert('Train a Desk policy first (Training page).');
+  const r = await post('/api/sim/desk/run', { policy: pol });
+  if (!r.ok) alert(r.error);
+  deskRefresh();
+};
+window.deskStop = () => post('/api/sim/desk/stop').then(deskRefresh);
+async function deskRefresh() {
+  try { desk = await (await fetch('/api/sim/desk')).json(); } catch { return; }
+  const pal = $('#desk-palette');
+  if (!pal.children.length) pal.innerHTML = Object.entries(desk.catalog).map(([n, c]) =>
+    `<button class="chip" data-obj="${esc(n)}" onclick="deskPick('${esc(n)}')"><i style="background:rgb(${c.map(v => Math.round(v * 255)).join(',')})"></i>${esc(n)}</button>`).join('');
+  const onDesk = !!desk.size;
+  if (onDesk && document.activeElement?.type !== 'number') { $('#desk-w').value = desk.size[0]; $('#desk-d').value = desk.size[1]; }
+  $('#desk-objects').innerHTML = !onDesk ? '<p class="tele-note">No desk loaded. Hit Build desk.</p>'
+    : desk.objects.length ? desk.objects.map(o => `<div class="desk-obj"><span>${esc(o.name)}</span>
+        <span class="sc-meta">${o.fell ? 'fell off' : `${Math.round(o.x * 100)}, ${Math.round(o.y * 100)} cm`}</span>
+        <button title="Remove" aria-label="Remove ${esc(o.name)}" onclick="deskRemove('${esc(o.id)}')">×</button></div>`).join('')
+    : '<p class="tele-note">Nothing on the desk.</p>';
+  const sel = $('#desk-policy'), was = sel.value;
+  sel.innerHTML = desk.policies.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('') || '<option value="">No desk policies yet</option>';
+  if (desk.policies.includes(was)) sel.value = was;
+  const run = desk.run, live = run && run.running;
+  $('#desk-go').hidden = !!live; $('#desk-stop').hidden = !live;
+  $('#desk-score').innerHTML = run ? `<div class="desk-score">
+      <div class="sc-head"><b>${esc(run.policy)}</b><span class="res-tag">${live ? 'Driving' : 'Done'}</span></div>
+      <dl><dt>Time</dt><dd>${run.seconds} s</dd>
+        <dt>Desk covered</dt><dd>${run.covered != null ? Math.round(run.covered * 100) + '%' : '—'} · ${run.cells_per_min}/min <span class="sc-meta">(exam wants ≥ 40)</span></dd>
+        <dt>Bumps</dt><dd>${run.bumps} · ${run.bumps_per_min}/min <span class="sc-meta">(≤ 1.5)</span></dd>
+        <dt>Falls</dt><dd>${run.falls}</dd>
+        ${live ? `<dt>Policy</dt><dd>${esc(run.status || '')}</dd>` : ''}</dl></div>` : '';
+}
+
 /* the app shell calls these when the page is shown/hidden; tests finishing refresh the list */
-window.simShown = on => { shown = on; if (!on && ws) ws.close(); if (on) { bg(); resize(); refresh(); if (!ws) connect(); } };
+window.simShown = on => { shown = on; if (!on && ws) ws.close(); if (on) { bg(); resize(); refresh(); if (!ws) connect(); } simTab(tab); };
 window.simEvent = topic => { if (topic.startsWith('test.')) refresh(); };
 new MutationObserver(bg).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
