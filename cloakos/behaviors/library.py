@@ -28,6 +28,7 @@ class Wander(Behavior):
     """
     name = "wander"
     min_s = 8.0
+    typical_s = 70.0
 
     def score(self, d, w):
         return 0.45 * d["curiosity"] + 0.45 * d["energy"] - 0.25 * d["boredom"]
@@ -199,6 +200,7 @@ class Wander(Behavior):
 class LookAround(Behavior):
     name = "look_around"
     min_s = 6.0
+    typical_s = 25.0
 
     def score(self, d, w):
         return 0.15 + 0.5 * d["curiosity"] + 0.2 * (1 - d["energy"])
@@ -264,6 +266,7 @@ class Sulk(Behavior):
 class Nap(Behavior):
     name = "nap"
     min_s = 30.0
+    typical_s = 150.0
     resting = True
 
     def __init__(self, cfg):
@@ -303,13 +306,44 @@ class Startle(Behavior):
         await sleep(1.5)
 
 
+class Chill(Behavior):
+    """Hanging out: sits, breathes, looks around softly, watches you if you're there, settles.
+    Restful (energy recovers), so it comes up more as it gets tired from exploring."""
+    name = "chill"
+    min_s = 8.0
+    typical_s = 45.0
+    resting = True
+
+    def score(self, d, w):
+        return 0.22 + 0.45 * (1 - d["energy"]) + 0.15 * (1 - d["curiosity"]) - 0.25 * d["boredom"] + 0.1 * d["attachment"]
+
+    async def run(self, body: Body, w: World, d: dict):
+        await body.drive(0, 0, self.name)
+        rnd = random.Random()
+        while True:
+            if w.face_visible(1.5):                      # someone's there: just look at them a while
+                await body.head_angle(rnd.uniform(25, 38), 4)
+                await sleep(rnd.uniform(1.5, 3.5))
+                continue
+            r = rnd.random()
+            if r < 0.5:                                  # a slow look somewhere
+                await body.head_angle(rnd.uniform(-5, 28), 2 + 3 * d.get("energy", 0.5))
+                Wander._gaze(body, rnd.uniform(-0.7, 0.7), rnd.uniform(-0.3, 0.2))
+            elif r < 0.65 and not held(w):               # shuffle round a little
+                await body.turn(rnd.uniform(-40, 40), 25 + 20 * d.get("energy", 0.5))
+            elif r < 0.72:                               # settle: head down, a little sigh
+                await body.head_angle(-8, 2)
+                Wander._gaze(body, 0.0, 0.35)
+            await sleep(rnd.uniform(1.5, 5.0) * (1.6 - d.get("energy", 0.5)))
+
+
 class Idle(Behavior):
     """Fallback when nothing scores well: sit, breathe, glance."""
     name = "idle"
     min_s = 4.0
 
     def score(self, d, w):
-        return 0.2
+        return 0.1
 
     async def run(self, body: Body, w: World, d: dict):
         while True:
@@ -317,4 +351,4 @@ class Idle(Behavior):
             await body.head_angle(random.uniform(0, 25))
 
 
-ALL = (Startle, ApproachFace, Nap, Sulk, Wander, LookAround, Idle)
+ALL = (Startle, ApproachFace, Nap, Sulk, Wander, LookAround, Chill, Idle)

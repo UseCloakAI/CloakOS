@@ -42,11 +42,13 @@ class Behavior(ABC):
     min_s = 4.0          # don't switch away before this, unless something interrupts
     interrupt = False    # reflexes: may cut in before the current behavior's min_s
     resting = False
+    typical_s = 40.0     # roughly how long before it starts to get "tired" of this (variety, not a timer)
 
     def __init__(self, cfg: dict) -> None:
         self.cfg = (cfg.get("behaviors", {}) or {}).get(self.name, {}) or {}
         self.weight = float(self.cfg.get("weight", 1.0))
         self.min_s = float(self.cfg.get("min_s", self.min_s))
+        self.typical_s = float(self.cfg.get("typical_s", self.typical_s))
 
     @abstractmethod
     def score(self, d: dict[str, float], w: World) -> float: ...
