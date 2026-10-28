@@ -148,6 +148,7 @@ settings() {
   [[ -f "$HOME_DIR/config.yaml" ]] || cp "$HOME_DIR/app/config.yaml" "$HOME_DIR/config.yaml"
   # settings we changed the default of: update them only if they're still exactly what we shipped
   sed -i.bak 's/^  control_priority: default   # default | override (also ignores cliffs\/low battery: careful)$/  control_priority: override  # override = stock Vector behaviors can'"'"'t take over (CloakOS does the edge stop) | default/' "$HOME_DIR/config.yaml" && rm -f "$HOME_DIR/config.yaml.bak"
+  sed -i.bak 's/^  stock_blend: 0\.25 /  stock_blend: 0.0  /' "$HOME_DIR/config.yaml" && rm -f "$HOME_DIR/config.yaml.bak"
   [[ -f "$HOME_DIR/.env" ]] || { cp "$HOME_DIR/app/.env.example" "$HOME_DIR/.env"; chmod 600 "$HOME_DIR/.env"; }
   mkdir -p "$HOME_DIR/data" "$HOME_DIR/bin"
   install -m 755 "$HOME_DIR/app/scripts/cloakctl.sh" "$HOME_DIR/bin/cloakctl"

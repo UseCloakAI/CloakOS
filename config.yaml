@@ -93,7 +93,7 @@ expression:
   chirps: true
   chirp_volume: 70
   chirp_pitch: 1.0
-  stock_blend: 0.25   # chance an emote uses one of Vector's stock animations instead (0 = fully custom)
+  stock_blend: 0.0    # chance an emote uses one of Vector's stock animations instead (0 = fully custom)
   reactions:          # sense -> emote, in auto mode, on top of the running behavior
     touched: happy
     heard_wake_word: curious
