@@ -95,6 +95,7 @@ class Brain:
         self._taps: list[float] = []
         self.bus.on("raw.button_press", self._on_button)
         self.bus.on("raw.edge", self._on_edge)
+        self.bus.on("edge.cleared", self._on_edge_cleared)
         self.bus.on("sense.*", self._on_sense)
         self.bus.on("*", self._collect)
 
@@ -217,6 +218,10 @@ class Brain:
         self.eyes.alert("edge", 0.9)                    # alarm first, then say what it's doing
         self.eyes.flash("Backing up", 2.0)
 
+    def _on_edge_cleared(self, ev: Event) -> None:
+        if not ev.data.get("cleared"):                  # couldn't get off the edge: that's stuck
+            self._become_stuck("couldn't get clear of an edge")
+
     def _on_goto(self, ev: Event) -> None:
         how = ev.topic.split(".", 1)[1]
         if how in ("arrived", "failed"):
@@ -338,7 +343,7 @@ class Brain:
         Then everything stops (freeze) and it pings for help until someone unfreezes it."""
         w, cmd = self.world, self.body.cmd
         if self.frozen:
-            if self.stuck and time.time() - self._stuck_ping > 3.0:     # keep calling for help
+            if self.stuck and time.time() - self._stuck_ping > 4.0:     # keep calling for help, now and then
                 self._stuck_ping = time.time()
                 self.bus.emit("stuck")
                 self.eyes.alert("stuck", 2.5)
@@ -355,12 +360,18 @@ class Brain:
         self._stuck_s = self._stuck_s + dt if (moving_mode and (stalled or spun_out)) else 0.0
         if self._stuck_s > 1.8:
             self._stuck_s = 0.0
-            self.stuck = True
-            self._stuck_ping = time.time()
-            log.warning("stuck (%s): stopping everything", "wheels stalled" if stalled else "not turning")
-            asyncio.ensure_future(self.set_frozen(True, source="stuck"))
-            self.bus.emit("stuck")
-            self.eyes.alert("stuck", 2.5)
+            self._become_stuck("wheels stalled" if stalled else "not turning")
+
+    def _become_stuck(self, why: str) -> None:
+        """Stop everything and call for help: a ping now, then every few seconds until rescued."""
+        if self.stuck:
+            return
+        self.stuck = True
+        self._stuck_ping = time.time()
+        log.warning("stuck (%s): stopping everything", why)
+        asyncio.ensure_future(self.set_frozen(True, source="stuck"))
+        self.bus.emit("stuck")
+        self.eyes.alert("stuck", 2.5)
 
     async def go_home(self) -> bool:
         """Back to the charger with Vector's own docking, while CloakOS keeps the eyes and holds control.

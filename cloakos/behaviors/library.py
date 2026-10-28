@@ -78,9 +78,10 @@ class Wander(Behavior):
                 avoid = (1.0 - w.proximity_mm / 220) * (1 if noise(4, t) >= 0 else -1) * 1.6
             if near_edge(w):
                 await body.drive(0, 0, self.name)
-                await body.turn(rnd.choice((-1, 1)) * rnd.uniform(90, 170), 70)
+                await body.turn(self._away_from_edge(body, rnd), 70)       # waits for the back-off first
                 boredom = 0.0
                 continue
+            avoid += self._edge_memory(w)
 
             # boredom makes it stop and take stock (a hazard, not a timer)
             if boredom > 1.0 and rnd.random() < dt * boredom:
@@ -103,6 +104,34 @@ class Wander(Behavior):
             head_goal = 6 + 8 * noise(2, t) + (10 if target is not None else 0)
             self._gaze(body, steer, 0.15 * noise(2, t) - (0.25 if target is not None else 0.0))
             await sleep(dt)
+
+    @staticmethod
+    def _away_from_edge(body: Body, rnd: random.Random) -> float:
+        """Turn (deg, + = left) away from where the edge was: if it hit while curving left, the edge
+        is front-left, so turn right. Straight on: either way, but far round."""
+        e = getattr(body.link, "last_edge", None) or {}
+        side = e.get("side", "ahead")
+        mag = rnd.uniform(110, 160)
+        if e.get("behind"):                               # rolled off backwards: face away from it less
+            mag = rnd.uniform(40, 80)
+        return -mag if side == "left" else mag if side == "right" else rnd.choice((-1, 1)) * mag
+
+    @staticmethod
+    def _edge_memory(w: World) -> float:
+        """Steer away from edges it has felt before (within ~30 cm and roughly ahead)."""
+        if not w.edges or w.pose is None:
+            return 0.0
+        x, y, yaw = w.pose
+        push = 0.0
+        for ex, ey, _t in w.edges[-60:]:
+            dx, dy = ex - x, ey - y
+            dist = math.hypot(dx, dy)
+            if dist > 300 or dist < 1:
+                continue
+            bearing = (math.atan2(dy, dx) - yaw + math.pi) % (2 * math.pi) - math.pi
+            if abs(bearing) < math.radians(70):           # ahead of it
+                push += -math.copysign(1.0, bearing) * (1 - dist / 300) * 1.2
+        return max(-1.5, min(1.5, push))
 
     @staticmethod
     def _target(body: Body, seen: dict[str, float]):

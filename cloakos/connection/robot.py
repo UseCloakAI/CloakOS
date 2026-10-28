@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from typing import Any
 
@@ -50,6 +51,8 @@ class RobotLink:
         self._edge = False
         self.edge_events = 0                  # bumps each time the edge reflex fires
         self.edge_until = 0.0                 # the back-off owns the wheels until then
+        self.edge_v = -75.0
+        self.last_edge: dict | None = None
         self.pose: dict | None = None         # latest full pose for the mapper: pos (m), quat, head, origin                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
         self._stop = asyncio.Event()
@@ -314,7 +317,7 @@ class RobotLink:
             self.world.cliff = edge
             if edge:
                 self.world.edge_t = time.time()
-            if edge and not self._edge and self.has_control:
+            if edge and not self._edge and self.has_control and time.time() > self.edge_until:
                 self.edge_events += 1
                 asyncio.ensure_future(self._edge_reflex())
                 self.bus.emit("raw.edge")
@@ -334,24 +337,47 @@ class RobotLink:
         elif kind == "wake_word" and msg.WhichOneof("wake_word_type") == "wake_word_begin":
             self.bus.emit("raw.wake_word")
 
-    EDGE_BACK_S, EDGE_BACK_MMPS = 1.0, -70.0          # ~7 cm: far enough to turn away safely
+    EDGE_BACK_MMPS = -70.0             # back-off speed (Body reads the sign/size of edge_v)
 
     async def _edge_reflex(self) -> None:
-        """Stop now and reverse ~7 cm. For that second the back-off owns the wheels (Body enforces it),
-        so a behavior's next "stop" can't cancel it; then the brain decides where to go."""
-        c = self.client
+        """Get clear of an edge, worked out from what it was doing when it hit (Vector only says "edge",
+        not which sensor): driving forward = edge in front, so reverse; reversing = edge behind, so roll
+        forward; curving = edge on that side. Distance grows with speed. Keeps going until the sensor
+        clears (3 tries), then says where the edge was so behaviors turn away and avoid it later.
+        While it runs it owns the wheels (Body enforces it) so nothing can cancel it."""
+        c, w = self.client, self.world
         if c is None:
             return
-        self.edge_until = time.time() + self.EDGE_BACK_S
+        l, r = w.left_mmps or 0.0, w.right_mmps or 0.0
+        fwd, curve = (l + r) / 2, (r - l)                  # mm/s; curve > 0 = was turning left
+        sign = 1.0 if fwd < -10 else -1.0                  # move away from where it was heading
+        speed = 75.0
+        self.edge_v = sign * speed
+        x, y, yaw = w.pose or (0.0, 0.0, 0.0)
+        ahead = 45.0 * (1 if sign < 0 else -1)             # the edge is ~4.5 cm past the sensor it hit
+        w.edges.append((x + ahead * math.cos(yaw), y + ahead * math.sin(yaw), time.time()))
+        del w.edges[:-200]
+        cleared = False
         try:
-            await c.drive_wheels(self.EDGE_BACK_MMPS, self.EDGE_BACK_MMPS, 0)
-            await asyncio.sleep(self.EDGE_BACK_S)
-            if time.time() >= self.edge_until - 0.05:
-                await c.drive_wheels(0, 0, 0)
+            for attempt in range(3):
+                dur = 0.7 + min(0.6, abs(fwd) / 150 * 0.6)   # faster in = further out
+                self.edge_until = time.time() + dur
+                end = self.edge_until
+                while time.time() < end:                    # re-send: nothing gets to cancel it
+                    await c.drive_wheels(self.edge_v, self.edge_v, 300)
+                    await asyncio.sleep(0.15)
+                if not w.cliff:
+                    cleared = True
+                    break
+            await c.drive_wheels(0, 0, 300)
         except Exception as e:
-            log.debug("edge reflex: %s", e)
-        self.bus.emit("edge.cleared")
-        log.info("edge: backed off")
+            log.warning("edge reflex: %s", e)
+        finally:
+            self.edge_until = 0.0
+        side = "left" if curve > 25 else "right" if curve < -25 else "ahead"
+        self.last_edge = {"t": time.time(), "side": side, "behind": sign > 0, "cleared": cleared}
+        self.bus.emit("edge.cleared", **self.last_edge)
+        log.info("edge (%s%s): %s", side, ", behind" if sign > 0 else "", "backed off" if cleared else "couldn't get clear")
 
     def _on_frame(self, img: Any, image_id: int) -> None:
         self.world.frame = img

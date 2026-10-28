@@ -100,12 +100,12 @@ class Body:
         wheels = (a.left_mmps, a.right_mmps)
         backing = time.time() < getattr(self.link, "edge_until", 0.0)
         if backing:                                   # the edge back-off owns the wheels right now
-            v = getattr(self.link, "EDGE_BACK_MMPS", -70.0)
+            v = getattr(self.link, "edge_v", -75.0)
             wheels = (v, v)
         elif getattr(self.link.world, "cliff", False):  # edge under the nose: no forward (at override priority
             wheels = (min(0.0, wheels[0]), min(0.0, wheels[1]))   # Vector's own edge stop is off)
         if wheels != getattr(self, "_sent", None):
-            await self._do("drive_wheels", wheels[0], wheels[1], 400)
+            await self._do("drive_wheels", wheels[0], wheels[1], 400)   # (an accel of 0 can mean "don't move")
             self._sent = wheels
         if a.head_rate != prev.head_rate:
             await self._do("move_head", a.head_rate)
