@@ -25,6 +25,20 @@ from .tts import make_tts
 log = logging.getLogger(__name__)
 
 
+def louder(pcm: bytes) -> bytes:
+    """TTS comes out quiet for Vector's tiny speaker: bring speech up to full scale with a gentle
+    compressor (quiet syllables lifted more than loud ones) so it's clear without crackling."""
+    import numpy as np
+
+    x = np.frombuffer(pcm, "<i2").astype(np.float32) / 32768.0
+    if not len(x):
+        return pcm
+    peak = float(np.percentile(np.abs(x), 99.7)) or 1e-6      # ignore the odd click when normalising
+    x = np.clip(x / peak, -1.5, 1.5)
+    x = np.tanh(1.6 * x) / np.tanh(1.6)
+    return (x * 0.97 * 32767).astype("<i2").tobytes()
+
+
 class Voice:
     def __init__(self, cfg: dict, bus: Bus, body: Body, drives: dict[str, float]) -> None:
         c = cfg.get("voice", {}) or {}
@@ -124,7 +138,7 @@ class Voice:
             self.bus.emit("voice.said", text=text, trigger=trigger, source=source, ready_ms=ready_ms, spoken=self.body.ready)
             with wave.open(str(path)) as w:
                 pcm, rate = w.readframes(w.getnframes()), w.getframerate()
-            await self.body.play_pcm(pcm, self.volume, text=text, rate=rate)
+            await self.body.play_pcm(louder(pcm), self.volume, text=text, rate=rate)
         return True
 
     async def reply(self, heard: str) -> str | None:
