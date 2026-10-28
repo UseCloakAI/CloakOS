@@ -300,6 +300,7 @@
           <div class="chip-row">
             <button class="chip" onclick="calRun('map')">Camera AI vs truth (simulator, 3 min)</button>
             <button class="chip" onclick="calRun('robot')">Robot lag and sensors (about 20 s)</button>
+            <button class="chip" onclick="calRun('camera')">Camera lag (head nods, about 25 s)</button>
             <button class="chip" onclick="calStop()">Stop</button>
             <button class="chip" onclick="calCopy()">Copy results</button>
             <button class="chip" onclick="calSend()">Send to Claude</button>
@@ -436,6 +437,8 @@
               <option value="300000" selected>Normal · 300k steps</option>
               <option value="1000000">Long · 1M steps</option>
               <option value="3000000">Overnight · 3M steps</option>
+              <option value="10000000">Weekend · 10M steps</option>
+              <option value="30000000">Marathon · 30M steps</option>
             </select></label>
             <button class="chip" id="rl-start" onclick="rlStart()">Start training</button>
             <button class="chip" id="rl-stop" onclick="rlStop()" hidden>Stop and save</button>
@@ -450,6 +453,7 @@
           <div class="chip-row">
             <button class="chip" onclick="calRun('map')">Camera AI vs truth (simulator, 3 min)</button>
             <button class="chip" onclick="calRun('robot')">Robot lag and sensors (about 20 s)</button>
+            <button class="chip" onclick="calRun('camera')">Camera lag (head nods, about 25 s)</button>
             <button class="chip" onclick="calStop()">Stop</button>
             <button class="chip" onclick="calCopy()">Copy results</button>
             <button class="chip" onclick="calSend()">Send to Claude</button>

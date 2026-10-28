@@ -26,19 +26,29 @@ from .pixelnet import IMG_H, IMG_W, PROPRIO
 MAX_SPEED = 150.0
 REAL_WEIGHT = 3          # a real-desk sample counts this many times
 EXAM_SEEDS = range(900_001, 900_021)
-CAM_LAG_STEPS = (2, 5)   # Vector's camera over Wi-Fi: a frame is 0.2-0.5 s old when the brain gets it
+CAM_LAG_STEPS = (2, 5)   # Vector's camera over Wi-Fi: a frame is 0.2-0.5 s old when the brain gets it (until measured)
 CAM_DROP = 0.15          # and sometimes the next one doesn't make it in time
+
+
+def measured_lag(path: str = "data/calibration.json") -> tuple[int, int]:
+    """Use the Camera lag calibration when there is one: its delay (in 0.1 s steps), give or take one."""
+    try:
+        c = json.loads(Path(path).read_text()).get("camera") or {}
+        k = int(round(float(c["picture_behind_sensors_s"]) * 10))
+        return max(0, k - 1), max(1, k + 1)
+    except (OSError, ValueError, KeyError, TypeError):
+        return CAM_LAG_STEPS
 
 
 class LaggyCamera:
     """The real stream as the brain sees it: late, sometimes stuck on the last frame."""
 
-    def __init__(self, rng) -> None:
-        self.rng = rng
+    def __init__(self, rng, lag: tuple[int, int] = CAM_LAG_STEPS) -> None:
+        self.rng, self.lag_range = rng, lag
         self.reset()
 
     def reset(self) -> None:
-        self.lag = int(self.rng.integers(CAM_LAG_STEPS[0], CAM_LAG_STEPS[1] + 1))
+        self.lag = int(self.rng.integers(self.lag_range[0], self.lag_range[1] + 1))
         self.shots: list = []
         self.cur = self.prev = None
 
@@ -64,7 +74,7 @@ def collect(job: tuple) -> dict:
     teacher = NumpyPolicy(Path(teacher_path))
     student = PixelNet(student_path) if student_path else None
     rng = np.random.default_rng(seed)
-    cam = LaggyCamera(rng)
+    cam = LaggyCamera(rng, measured_lag())
     frames, cur, prev, proprio, labels, eps = [], [], [], [], [], []
     obs, _ = env.reset()
     n = by_student = 0
@@ -104,7 +114,7 @@ def exam(job: tuple) -> dict:
 
     env = VectorEnv("desk", "map", seed=0, worlds_per_reload=1)
     net = PixelNet(student_path)
-    cam = LaggyCamera(np.random.default_rng(1))
+    cam = LaggyCamera(np.random.default_rng(1), measured_lag())
     rows = []
     for seed in seeds:
         obs, _ = env.reset(seed=seed)
@@ -262,7 +272,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--teacher", required=True, help="a trained desk policy folder")
     ap.add_argument("--out", required=True)
     ap.add_argument("--steps", type=int, default=200_000, help="sim steps in total, over all rounds")
-    ap.add_argument("--rounds", type=int, default=8)
+    ap.add_argument("--rounds", type=int, default=None, help="default: one per 25k steps (4-400)")
+    ap.add_argument("--continue", dest="cont", action="store_true", help="pick a stopped/crashed run in --out back up")
     ap.add_argument("--envs", type=int, default=max(1, min(8, (os.cpu_count() or 2) - 2)))
     ap.add_argument("--init", default=None, help="an earlier student to build on")
     ap.add_argument("--real", nargs="*", default=[], help="recordings from the real desk (teleop)")
@@ -274,6 +285,7 @@ def main(argv: list[str] | None = None) -> None:
 
     out = Path(a.out)
     (out / "data").mkdir(parents=True, exist_ok=True)
+    a.rounds = a.rounds or int(np.clip(a.steps // 25_000, 4, 400))
     teacher = Path(a.teacher)
     tmeta = json.loads((teacher / "meta.json").read_text())
     if tmeta.get("task") != "desk":
@@ -285,35 +297,48 @@ def main(argv: list[str] | None = None) -> None:
     net = build(torch)
     data = Data(a.max_samples)
     rounds_done = 0
-    if a.init:                                          # stack on an earlier student: its weights + its lessons
+    prev_meta = json.loads((out / "meta.json").read_text()) if a.cont and (out / "meta.json").exists() else None
+    if prev_meta and (out / "student.pt").exists():    # crashed or stopped: same folder, same plan, carry on
+        meta = {**prev_meta, "continued": prev_meta.get("continued", 0) + 1}
+        meta.pop("finished", None)
+        net.load_state_dict(torch.load(out / "student.pt"))
+        rounds_done, a.rounds, a.steps = int(meta.get("rounds", 0)), int(meta["rounds_total"]), int(meta["steps"])
+        for d in meta.get("data_dirs", []):
+            for f in sorted(Path(d).glob("*.npz")):
+                data.add(load_part(f), REAL_WEIGHT if f.name.startswith("real") else 1)
+        print(f"continuing at round {rounds_done + 1} of {a.rounds}: {len(data)} lessons", flush=True)
+    elif a.init:                                          # stack on an earlier student: its weights + its lessons
         init = Path(a.init)
         imeta = json.loads((init / "meta.json").read_text())
         net.load_state_dict(torch.load(init / "student.pt"))
         meta["built_on"] = init.name
         rounds_done = int(imeta.get("rounds", 0))
+        a.rounds += rounds_done
         meta["data_dirs"] = imeta.get("data_dirs", []) + meta["data_dirs"]
         for d in imeta.get("data_dirs", []):
             for f in sorted(Path(d).glob("*.npz")):
                 data.add(load_part(f), REAL_WEIGHT if f.name.startswith("real") else 1)
         print(f"building on {init.name}: {len(data)} lessons", flush=True)
-    if a.real:
+    if a.real and not prev_meta:
         part = load_real(a.real)
         if part:
             save_part(part, out / "data" / f"real_{int(time.time())}.npz")
             data.add(part, REAL_WEIGHT)
             print(f"real desk: {len(part['labels'])} teleop steps", flush=True)
+    meta.setdefault("rounds", rounds_done)
+    meta["rounds_total"] = a.rounds
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     progress = (out / "progress.jsonl").open("a")
-    opt = torch.optim.Adam(net.parameters(), lr=1e-3 if not a.init else 3e-4)
+    opt = torch.optim.Adam(net.parameters(), lr=3e-4 if (a.init or prev_meta) else 1e-3)
     rng = np.random.default_rng(a.seed)
-    per_round = max(500, a.steps // a.rounds)
-    t0, total = time.time(), 0
+    per_round = int(meta.get("per_round") or max(500, a.steps // max(1, a.rounds - rounds_done)))
+    meta["per_round"] = per_round
+    t0, total = time.time(), int(meta.get("trained_steps", 0)) if prev_meta else 0
     ctx = mp.get_context("spawn")                        # workers never inherit torch (it and offscreen GL don't mix)
     with ctx.Pool(a.envs) as pool:
-        for r in range(a.rounds):
+        for k in range(rounds_done, a.rounds):
             if (out / "STOP").exists():
                 break
-            k = rounds_done + r
             beta = 1.0 if k == 0 else 0.5 ** k            # who drives: the teacher at first, the student later
             student = str(out / "policy.npz") if (out / "policy.npz").exists() else None
             if k > 0 and student is None and a.init:
@@ -337,7 +362,8 @@ def main(argv: list[str] | None = None) -> None:
                     opt.step()
                     losses.append(loss.item())
             net.eval()
-            torch.save(net.state_dict(), out / "student.pt")
+            torch.save(net.state_dict(), out / "student.tmp.pt")
+            (out / "student.tmp.pt").replace(out / "student.pt")
             z = fold(net)
             np.savez(out / "policy.tmp.npz", **z)
             (out / "policy.tmp.npz").replace(out / "policy.npz")
@@ -352,11 +378,14 @@ def main(argv: list[str] | None = None) -> None:
             progress.write(json.dumps(row) + "\n")
             progress.flush()
             print(json.dumps(row), flush=True)
-        meta.update(rounds=rounds_done + r + 1, finished=time.time(), trained_steps=total, lessons=len(data))
-        (out / "meta.json").write_text(json.dumps(meta, indent=1))
+            meta.update(rounds=k + 1, trained_steps=total, lessons=len(data))      # a checkpoint every round
+            (out / "meta.json").write_text(json.dumps(meta, indent=1))
         progress.close()
-        if not (out / "policy.npz").exists():
-            return
+        (out / "STOP").unlink(missing_ok=True)
+        if meta["rounds"] < a.rounds or not (out / "policy.npz").exists():
+            return                                       # stopped early: left open to Continue
+        meta["finished"] = time.time()
+        (out / "meta.json").write_text(json.dumps(meta, indent=1))
         seeds = list(EXAM_SEEDS)
         res = pool.map(exam, [(str(out / "policy.npz"), seeds[i::a.envs]) for i in range(a.envs) if seeds[i::a.envs]])
     write_exam(out, [row for x in res for row in x["runs"]])
