@@ -74,7 +74,7 @@ class LaggyCamera:
 # ── sim side (worker processes: numpy + MuJoCo only, never torch) ──────────────
 
 def collect(job: tuple) -> dict:
-    teacher_path, student_path, beta, steps, seed = job
+    teacher_path, student_path, beta, steps, seed, stop = job
     from .envs import VectorEnv
     from .pixelnet import PixelNet, prepare
     from .policy import NumpyPolicy
@@ -87,7 +87,9 @@ def collect(job: tuple) -> dict:
     frames, cur, prev, proprio, labels, eps = [], [], [], [], [], []
     obs, _ = env.reset()
     n = by_student = 0
-    for _ in range(steps):
+    for i in range(steps):
+        if i % 200 == 0 and Path(stop).exists():        # Stop pressed: hand back what's done so far
+            break
         c, pv, new = cam.step(prepare(env.sim.grab(IMG_W, IMG_H)))
         if new:                                          # store each delivered frame once
             frames.append(c)
@@ -352,17 +354,23 @@ def main(argv: list[str] | None = None) -> None:
             student = str(out / "policy.npz") if (out / "policy.npz").exists() else None
             if k > 0 and student is None and a.init:
                 student = str(Path(a.init) / "policy.npz")
-            jobs = [(str(teacher / "policy.npz"), student, beta, per_round // a.envs, a.seed * 1000 + k * 100 + i)
-                    for i in range(a.envs)]
+            print(f"round {k + 1} of {a.rounds}: driving the desk", flush=True)
+            jobs = [(str(teacher / "policy.npz"), student, beta, per_round // a.envs, a.seed * 1000 + k * 100 + i,
+                     str(out / "STOP")) for i in range(a.envs)]
             parts = pool.map(collect, jobs)
             eps = [e for p in parts for e in p["episodes"]]
             for i, p in enumerate(parts):
                 save_part(p, out / "data" / f"r{k:03d}_{i}.npz")
                 data.add({kk: v for kk, v in p.items() if kk != "episodes"})
             total += sum(len(p["labels"]) for p in parts)
+            if (out / "STOP").exists():
+                break
+            print(f"round {k + 1} of {a.rounds}: learning from {len(data)} lessons", flush=True)
             net.train()
             losses = []
             for _ in range(3):
+                if (out / "STOP").exists():
+                    break
                 for img, prop, lab in data.batches(rng, 256):
                     x, pp = augment(torch, torch.from_numpy(img).float() / 255.0, torch.from_numpy(prop))
                     loss = torch.nn.functional.mse_loss(net(x, pp), torch.from_numpy(lab))
@@ -395,6 +403,7 @@ def main(argv: list[str] | None = None) -> None:
             return                                       # stopped early: left open to Continue
         meta["finished"] = time.time()
         (out / "meta.json").write_text(json.dumps(meta, indent=1))
+        print("taking the exam", flush=True)
         seeds = list(EXAM_SEEDS)
         res = pool.map(exam, [(str(out / "policy.npz"), seeds[i::a.envs]) for i in range(a.envs) if seeds[i::a.envs]])
     write_exam(out, [row for x in res for row in x["runs"]])
