@@ -59,6 +59,7 @@ function render(s) {
   S = s;
   setConn(s.connection);
   if (s.target === 'sim') { clearTimeout(setConn.t); $('#pair-cta').hidden = true; }
+  if (!!s.estop !== estopWas) paintEstop(!!s.estop);
   $$('.freeze-btn, .freeze-chip').forEach(b => { b.classList.toggle('on', !!s.frozen); b.title = s.frozen ? 'Unfreeze' : 'Freeze (or triple-tap Vector\'s button)'; });
   document.body.classList.toggle('is-frozen', !!s.frozen);
   renderHint(s.link_hint);
@@ -179,6 +180,7 @@ function onEvent(m, quiet) {
   else if (t === 'behavior.changed') text = `→ ${d.name.replace('_', ' ')}`;
   else if (t === 'mode.changed') text = `Mode: ${d.mode}`;
   else if (t === 'freeze.changed') text = FREEZE_TEXT(d.on);
+  else if (t === 'estop.changed') { text = d.on ? 'EMERGENCY STOP: everything halted' : 'Emergency stop released: all clear'; paintEstop(!!d.on); }
   else if (t === 'command') text = (d.say ? `“${d.say}”` : 'Heard you') + (d.action === 'go_to' ? ` · going to ${d.target}` : d.action !== 'none' ? ` · ${d.action}` : '');
   else if (t === 'goto.arrived') text = `Got to the ${d.target}`;
   else if (t === 'goto.failed') text = `Couldn't reach the ${d.target}`;
@@ -268,6 +270,23 @@ function closeMenus() {
 }
 document.addEventListener('click', closeMenus);
 function toggleRecord() { sendWS({ type: 'record', on: !(S && S.recording && S.recording.on) }); }
+function toggleEstop() { sendWS({ type: 'estop', on: !(S && S.estop) }); }
+let estopWas = false, clearTimer = null;
+function paintEstop(on) {
+  $$('.estop-btn').forEach(b => { b.classList.toggle('on', on); b.textContent = on ? 'RELEASE' : 'STOP'; });
+  $('#estop-banner').hidden = !on;
+  if (estopWas && !on) {                       // released: say so, clearly, for a few seconds
+    $('#estop-clear').hidden = false;
+    clearTimeout(clearTimer);
+    clearTimer = setTimeout(() => { $('#estop-clear').hidden = true; }, 4000);
+  }
+  if (on) $('#estop-clear').hidden = true;
+  estopWas = on;
+}
+// Shift+Space: emergency stop from anywhere on the page, even while typing
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && e.shiftKey && !e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); toggleEstop(); }
+}, true);
 function toggleFreeze() { sendWS({ type: 'freeze', on: !(S && S.frozen) }); }
 async function deleteEpisode(ev, name) {
   ev.stopPropagation();

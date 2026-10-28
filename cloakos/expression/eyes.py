@@ -79,7 +79,8 @@ class Eyes:
         self.mood, self.mood_until = mood, time.time() + seconds
 
     def alert(self, kind: str, seconds: float = 1.5) -> None:
-        """A warning symbol takes over the screen: 'edge' (triangle) or 'stuck' (blocked wheel)."""
+        """A symbol takes over the screen: 'edge' (triangle), 'stuck' (blocked wheel), 'stop' (emergency
+        stop sign) or 'clear' (green check, the stop was released)."""
         self._icon, self._icon_len = (kind, time.time() + seconds), seconds
 
     def flash(self, text: str, seconds: float = 2.0) -> None:
@@ -213,6 +214,11 @@ class Eyes:
             pulse = 0.85 + 0.15 * abs(math.sin(now * 2 * math.pi * 2.5))
             shake = 3 * SS * math.exp(-age * 4) * math.sin(now * 2 * math.pi * 7)
             slam = 1.0 + 0.35 * math.exp(-age * 9)       # starts big, snaps down to size
+        elif kind == "stop":                             # red stop sign, slow strong pulse
+            base, shake, slam = (235, 30, 30), 0.0, 1.0
+            pulse = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(now * 2 * math.pi * 1.2))
+        elif kind == "clear":                            # green, pops in
+            base, pulse, shake, slam = (40, 220, 90), 1.0, 0.0, 1.0 + 0.25 * math.exp(-age * 8)
         else:
             base, pulse, shake, slam = self.color, 0.85 + 0.15 * math.sin(now * 2 * math.pi * 3), 0.0, 1.0
         col = tuple(int(c * a * pulse) for c in base)
@@ -222,6 +228,15 @@ class Eyes:
             dr.polygon(pts, outline=col, width=int(6 * SS))
             dr.rounded_rectangle([cx - 4 * SS, cy - r * 0.45, cx + 4 * SS, cy + r * 0.3], radius=3 * SS, fill=col)
             dr.ellipse([cx - 4.5 * SS, cy + r * 0.45, cx + 4.5 * SS, cy + r * 0.45 + 9 * SS], fill=col)
+        elif kind == "stop":                             # octagon, white bar across: a stop sign at 184x96
+            r *= 0.95 + 0.07 * (0.5 + 0.5 * math.sin(now * 2 * math.pi * 1.2))
+            pts = [(cx + r * math.cos(math.pi / 8 + k * math.pi / 4), cy + r * math.sin(math.pi / 8 + k * math.pi / 4)) for k in range(8)]
+            dr.polygon(pts, fill=col)
+            white = tuple(int(255 * a) for _ in range(3))
+            dr.rounded_rectangle([cx - r * 0.62, cy - r * 0.14, cx + r * 0.62, cy + r * 0.14], radius=int(3 * SS), fill=white)
+        elif kind == "clear":                            # a check mark
+            dr.line([cx - r * 0.6, cy + r * 0.02, cx - r * 0.15, cy + r * 0.45, cx + r * 0.7, cy - r * 0.5],
+                    fill=col, width=int(9 * SS), joint="curve")
         else:                                            # stuck: a wheel with a bar through it
             dr.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=int(6 * SS))
             for k in range(6):

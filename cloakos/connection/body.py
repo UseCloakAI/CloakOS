@@ -48,7 +48,11 @@ class Body:
         self._discrete: list[dict[str, Any]] = []
         self._gen = -1
         self.face_ok, self.face_error, self._face_warned = 0, None, 0.0     # eyes frames Vector accepted / last error
+        self.halted = False           # emergency stop: every motor, nothing moves until released
         self.frozen = False           # freeze mode: wheels and lift held still; head, face and sound carry on                # link.control_gen our last command went out under
+
+    # emergency stop: nothing that moves gets through, only the screen, sound and stopping
+    HALT_OK = {"show_face", "play_pcm", "stop_all"}
 
     # while frozen these don't get through: anything that moves the wheels or the lift
     FROZEN_BLOCKED = {"drive_wheels", "move_lift", "lift_height", "straight", "turn", "drive_on_charger",
@@ -67,7 +71,7 @@ class Body:
 
     async def _do(self, method: str, *args: Any) -> Any:
         """Call a VectorClient method if we hold control; failures are logged, never raised."""
-        if not self.ready or (self.frozen and method in self.FROZEN_BLOCKED):
+        if not self.ready or (self.frozen and method in self.FROZEN_BLOCKED) or (self.halted and method not in self.HALT_OK):
             return None
         try:
             out = await getattr(self.link.client, method)(*args)
@@ -92,7 +96,7 @@ class Body:
         prev, self.cmd = self.cmd, a
         if source:
             self.source = source
-        if not self.ready:
+        if not self.ready or self.halted:
             return
         if self.frozen:                               # only the head moves
             if a.head_rate != prev.head_rate or self._gen != self.link.control_gen:

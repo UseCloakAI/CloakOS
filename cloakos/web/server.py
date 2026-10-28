@@ -191,6 +191,8 @@ def create_app(brain: "Brain") -> FastAPI:
         elif kind == "volume":
             await brain.link.set_volume(int(msg.get("value", 80)))
             write_env(env_path(), {"CLOAK_VOLUME": str(brain.link.volume)})
+        elif kind == "estop":
+            await brain.set_estop(bool(msg.get("on")), source="ui")
         elif kind == "freeze":
             await brain.set_frozen(bool(msg.get("on")), source="ui")
         elif kind == "anim":
