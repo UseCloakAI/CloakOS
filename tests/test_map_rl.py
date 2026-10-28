@@ -91,7 +91,7 @@ def test_sim_depth_maps_the_room(tmp_path):
 gym = pytest.importorskip("gymnasium")
 
 
-@pytest.mark.parametrize("task,sensors", [("goto", "robot"), ("goto", "rays"), ("explore", "robot"), ("recover", "robot")])
+@pytest.mark.parametrize("task,sensors", [("goto", "robot"), ("goto", "rays"), ("explore", "robot"), ("recover", "robot"), ("desk", "map")])
 def test_envs_follow_the_gym_api(task, sensors):
     from gymnasium.utils.env_checker import check_env
 
@@ -170,3 +170,42 @@ def test_exported_policy_matches_sb3(tmp_path):
     n = model.observation_space.shape[0]
     for o in np.random.default_rng(1).normal(size=(20, n)).astype(np.float32):
         assert np.allclose(model.predict(o, deterministic=True)[0], np_pol.predict(o)[0], atol=1e-5)
+
+
+def test_desk_sizes_follow_your_desk(monkeypatch):
+    from cloakos.sim.rooms import build, desk_size
+
+    monkeypatch.setenv("CLOAK_DESK", "90x60")
+    rng = np.random.default_rng(0)
+    sizes = [desk_size(rng) for _ in range(200)]
+    mine = [s for s in sizes if abs(s[0] - 0.45) < 0.05 and abs(s[1] - 0.3) < 0.035]
+    assert 60 < len(mine) < 160 and all(0.2 <= w <= 0.6 for w, _ in sizes if (w, _) not in mine)
+    sc = build("desk", 3)
+    assert sc.floor_z > 0.5 and len(sc.obstacles) <= 4
+
+
+def test_pixel_student_matches_torch_and_reads_recordings(tmp_path):
+    torch = pytest.importorskip("torch")
+    from PIL import Image
+
+    from cloakos.rl.pixelnet import PixelNet
+    from cloakos.rl.student import build, fold, load_real
+
+    net = build(torch).eval()
+    np.savez(tmp_path / "p.npz", **fold(net))
+    f, p = np.random.randint(0, 255, (2, 3, 54, 96), dtype=np.uint8), np.random.rand(7).astype(np.float32)
+    with torch.no_grad():
+        want = net(torch.from_numpy(np.concatenate([f[0], f[1]])[None]).float() / 255, torch.from_numpy(p[None]))[0].numpy()
+    assert np.allclose(PixelNet(tmp_path / "p.npz").act(f[0], f[1], p), want, atol=1e-4)
+
+    rec = tmp_path / "ep"
+    (rec / "frames").mkdir(parents=True)
+    lines = []
+    for i in range(4):
+        Image.new("RGB", (320, 180), (i * 40, 0, 0)).save(rec / f"frames/{i}.jpg")
+        lines.append({"i": i, "obs": {"left_mmps": 50, "right_mmps": 40, "cliff": False}, "frame": f"frames/{i}.jpg",
+                      "action": {"left_mmps": 75, "right_mmps": -75}, "action_source": "teleop" if i != 2 else "wander"})
+    (rec / "steps.jsonl").write_text("\n".join(__import__("json").dumps(x) for x in lines))
+    part = load_real([str(rec)])
+    assert part["frames"].shape == (3, 3, 54, 96) and np.allclose(part["labels"][0], [0.5, -0.5])
+    assert list(part["prev"]) == [0, 0, 2]          # the frame after a gap has no "before"

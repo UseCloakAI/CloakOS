@@ -22,6 +22,7 @@ EXAM_SEEDS = range(900_001, 900_021)        # never used in training (training s
 
 PASS = {
     "goto": {"success": (">=", 0.85), "bumps_per_run": ("<=", 1.0), "falls": ("<=", 0.05)},
+    "desk": {"cells_per_min": (">=", 40), "bumps_per_min": ("<=", 1.5), "falls": ("<=", 0.05)},
     "wander": {"cells_per_min": (">=", 60), "bumps_per_min": ("<=", 1.5), "falls": ("<=", 0.05)},
 }
 
@@ -52,7 +53,7 @@ def run_exam(folder: Path | None, task: str, sensors: str = "map", episodes: int
         ok = [r for r in rows if r["success"]]
         out.update(success=round(len(ok) / n, 3), bumps_per_run=round(sum(r["bumps"] for r in rows) / n, 2),
                    seconds_to_goal=round(float(np.mean([r["seconds"] for r in ok])), 1) if ok else None)
-    elif task == "wander":
+    elif task in ("wander", "desk"):
         mins = sum(r["minutes"] for r in rows) or 1
         out.update(cells_per_min=round(sum(r["cells"] or 0 for r in rows) / mins, 1),
                    bumps_per_min=round(sum(r["bumps"] for r in rows) / mins, 2))

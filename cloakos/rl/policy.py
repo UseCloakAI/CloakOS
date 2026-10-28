@@ -16,7 +16,7 @@ import numpy as np
 
 from ..behaviors.base import Obs, Policy
 from ..connection import Action
-from .envs import Spec, observe
+from .envs import RAY_FOV, RAY_MAX, Spec, edge_rays, observe
 
 if TYPE_CHECKING:
     from ..connection import Body, RobotLink
@@ -52,6 +52,7 @@ class LearnedPolicy(Policy):
         self.goal: tuple[float, float] | None = None       # metres, in the robot's pose frame
         self.last_action = np.zeros(2, np.float32)
         self.status = "no policy loaded"
+        self.pixels = None
 
     @property
     def current(self) -> str:   # shown as the behavior
@@ -60,8 +61,15 @@ class LearnedPolicy(Policy):
     def load(self, folder: str | Path) -> None:
         folder = Path(folder)
         meta = json.loads((folder / "meta.json").read_text())
-        self.model = NumpyPolicy(folder / "policy.npz")
-        self.spec = Spec(meta["task"], meta["sensors"], meta["control_hz"], meta["max_speed"], n_rays=meta.get("n_rays", 9))
+        self.pixels = None
+        self._frames: tuple[int, np.ndarray | None, np.ndarray | None] = (-1, None, None)
+        if meta["sensors"] == "pixels":                 # the desk student: camera + body sensors
+            from .pixelnet import PixelNet
+            self.pixels, self.model = PixelNet(folder / "policy.npz"), None
+            self.spec = Spec("desk", "robot", meta["control_hz"], meta["max_speed"])
+        else:
+            self.model = NumpyPolicy(folder / "policy.npz")
+            self.spec = Spec(meta["task"], meta["sensors"], meta["control_hz"], meta["max_speed"], n_rays=meta.get("n_rays", 9))
         self.policy_name = folder.name
         self.status = f"loaded {folder.name}"
         log.info("learned policy: %s (%s, %s sensors)", folder.name, self.spec.task, self.spec.sensors)
@@ -72,6 +80,8 @@ class LearnedPolicy(Policy):
             return "no policy loaded"
         if self.link.target != "sim" and (self.spec.task == "balance" or self.spec.sensors == "rays"):
             return "this policy is sim-only (needs 50 Hz control or sim depth rays)"
+        if self.spec.task == "desk" and self.pixels is None and self.link.target != "sim":
+            return "the desk teacher only runs in the sim (it sees exact edges); train a desk-pixels student from it"
         if self.spec.task == "goto" and self.goal is None:
             return "set a goal first"
         return None
@@ -101,14 +111,36 @@ class LearnedPolicy(Policy):
             self.status = "arrived"
             await self.body.drive(0, 0, "learned")
             return
-        rays = self.link.sim.rays(self.spec.n_rays) if self.spec.sensors == "rays" and self.link.sim else None
-        o = observe(self.spec, s, self.goal, rays, self.last_action)
-        a, _ = self.model.predict(o, deterministic=True)
+        if self.pixels is not None:
+            a = self._pixel_action(obs, s)
+            if a is None:
+                self.status = "waiting for the camera"
+                await self.body.drive(0, 0, "learned")
+                return
+        else:
+            rays = self.link.sim.rays(self.spec.n_rays) if self.spec.sensors == "rays" and self.link.sim else None
+            if self.spec.task == "desk" and self.link.sim and self.link.sim.scene_info:     # teacher: exact sim ranges
+                sim = self.link.sim
+                rays = np.minimum(sim.rays(self.spec.n_rays, RAY_FOV, RAY_MAX), edge_rays(s, sim.scene_info.room, self.spec.n_rays))
+            o = observe(self.spec, s, self.goal, rays, self.last_action)
+            a, _ = self.model.predict(o, deterministic=True)
         a = np.clip(np.asarray(a, np.float32), -1, 1)
         self.last_action = a
         self.status = "driving"
         await self.body.apply(Action(float(a[0]) * self.spec.max_speed, float(a[1]) * self.spec.max_speed,
                                      self.body.cmd.head_rate, self.body.cmd.lift_rate), source="learned")
+
+    def _pixel_action(self, obs: Obs, s: dict) -> np.ndarray | None:
+        from .pixelnet import prepare
+
+        w = obs.world
+        if w.frame is None:
+            return None
+        fid, cur, prev = self._frames
+        if w.frame_id != fid or cur is None:
+            prev, cur = cur, prepare(w.frame)
+            self._frames = (w.frame_id, cur, prev)
+        return self.pixels.act(cur, prev if prev is not None else cur, observe(self.spec, s, None, None, self.last_action))
 
     def _snapshot(self, obs: Obs) -> dict:
         """The same fields the sim snapshot has, from World (works on the real robot)."""

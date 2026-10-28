@@ -54,7 +54,8 @@ def main(argv: list[str] | None = None) -> None:
     spec = make_spec(a.task, a.sensors)
     meta = {"task": a.task, "sensors": spec.sensors, "obs_size": spec.obs_size, "control_hz": spec.control_hz,
             "max_speed": spec.max_speed, "n_rays": spec.n_rays, "steps": a.steps, "envs": a.envs,
-            "created": time.time(), "algo": "PPO"}
+            "created": time.time(), "algo": "PPO",
+            "resumed_from": Path(a.resume).parent.name if a.resume else None}
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     progress = (out / "progress.jsonl").open("a")
 
@@ -121,7 +122,7 @@ def finish(out: Path) -> None:
     import subprocess
     import sys
 
-    if meta_task(out) in ("goto", "wander"):
+    if meta_task(out) in ("goto", "wander", "desk"):
         subprocess.run([sys.executable, "-m", "cloakos.rl.evaluate", str(out)], capture_output=True, timeout=1800)
     from .. import share
     if share.enabled():
