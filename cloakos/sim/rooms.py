@@ -180,7 +180,9 @@ def desk_size(rng) -> tuple[float, float]:
     return rng.uniform(0.2, 0.6), rng.uniform(0.15, 0.4)
 
 
-def build(world: str = "room", seed: int | None = None, assets: "Assets | None" = None, n_objects: int | None = None) -> Scene:
+def build(world: str = "room", seed: int | None = None, assets: "Assets | None" = None, n_objects: int | None = None,
+          layout: dict | None = None) -> Scene:
+    """layout (desk only): {"size": [w_cm, d_cm], "objects": [{"name", "x", "y"}]} replaces the random desk/things."""
     world = world if world in WORLDS else "room"
     seed = int(seed if seed is not None else np.random.default_rng().integers(1, 1_000_000))
     rng = np.random.default_rng(seed)
@@ -222,6 +224,8 @@ def build(world: str = "room", seed: int | None = None, assets: "Assets | None" 
     elif world == "desk":
         tz = rng.uniform(0.6, 0.78)
         tw, td = desk_size(rng)
+        if layout and layout.get("size"):
+            tw, td = (max(0.1, min(1.5, float(v) / 200)) for v in layout["size"])
         kind = str(rng.choice(["wood", "wood", "paint", "concrete", "fabric"]))
         tm = mats.make(kind, repeat=(1, 1), specular=rng.uniform(0.05, 0.5), shininess=rng.uniform(0.05, 0.6),
                        reflectance=rng.uniform(0, 0.08), fallback=tuple(rng.uniform(0.15, 0.85, 3)))
@@ -234,14 +238,21 @@ def build(world: str = "room", seed: int | None = None, assets: "Assets | None" 
         desk_taken: list[tuple[float, float, float]] = []
         plain = list(OBJECTS)
         rng.shuffle(plain)
-        for name in plain[: int(rng.integers(0, 5))]:          # a few small things, never a cluttered desk
+        picks = [(n, None) for n in plain[: int(rng.integers(0, 5))]]       # a few small things, never a cluttered desk
+        if layout and layout.get("objects") is not None:                     # placed by hand in the Simulator
+            picks = [(o["name"], (o.get("x"), o.get("y"))) for o in layout["objects"] if o.get("name") in OBJECTS]
+        for i, (name, at) in enumerate(picks):
             shape, size, rgba = OBJECTS[name]
             r = max(size)
-            spot = _free_spot(rng, (tw, td), desk_taken, r, margin=0.04)
+            if at and at[0] is not None:
+                spot = (max(-tw + r, min(tw - r, float(at[0]))), max(-td + r, min(td - r, float(at[1]))))
+                desk_taken.append((*spot, r))
+            else:
+                spot = _free_spot(rng, (tw, td), desk_taken, r, margin=0.04)
             if not spot:
                 continue
             z = size[1] if shape == "cylinder" else size[0] if shape == "sphere" else size[-1]
-            slug = name.replace(" ", "_")
+            slug = f"{name.replace(' ', '_')}_{i}"
             parts.append(f'<body name="obj_{slug}" pos="{_f(*spot, tz + z + 0.001)}"><freejoint/>'
                          f'<geom name="obj_{slug}" type="{shape}" size="{_f(*size)}" rgba="{_f(*rgba)}" mass="0.05"/></body>')
             scene.objects[f"obj_{slug}"], scene.labels[f"obj_{slug}"] = spot, name

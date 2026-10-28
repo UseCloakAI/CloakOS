@@ -179,3 +179,42 @@ async def test_emergency_stop_halts_everything_until_released(tmp_path):
     assert math.dist(p[:2], sim.snapshot["pos"][:2]) > 0.02    # drives again once released
     brain.request_stop()
     await asyncio.wait_for(task, 10)
+
+
+async def test_desk_run_drives_a_hand_built_desk(tmp_path):
+    import json
+    import os
+    import shutil
+    from pathlib import Path
+
+    from cloakos.sim.deskrun import DeskRun
+
+    pol = Path(os.environ.get("CLOAK_TEST_DESK_POLICY", ""))
+    if not (pol / "policy.npz").exists():
+        pytest.skip("set CLOAK_TEST_DESK_POLICY to a trained desk policy folder")
+    cfg = Config(load_config("config.yaml"))
+    cfg["datalog"]["dir"] = str(tmp_path)
+    cfg["voice"]["enabled"] = False
+    cfg["sim"].update(enabled=True, camera=False, assets=False, world="empty", seed=5)
+    brain = Brain(cfg)
+    shutil.copytree(pol, brain.trainer.root / pol.name)
+    task = asyncio.create_task(brain.run(mode="idle", web=False))
+    for _ in range(80):
+        await asyncio.sleep(0.1)
+        if brain.link.has_control:
+            break
+    sim = brain.link.sim
+    await asyncio.to_thread(sim.set_layout, {"size": [80, 50], "objects": [{"name": "red mug", "x": 0.2, "y": 0.1}]})
+    run = DeskRun(brain)
+    assert await run.start(pol.name) is None
+    await asyncio.sleep(8)
+    st = run.status()
+    print(json.dumps(st))
+    assert st["running"] and st["cells"] > 5
+    await asyncio.to_thread(sim.set_layout, {"size": [80, 50], "objects": []})   # take the mug away mid-run
+    await asyncio.sleep(1)
+    assert run.running and sim.desk_layout()["objects"] == []
+    await run.stop()
+    assert brain.mode == "idle" and run.status()["done"]
+    brain.request_stop()
+    await asyncio.wait_for(task, 10)

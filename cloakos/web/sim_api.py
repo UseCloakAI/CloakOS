@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body, Response, WebSocket, WebSocketDisconnect
 
-from ..sim.rooms import WORLDS
+from ..sim.rooms import OBJECTS, WORLDS
 from .setup_api import env_path, write_env
 
 if TYPE_CHECKING:
@@ -24,6 +24,56 @@ def make_sim_router(brain: "Brain") -> APIRouter:
             from ..sim.tester import Tester
             brain.tester = Tester(brain)
         return brain.tester
+
+    def deskrun():
+        if getattr(brain, "deskrun", None) is None:
+            from ..sim.deskrun import DeskRun
+            brain.deskrun = DeskRun(brain)
+        return brain.deskrun
+
+    @r.get("/desk")
+    async def desk() -> dict[str, Any]:
+        sim = brain.link.sim
+        pols = [p["name"] for p in await asyncio.to_thread(brain.trainer.policies)
+                if p["ready"] and (p["task"] or "").startswith("desk")]
+        return {**(sim.desk_layout() if sim else {"size": None, "objects": []}), "catalog": {k: v[2][:3] for k, v in OBJECTS.items()},
+                "policies": pols, "run": deskrun().status()}
+
+    @r.post("/desk")
+    async def desk_edit(body: dict = Body(...)) -> dict[str, Any]:
+        """size: [w_cm, d_cm]; add: {name, x?, y?}; remove: id; clear: true; random: true."""
+        if brain.link.target != "sim":
+            await brain.link.set_target("sim")
+        sim = brain.link.get_sim()
+        if body.get("random"):
+            sim.layout = None
+            await asyncio.to_thread(sim.load, "desk", None)
+            return {"ok": True}
+        cur = sim.desk_layout()
+        objs = [{"name": o["name"], "x": o["x"], "y": o["y"]} for o in cur["objects"] if not o["fell"]]
+        size = cur["size"] or [80, 50]
+        if body.get("size"):
+            size = [max(20, min(300, float(v))) for v in body["size"]][:2]
+        if body.get("clear"):
+            objs = []
+        if body.get("remove"):
+            objs = [{"name": o["name"], "x": o["x"], "y": o["y"]} for o in cur["objects"]
+                    if o["id"] != body["remove"] and not o["fell"]]
+        add = body.get("add")
+        if add and add.get("name") in OBJECTS:
+            objs.append({"name": add["name"], "x": add.get("x"), "y": add.get("y")})
+        await asyncio.to_thread(sim.set_layout, {"size": size, "objects": objs})
+        return {"ok": True}
+
+    @r.post("/desk/run")
+    async def desk_run(body: dict = Body(...)) -> dict[str, Any]:
+        why = await deskrun().start(str(body.get("policy", "")))
+        return {"ok": why is None, "error": why}
+
+    @r.post("/desk/stop")
+    async def desk_stop() -> dict[str, Any]:
+        await deskrun().stop()
+        return {"ok": True}
 
     @r.get("")
     async def status() -> dict[str, Any]:
@@ -46,6 +96,7 @@ def make_sim_router(brain: "Brain") -> APIRouter:
     async def reset(body: dict = Body(default={})) -> dict[str, Any]:
         sim = brain.link.get_sim()
         seed = body.get("seed")
+        sim.layout = None                               # New room: a random desk again
         sc = await asyncio.to_thread(sim.load, body.get("world") or sim.world, int(seed) if seed not in (None, "") else None)
         return {"world": sc.world, "seed": sc.seed}
 
