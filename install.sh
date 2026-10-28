@@ -150,7 +150,7 @@ settings() {
   sed -i.bak 's/^  control_priority: default   # default | override (also ignores cliffs\/low battery: careful)$/  control_priority: override  # override = stock Vector behaviors can'"'"'t take over (CloakOS does the edge stop) | default/' "$HOME_DIR/config.yaml" && rm -f "$HOME_DIR/config.yaml.bak"
   sed -i.bak 's/^  stock_blend: 0\.25 /  stock_blend: 0.0  /' "$HOME_DIR/config.yaml" && rm -f "$HOME_DIR/config.yaml.bak"
   sed -i.bak -e 's/^  chirp_volume: 70$/  chirp_volume: 100/' -e 's/^  sfx_volume: 60$/  sfx_volume: 100/' -e '/^voice:/,/^[a-z]/s/^  volume: 75$/  volume: 100/' \
-    -e 's/^  eye_color: "#D44D2A"$/  eye_color: "#FFFFFF"/' -e 's/^  eye_fps: 8$/  eye_fps: 10/' \
+    -e 's/^  eye_color: "#D44D2A"$/  eye_color: "#FFFFFF"/' -e 's/^  eye_fps: 8$/  eye_fps: 6/' -e 's/^  eye_fps: 10 .*$/  eye_fps: 6            # frames sent to Vector per second (max 8: more crashes its face\/sound process, error 800)/' \
     -e '/^    cliff: *{hint: "you almost fell off an edge"/d' \
     -e 's/^  energy_active: -0\.0015$/  energy_active: -0.004/' -e 's/^  energy_rest: 0\.006$/  energy_rest: 0.007/' "$HOME_DIR/config.yaml" && rm -f "$HOME_DIR/config.yaml.bak"
   [[ -f "$HOME_DIR/.env" ]] || { cp "$HOME_DIR/app/.env.example" "$HOME_DIR/.env"; chmod 600 "$HOME_DIR/.env"; }
