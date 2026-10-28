@@ -208,10 +208,10 @@ class Eyes:
         dr = ImageDraw.Draw(big)
         age = now - (self._icon[1] - self._icon_len) if getattr(self, "_icon_len", None) else 1.0
         if kind == "edge":                               # alarm: flashes yellow/red, shakes, slams in
-            flash = math.sin(now * 2 * math.pi * 5) > 0
+            flash = math.sin(now * 2 * math.pi * 2.5) > 0
             base = (255, 196, 0) if flash else (255, 70, 30)
-            pulse = 0.8 + 0.2 * abs(math.sin(now * 2 * math.pi * 5))
-            shake = 3 * SS * math.exp(-age * 2.5) * math.sin(now * 2 * math.pi * 23)
+            pulse = 0.85 + 0.15 * abs(math.sin(now * 2 * math.pi * 2.5))
+            shake = 3 * SS * math.exp(-age * 4) * math.sin(now * 2 * math.pi * 7)
             slam = 1.0 + 0.35 * math.exp(-age * 9)       # starts big, snaps down to size
         else:
             base, pulse, shake, slam = self.color, 0.85 + 0.15 * math.sin(now * 2 * math.pi * 3), 0.0, 1.0
