@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -45,6 +46,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--resume", default=None, help="model.zip to continue from")
+    ap.add_argument("--lr", type=float, default=None, help="starting learning rate (default 3e-4, 1.5e-4 when building on)")
     a = ap.parse_args(argv)
 
     import torch
@@ -68,12 +70,27 @@ def main(argv: list[str] | None = None) -> None:
     if prev_meta:                    # picking a stopped run back up: same folder, same goal
         meta = {**prev_meta, "continued": prev_meta.get("continued", 0) + 1}
         meta.pop("finished", None)
+    # the data engine: worlds the parent failed its exam on come back more often (a quarter of worlds)
+    parent = Path(a.resume).parent if a.resume and not same_run else None
+    hard = list(meta.get("hard_seeds") or [])
+    if parent is not None:
+        try:
+            pex = json.loads((parent / "exam.json").read_text())
+            hard = sorted(set(hard) | set(pex.get("hard") or []) | set(json.loads((parent / "meta.json").read_text()).get("hard_seeds") or []))
+        except (OSError, ValueError):
+            pass
+    meta["hard_seeds"] = hard[-200:]
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     progress = (out / "progress.jsonl").open("a")
 
     print("starting the simulator rooms", flush=True)
     vec = make_vec_env(VectorEnv, n_envs=a.envs, seed=a.seed, vec_env_cls=SubprocVecEnv if a.envs > 1 else None,
-                       env_kwargs={"task": a.task, "sensors": a.sensors})
+                       env_kwargs={"task": a.task, "sensors": a.sensors, "hard": meta["hard_seeds"]})
+    best_file = out / "best" / "best.json"
+    try:
+        best = json.loads(best_file.read_text())
+    except (OSError, ValueError):
+        best = {"reward": -math.inf, "steps": 0}
 
     class Report(BaseCallback):
         def __init__(self) -> None:
@@ -81,6 +98,7 @@ def main(argv: list[str] | None = None) -> None:
             self.t0 = time.time()
             self.eps: list[dict] = []
             self.last_save = time.time()
+            self.start_steps: int | None = None
 
         def _on_step(self) -> bool:
             for info in self.locals.get("infos", []):
@@ -93,11 +111,15 @@ def main(argv: list[str] | None = None) -> None:
                 return False
             return True
 
+        def _on_training_start(self) -> None:
+            self.start_steps = int(self.num_timesteps)
+
         def _on_rollout_end(self) -> None:
+            clock["done"] = (self.num_timesteps - meta["base_steps"]) / max(1, int(meta["steps"]))
             recent = self.eps[-100:]
             row = {"t": round(time.time() - self.t0, 1), "steps": int(self.num_timesteps),
-                   "fps": int(self.num_timesteps / max(1e-6, time.time() - self.t0)),
-                   "episodes": len(self.eps)}
+                   "fps": int((self.num_timesteps - (self.start_steps or 0)) / max(1e-6, time.time() - self.t0)),
+                   "episodes": len(self.eps), "lr": float(f"{self.model.lr_schedule(self.model._current_progress_remaining):.3g}")}
             if recent:
                 row["reward"] = round(float(np.mean([e["r"] for e in recent])), 3)
                 row["length"] = round(float(np.mean([e["l"] for e in recent])), 1)
@@ -106,17 +128,35 @@ def main(argv: list[str] | None = None) -> None:
                 row["bumps"] = round(float(np.mean([e["bumps"] for e in recent])), 2)
             progress.write(json.dumps(row) + "\n")
             progress.flush()
+            # keep the best policy seen (by the last 100 episodes): PPO can wander off late in a run,
+            # and the exam at the end picks whichever of best and last really drives better
+            if len(recent) >= 100 and row["reward"] > best["reward"]:
+                best.update(reward=row["reward"], steps=row["steps"], fell=row["fell"], bumps=row["bumps"])
+                best_file.parent.mkdir(exist_ok=True)
+                export_numpy(self.model, best_file.parent / "policy.npz")
+                best_file.write_text(json.dumps(best))
             if time.time() - self.last_save > 60:          # a checkpoint a minute: a dead Mac loses at most that
                 save_model(self.model, out)
                 self.last_save = time.time()
 
+    # learning rate falls linearly to a tenth over the run (counted over the whole run, across
+    # Continues), and a KL guard stops an update that moves the policy too far: steadier late training
+    lr0 = a.lr or (1.5e-4 if parent is not None else 3e-4)
+    clock = {"done": 0.0}             # share of this run done; the callback keeps it current (saved with the model, so plain numbers only)
+
+    def lr(_remaining: float) -> float:
+        return lr0 * max(0.1, 1.0 - min(1.0, clock["done"]) * 0.9)
+
     if a.resume:
-        model = PPO.load(a.resume, env=vec, device="cpu")
+        model = PPO.load(a.resume, env=vec, device="cpu", custom_objects={"learning_rate": lr, "lr_schedule": lr})
+        model.target_kl = 0.03
         print(f"continuing from {model.num_timesteps} steps", flush=True)
     else:
-        model = PPO("MlpPolicy", vec, device="cpu", seed=a.seed, verbose=0,
-                    n_steps=1024 if a.task != "balance" else 512, batch_size=256, gamma=0.99 if a.task != "balance" else 0.98,
-                    learning_rate=3e-4, ent_coef=0.005, policy_kwargs={"net_arch": [128, 128]})
+        model = PPO("MlpPolicy", vec, device="cpu", seed=a.seed, verbose=0, n_steps=1024, batch_size=256, gamma=0.99,
+                    learning_rate=lr, ent_coef=0.005, target_kl=0.03, policy_kwargs={"net_arch": [128, 128]})
+    meta.setdefault("base_steps", int(model.num_timesteps))      # where this run's own steps start counting
+    clock["done"] = (model.num_timesteps - meta["base_steps"]) / max(1, int(meta["steps"]))
+    (out / "meta.json").write_text(json.dumps(meta, indent=1))
     try:
         start = int(model.num_timesteps)
         todo = max(0, int(meta["steps"]) - start) if prev_meta else a.steps
@@ -141,8 +181,10 @@ def finish(out: Path) -> None:
     import sys
 
     if meta_task(out) in ("goto", "wander", "desk"):
-        print("taking the exam", flush=True)
-        subprocess.run([sys.executable, "-m", "cloakos.rl.evaluate", str(out)], capture_output=True, timeout=1800)
+        print("taking the exam (the last policy and the best one seen; the better one is kept)", flush=True)
+        r = subprocess.run([sys.executable, "-m", "cloakos.rl.evaluate", str(out), "--pick"],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=3600)
+        print(r.stdout[-3000:], flush=True)
     from .. import share
     if share.enabled():
         try:

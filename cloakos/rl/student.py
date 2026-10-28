@@ -246,8 +246,11 @@ class Data:
 
     def add(self, part: dict, weight: int = 1) -> None:
         self.parts.append((part, weight))
-        while sum(len(p["labels"]) for p, _ in self.parts) > self.max and len(self.parts) > 1:
-            self.parts.pop(0 if self.parts[0][1] == 1 else 1)        # forget the oldest sim lessons first
+        while sum(len(p["labels"]) for p, _ in self.parts) > self.max:
+            sim = next((k for k, (_, w) in enumerate(self.parts) if w == 1), None)
+            if sim is None or len(self.parts) == 1:
+                break
+            self.parts.pop(sim)                                       # forget the oldest sim lessons first, never real ones
 
     def __len__(self) -> int:
         return sum(len(p["labels"]) * w for p, w in self.parts)
@@ -416,18 +419,9 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def write_exam(out: Path, rows: list[dict]) -> dict:
-    from .evaluate import PASS
+    from .evaluate import summarize
 
-    n = len(rows) or 1
-    mins = sum(r["minutes"] for r in rows) or 1
-    res = {"task": "desk-pixels", "sensors": "pixels", "episodes": len(rows),
-           "falls": round(sum(r["fell"] for r in rows) / n, 3),
-           "cells_per_min": round(sum(r["cells"] for r in rows) / mins, 1),
-           "bumps_per_min": round(sum(r["bumps"] for r in rows) / mins, 2)}
-    res["checks"] = {k: {"value": res[k], "want": f"{op} {v}", "ok": res[k] >= v if op == ">=" else res[k] <= v}
-                     for k, (op, v) in PASS["desk"].items()}
-    res["passed"] = all(c["ok"] for c in res["checks"].values())
-    res["runs"], res["when"] = rows, time.time()
+    res = {**summarize("desk", "pixels", rows), "task": "desk-pixels"}
     (out / "exam.json").write_text(json.dumps(res, indent=1))
     print(json.dumps({k: v for k, v in res.items() if k != "runs"}), flush=True)
     return res
