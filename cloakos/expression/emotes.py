@@ -27,7 +27,7 @@ class Emotes:
     def __init__(self, cfg: dict, eyes: Eyes) -> None:
         c = cfg.get("expression", {}) or {}
         self.eyes = eyes
-        self.stock_blend = float(c.get("stock_blend", 0.25))
+        self.stock_blend = float(c.get("stock_blend", 0.0))
         self.stock = {**DEFAULT_STOCK, **(c.get("stock") or {})}
         self.chirps = bool(c.get("chirps", True))
         self.chirp_volume = int(c.get("chirp_volume", 70))
