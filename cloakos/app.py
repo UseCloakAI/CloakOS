@@ -547,6 +547,8 @@ class Brain:
     def activity(self) -> str | None:
         """What it's doing, in a few words, for the screen. None = just eyes."""
         w = self.world
+        if self.estop:
+            return None                                  # the stop sign says it
         if self.frozen:
             return "Stuck!" if self.stuck else "Frozen"
         if self.mode == "home":
@@ -561,7 +563,7 @@ class Brain:
             gp = self.policies["goto"]
             return f"Going to the {gp.target['label']}" if gp.target and gp.status == "driving" else None
         if self.mode == "teleop":
-            return "Remote control" if self.body.cmd.left or self.body.cmd.right else None
+            return "Remote control" if self.body.cmd.left_mmps or self.body.cmd.right_mmps else None
         if self.mode in ("auto", "learned") and self.policy is not None:
             return self.ACTIVITY.get(self.policy.current)
         return None
