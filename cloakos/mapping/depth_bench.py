@@ -68,7 +68,7 @@ def _metrics(pred: np.ndarray, true: np.ndarray) -> dict:
             "coverage": float(m.sum() / max(1, (np.isfinite(true) & (true > NEAR) & (true < FAR)).sum()))}
 
 
-def score(path: str, models: list[str]) -> dict:
+def score(path: str, models: list[str], limit: int | None = None) -> dict:
     from PIL import Image
 
     from .vision import CameraPose, DepthModel
@@ -78,7 +78,8 @@ def score(path: str, models: list[str]) -> dict:
     for name in models:
         dm = DepthModel(name)
         rows, t0 = [], time.time()
-        for i in range(len(d["rgb"])):
+        n = min(len(d["rgb"]), limit or len(d["rgb"]))
+        for i in range(n):
             img = Image.fromarray(d["rgb"][i])
             cam = CameraPose(d["pos"][i], d["R"][i])
             try:
@@ -91,7 +92,7 @@ def score(path: str, models: list[str]) -> dict:
                 rows.append(_metrics(clean_depth(z), d["depth"][i]))      # what the map actually keeps
         ok = [r for r in rows if r and "error" not in r]
         res = {k: round(float(np.mean([r[k] for r in ok])), 3) for k in ok[0]} if ok else (rows[0] if rows else {})
-        res.update(frames_used=len(ok), frames=len(d["rgb"]), s_per_frame=round((time.time() - t0) / max(1, len(d["rgb"])), 2))
+        res.update(frames_used=len(ok), frames=n, s_per_frame=round((time.time() - t0) / max(1, n), 2))
         results[name] = res
         print(name, json.dumps(res), flush=True)
     return results
@@ -101,13 +102,13 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="cloakos.mapping.depth_bench")
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("make"); m.add_argument("--frames", type=int, default=150); m.add_argument("--out", default="data/vision/depth_bench.npz"); m.add_argument("--seed", type=int, default=7)
-    s = sub.add_parser("score"); s.add_argument("path"); s.add_argument("--models", nargs="+")
+    s = sub.add_parser("score"); s.add_argument("path"); s.add_argument("--models", nargs="+"); s.add_argument("--limit", type=int)
     a = ap.parse_args(argv)
     if a.cmd == "make":
         make(a.frames, a.out, a.seed)
     else:
         from .vision import DepthModel
-        score(a.path, a.models or [DepthModel.NAME])
+        score(a.path, a.models or [DepthModel.NAME], a.limit)
 
 
 if __name__ == "__main__":

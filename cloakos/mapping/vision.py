@@ -95,7 +95,7 @@ class DepthModel:
 
     def __init__(self, name: str | None = None) -> None:
         self.name = name or self.NAME
-        self.is_metric = "metric" in self.name.lower()     # outputs metres directly (no floor fit needed)
+        self.is_metric = any(k in self.name.lower() for k in ("metric", "depthpro"))   # outputs metres directly
         self.pipe = None
         self.error: str | None = None
 
