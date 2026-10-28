@@ -52,6 +52,7 @@ class RobotLink:
         self.edge_events = 0                  # bumps each time the edge reflex fires
         self.edge_until = 0.0                 # the back-off owns the wheels until then
         self.edge_v = -75.0
+        self._drove_t = 0.0
         self.last_edge: dict | None = None
         self.pose: dict | None = None         # latest full pose for the mapper: pos (m), quat, head, origin                  # bumps on every control grant; Body resyncs its motor state
         self._want_control = False
@@ -313,7 +314,13 @@ class RobotLink:
             self._button = down
             # edge reflex, right where the sensor data lands (not on the next brain tick): at override
             # priority Vector's own edge stop is off, so every millisecond here is centimetres saved
-            edge = bool(msg.status & 0x4000) and not bool(msg.status & 0x8)         # cliff, not picked up
+            # "picked up" also flips when the nose tips over an edge, so it only cancels the edge if
+            # the robot wasn't driving just now (really lifted, not tipping)
+            driving = abs(msg.left_wheel_speed_mmps) + abs(msg.right_wheel_speed_mmps) > 15
+            if driving:
+                self._drove_t = time.time()
+            lifted = bool(msg.status & 0x8) and time.time() - self._drove_t > 1.0
+            edge = bool(msg.status & 0x4000) and not lifted
             self.world.cliff = edge
             if edge:
                 self.world.edge_t = time.time()
@@ -358,6 +365,7 @@ class RobotLink:
         w.edges.append((x + ahead * math.cos(yaw), y + ahead * math.sin(yaw), time.time()))
         del w.edges[:-200]
         cleared = False
+        start = w.pose
         try:
             for attempt in range(3):
                 dur = 0.7 + min(0.6, abs(fwd) / 150 * 0.6)   # faster in = further out
@@ -377,7 +385,9 @@ class RobotLink:
         side = "left" if curve > 25 else "right" if curve < -25 else "ahead"
         self.last_edge = {"t": time.time(), "side": side, "behind": sign > 0, "cleared": cleared}
         self.bus.emit("edge.cleared", **self.last_edge)
-        log.info("edge (%s%s): %s", side, ", behind" if sign > 0 else "", "backed off" if cleared else "couldn't get clear")
+        moved = math.dist(start[:2], w.pose[:2]) if start and w.pose else -1
+        log.info("edge (%s%s): %s, moved %.0f mm, wheels read %.0f/%.0f mm/s", side, ", behind" if sign > 0 else "",
+                 "backed off" if cleared else "couldn't get clear", moved, w.left_mmps or 0, w.right_mmps or 0)
 
     def _on_frame(self, img: Any, image_id: int) -> None:
         self.world.frame = img

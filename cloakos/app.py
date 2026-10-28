@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import logging
+import math
 import signal
 import time
 from typing import Any
@@ -78,6 +79,7 @@ class Brain:
         self.stuck = False                       # froze itself because it was stuck
         self._stuck_s = 0.0
         self._stuck_ping = 0.0
+        self._tipped_s = 0.0
         self.bus.on("goto.*", self._on_goto)
         self.mode = "idle"
         self.policy: Policy | None = None
@@ -342,6 +344,13 @@ class Brain:
         Two signs: the wheels themselves don't turn, or it's told to turn and the gyro says it isn't.
         Then everything stops (freeze) and it pings for help until someone unfreezes it."""
         w, cmd = self.world, self.body.cmd
+        # tipped over (on its side or back): gravity isn't pointing down through its treads
+        ax, ay, az = w.accel or (0.0, 0.0, 9800.0)
+        g = math.sqrt(ax * ax + ay * ay + az * az) or 1.0
+        tipped = g > 4000 and az / g < 0.55
+        self._tipped_s = self._tipped_s + dt if tipped else 0.0
+        if self._tipped_s > 1.0 and not self.stuck and self.link.connected:
+            self._become_stuck("tipped over")
         if self.frozen:
             if self.stuck and time.time() - self._stuck_ping > 4.0:     # keep calling for help, now and then
                 self._stuck_ping = time.time()
