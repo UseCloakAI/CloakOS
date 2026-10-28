@@ -46,6 +46,7 @@ class Body:
         self.emotes: Any = None       # expression.Emotes, attached by the brain
         self._discrete: list[dict[str, Any]] = []
         self._gen = -1
+        self.face_ok, self.face_error, self._face_warned = 0, None, 0.0     # eyes frames Vector accepted / last error
         self.frozen = False           # freeze mode: no motion at all until unfrozen                # link.control_gen our last command went out under
 
     # while frozen only these get through: the screen, sound, and stopping
@@ -67,9 +68,18 @@ class Body:
         if not self.ready or (self.frozen and method not in self.FROZEN_OK):
             return None
         try:
-            return await getattr(self.link.client, method)(*args)
+            out = await getattr(self.link.client, method)(*args)
+            if method == "show_face":
+                self.face_ok, self.face_error = self.face_ok + 1, None
+            return out
         except Exception as e:
-            log.debug("body %s failed: %s", method, e)
+            if method == "show_face":                   # the eyes not showing is worth knowing about
+                self.face_error = f"{type(e).__name__}: {e}"[:200]
+                if time.time() - self._face_warned > 30:
+                    self._face_warned = time.time()
+                    log.warning("Vector didn't take the eyes frame: %s", self.face_error)
+            else:
+                log.debug("body %s failed: %s", method, e)
             return None
 
     # ── continuous ─────────────────────────────────────────────
