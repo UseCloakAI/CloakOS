@@ -22,6 +22,7 @@ def make_rl_router(brain: "Brain") -> APIRouter:
     async def status() -> dict[str, Any]:
         lp = brain.learned
         return {"available": available(), "tasks": TASKS, "sensors": SENSORS, "running": t.running(),
+                "recordings": [e for e in await asyncio.to_thread(brain.recorder.list_episodes) if e["frames"]],
                 "policies": await asyncio.to_thread(t.policies),
                 "active": {"name": lp.policy_name, "task": lp.spec.task if lp.spec else None, "goal": lp.goal,
                            "status": lp.status, "on": brain.mode == "learned", "blocked": lp.deployable()}}
@@ -58,7 +59,8 @@ def make_rl_router(brain: "Brain") -> APIRouter:
     async def train(body: dict = Body(...)) -> JSONResponse:
         try:
             name = t.start(str(body.get("task", "goto")), str(body.get("sensors", "robot")),
-                           int(body.get("steps", 300_000)), body.get("envs"), body.get("resume"))
+                           int(body.get("steps", 300_000)), body.get("envs"), body.get("resume") or None,
+                           body.get("teacher") or None, body.get("real") or None)
         except (RuntimeError, ValueError) as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return JSONResponse({"ok": True, "name": name})

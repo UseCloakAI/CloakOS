@@ -486,6 +486,27 @@ class Sim:
             mujoco.mj_step(m, d)
         self._update_snapshot()
 
+    def grab(self, w: int = 96, h: int = 54, quality: int | None = None) -> np.ndarray:
+        """One camera frame right now, made like the real one (lens, exposure drift, grain, JPEG at
+        Vector's stream size), shrunk to w x h. Synchronous: for training, with the sim thread off."""
+        import io
+
+        from PIL import Image
+
+        if getattr(self, "_grab_m", None) is not self._m:
+            if getattr(self, "_grab_r", None) is not None:
+                self._grab_r.close()
+            import mujoco
+            self._grab_r, self._grab_m = mujoco.Renderer(self._m, 108, 192), self._m
+        r = self._grab_r
+        r.update_scene(self._d, camera="eye")
+        img = self._lens_and_exposure(r.render().astype(np.float32))
+        img += np.random.normal(0, self.noise * (1.0 + 0.8 * max(0.0, 1.0 - self._gain)), img.shape)
+        im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).resize((320, 180), Image.BILINEAR)
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=quality or self.jpeg_q)
+        return np.asarray(Image.open(buf).convert("RGB").resize((w, h), Image.BILINEAR))
+
     def place_robot(self, x: float, y: float, yaw: float, pitch: float = 0.0, tumble: tuple[float, float] | None = None) -> None:
         """Teleport Vector (standing, tipped back by `pitch`, or dropped at a `tumble` (pitch, roll)
         orientation from a few cm up so it lands however it lands) and zero its motion."""

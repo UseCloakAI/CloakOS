@@ -36,6 +36,8 @@ from ..sim.engine import Sim
 TASKS = {
     "goto": "Drive to a point, avoid obstacles and edges",
     "wander": "Roam the room without bumping into things",
+    "desk": "Desk: roam a random desk, never fall, avoid things (teacher, sees exact edges in the sim)",
+    "desk-pixels": "Desk from the camera: learns from the desk teacher, runs on the real robot",
     "recover": "Get back on its treads after a fall (experimental: train long)",
 }
 SENSORS = {"map": "Map ranges + robot sensors (recommended)", "robot": "Robot sensors only"}
@@ -57,12 +59,14 @@ class Spec:
 
     @property
     def obs_size(self) -> int:
-        base = {"goto": 9, "wander": 7, "recover": 12}[self.task]
+        base = {"goto": 9, "wander": 7, "desk": 7, "recover": 12}[self.task]
         return base + (self.n_rays if self.sensors == "map" else 0)
 
 
 def make_spec(task: str, sensors: str = "map") -> Spec:
     task, sensors = ALIASES.get(task, task), ALIASES.get(sensors, sensors)
+    if task == "desk":                 # the teacher: always sees exact edges + things (sim-only)
+        return Spec("desk", "map", episode_s=40.0)
     if task == "recover":
         return Spec("recover", "robot", control_hz=10.0, max_speed=200.0, episode_s=10.0)
     return Spec(task, sensors if sensors in SENSORS else "map", episode_s=40.0 if task == "wander" else 30.0)
@@ -105,7 +109,7 @@ def observe(spec: Spec, s: dict, goal: tuple[float, float] | None, rays: np.ndar
         dist = math.hypot(dx, dy)
         ang = math.atan2(dy, dx) - s["yaw"]
         o = [min(dist, 3.0) / 3.0, math.sin(ang), math.cos(ang), *common, *last_action]
-    elif spec.task == "wander":
+    elif spec.task in ("wander", "desk"):
         o = [*common, s["upright"], *last_action]
     else:   # recover: which way it's lying, how it's moving, where the lift is
         roll = s.get("roll", 0.0)
@@ -155,11 +159,32 @@ if gym is not None:
                 return None
             r = self.sim.rays(self.spec_.n_rays, RAY_FOV, RAY_MAX)
             sc = self.sim.scene_info
-            if sc.world == "table":                    # a drop-off reads as a wall, like the real map's edge of floor
+            if sc.world in ("table", "desk"):          # a drop-off reads as a wall, like the real map's edge of floor
                 r = np.minimum(r, self._edge_rays(sc.room))
+            if self.spec_.task == "desk":              # the teacher's privileged view: exact, a hair of noise
+                return np.clip(r * self.rng.normal(1.0, 0.01, r.shape), 0.0, RAY_MAX).astype(np.float32)
             r = r * self.rng.normal(1.0, 0.05, r.shape)
             r[self.rng.random(r.shape) < 0.12] = RAY_MAX
             return np.clip(r, 0.0, RAY_MAX).astype(np.float32)
+
+        def _place_on_desk(self) -> None:
+            """Anywhere on the desk, any heading, clear of the edge and the things on it; the head
+            and camera a little different each time (no two Vectors sit or see exactly alike)."""
+            sc = self.sim.scene_info
+            hx, hy = sc.room
+            x = y = 0.0
+            for _ in range(100):
+                x, y = self.rng.uniform(-hx + 0.08, hx - 0.08), self.rng.uniform(-hy + 0.08, hy - 0.08)
+                if all(math.hypot(x - ox, y - oy) > r + 0.08 for ox, oy, r in sc.obstacles):
+                    break
+            self.sim.place_robot(float(x), float(y), float(self.rng.uniform(-math.pi, math.pi)))
+            self.sim.head_target = math.radians(float(self.rng.uniform(-15, 10)))
+            m = self.sim._m
+            cam = m.camera("eye").id
+            if not hasattr(self, "_cam0"):
+                self._cam0 = (float(m.cam_fovy[cam]), m.cam_pos[cam].copy())
+            m.cam_fovy[cam] = self._cam0[0] + self.rng.uniform(-4, 4)
+            m.cam_pos[cam] = self._cam0[1] + self.rng.normal(0, 0.002, 3)
 
         def _edge_rays(self, room) -> np.ndarray:
             return edge_rays(self.sim.snapshot, room, self.spec_.n_rays)
@@ -179,7 +204,7 @@ if gym is not None:
                 self.episodes = 0
             task = self.spec_.task
             if self.sim.scene_info is None or self.episodes % self.reload_every == 0:
-                world = "empty" if task == "recover" else str(self.rng.choice(["room", "room", "empty", "table"]))
+                world = "empty" if task == "recover" else "desk" if task == "desk" else str(self.rng.choice(["room", "room", "empty", "table"]))
                 self.sim.load(world, int(self.rng.integers(1, 1_000_000)))
             self.episodes += 1
             sc = self.sim.scene_info
@@ -192,6 +217,8 @@ if gym is not None:
                     self.sim.step(0.6)
                     if self.sim.snapshot["upright"] < 0.5:
                         break
+            elif sc.world == "desk":
+                self._place_on_desk()
             elif sc.world == "table":
                 self.sim.place_robot(float(self.rng.uniform(-0.1, 0.1)), float(self.rng.uniform(-0.05, 0.05)),
                                      float(self.rng.uniform(-math.pi, math.pi)))
@@ -258,6 +285,21 @@ if gym is not None:
                 if dist < 0.06:
                     reward += 3.0
                     done, info["success"] = True, True
+            elif spec.task == "desk":
+                cell = (int(s["pos"][0] // 0.05), int(s["pos"][1] // 0.05))
+                if cell not in self.visited:
+                    self.visited.add(cell)
+                    reward += 0.1
+                fwd = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
+                reward += 0.02 * max(0.0, fwd)
+                if s["bump"]:
+                    reward -= 2.0
+                    info["bump"] = True
+                    self.bumps += 1
+                ahead = edge_rays(s, sc.room, 5)[1:4].min()
+                if ahead < 0.05:
+                    reward -= 0.1 * (1 - ahead / 0.05)         # keep well back from the drop
+                info["cells"] = len(self.visited)
             elif spec.task == "wander":
                 cell = (int(s["pos"][0] // 0.1), int(s["pos"][1] // 0.1))
                 if cell not in self.visited:

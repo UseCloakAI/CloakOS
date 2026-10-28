@@ -38,7 +38,9 @@ class Trainer:
         return self.job
 
     def start(self, task: str, sensors: str = "robot", steps: int = 300_000, envs: int | None = None,
-              resume: str | None = None) -> str:
+              resume: str | None = None, teacher: str | None = None, real: list[str] | None = None) -> str:
+        """resume: a policy of the same skill to keep training (stacking). desk-pixels also takes a
+        desk teacher (default: the newest) and real-desk recordings to learn from."""
         if self.running():
             raise RuntimeError("a training run is already going")
         why = available()
@@ -46,6 +48,25 @@ class Trainer:
             raise RuntimeError(why)
         if task not in TASKS:
             raise ValueError(f"unknown task {task}")
+        if resume and not (self.root / resume / "meta.json").exists():
+            raise ValueError(f"no policy {resume} to build on")
+        if task == "desk-pixels":
+            teacher = teacher or next((p["name"] for p in self.policies() if p["task"] == "desk" and p["ready"]), None)
+            if not teacher:
+                raise ValueError("train a desk teacher first (skill: Desk), then the pixel student learns from it")
+            name = f"desk-pixels-{time.strftime('%Y%m%d-%H%M%S')}"
+            out = self.root / name
+            out.mkdir(parents=True, exist_ok=True)
+            cmd = [sys.executable, "-m", "cloakos.rl.student", "--teacher", str(self.root / teacher),
+                   "--steps", str(int(steps)), "--out", str(out)]
+            if envs:
+                cmd += ["--envs", str(int(envs))]
+            if resume:
+                cmd += ["--init", str(self.root / resume)]
+            if real:
+                eps = Path(self.root.parent) / "episodes"
+                cmd += ["--real", *[str(eps / Path(r).name) for r in real]]
+            return self._launch(name, out, cmd)
         name = f"{task}-{sensors if task != 'balance' else 'robot'}-{time.strftime('%Y%m%d-%H%M%S')}"
         out = self.root / name
         out.mkdir(parents=True, exist_ok=True)
@@ -55,6 +76,9 @@ class Trainer:
             cmd += ["--envs", str(int(envs))]
         if resume:
             cmd += ["--resume", str(self.root / resume / "model.zip")]
+        return self._launch(name, out, cmd)
+
+    def _launch(self, name: str, out: Path, cmd: list[str]) -> str:
         log.info("training: %s", " ".join(cmd[2:]))
         self.proc = subprocess.Popen(cmd, stdout=(out / "train.log").open("w"), stderr=subprocess.STDOUT)
         self.job = name
@@ -88,7 +112,8 @@ class Trainer:
             except (OSError, ValueError):
                 continue
             rows = self.progress(d.name, last=1)
-            out.append({"name": d.name, **{k: meta.get(k) for k in ("task", "sensors", "steps", "trained_steps", "created", "finished")},
+            out.append({"name": d.name, **{k: meta.get(k) for k in ("task", "sensors", "steps", "trained_steps", "created", "finished",
+                                                                    "teacher", "built_on", "resumed_from")},
                         "ready": (d / "policy.npz").exists(), "training": d.name == self.running(),
                         "last": rows[-1] if rows else None, "log_tail": self._tail(d / "train.log")})
         return out

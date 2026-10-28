@@ -26,6 +26,7 @@ WORLDS = {
     "room": "Random realistic room",
     "empty": "Empty floor, walls only",
     "table": "Tabletop with edges (cliffs)",
+    "desk": "Random desk: any size, a few small things on it, dim or bright",
     "person": "Room with a person sitting on the floor",
     "goal": "Room with a goal marker to reach",
     "balance": "Flat floor, Vector starts tipped back (recovery practice)",
@@ -162,11 +163,26 @@ def _furniture(rng, mats: _Mats, room, taken, parts: list[str], scene: Scene, i:
     scene.obstacles.append((spot[0], spot[1], taken[-1][2]))
 
 
+def desk_size(rng) -> tuple[float, float]:
+    """Half extents of a random desk, 40-120 cm by 30-80 cm. CLOAK_DESK="90x60" (cm) makes half of
+    them your desk's size, give or take 10%, so a policy comes out ready for it."""
+    import os
+
+    mine = os.environ.get("CLOAK_DESK", "")
+    try:
+        w, d = (float(v) / 200 for v in mine.lower().split("x"))
+        if rng.random() < 0.5:
+            return w * rng.uniform(0.9, 1.1), d * rng.uniform(0.9, 1.1)
+    except ValueError:
+        pass
+    return rng.uniform(0.2, 0.6), rng.uniform(0.15, 0.4)
+
+
 def build(world: str = "room", seed: int | None = None, assets: "Assets | None" = None, n_objects: int | None = None) -> Scene:
     world = world if world in WORLDS else "room"
     seed = int(seed if seed is not None else np.random.default_rng().integers(1, 1_000_000))
     rng = np.random.default_rng(seed)
-    hx, hy = (rng.uniform(0.9, 1.6), rng.uniform(0.9, 1.6)) if world not in ("table", "balance") else (1.0, 1.0)
+    hx, hy = (rng.uniform(0.9, 1.6), rng.uniform(0.9, 1.6)) if world not in ("table", "desk", "balance") else (1.0, 1.0)
     mats = _Mats(assets, rng)
     taken: list[tuple[float, float, float]] = [(0.0, 0.0, 0.18)]    # keep the spawn clear
     parts: list[str] = []
@@ -201,6 +217,34 @@ def build(world: str = "room", seed: int | None = None, assets: "Assets | None" 
         scene.floor_z = tz
         scene.spawn = (rng.uniform(-0.1, 0.1), rng.uniform(-0.05, 0.05), tz, scene.spawn[3])
         scene.room = (tw, td)
+    elif world == "desk":
+        tz = rng.uniform(0.6, 0.78)
+        tw, td = desk_size(rng)
+        kind = str(rng.choice(["wood", "wood", "paint", "concrete", "fabric"]))
+        tm = mats.make(kind, repeat=(1, 1), specular=rng.uniform(0.05, 0.5), shininess=rng.uniform(0.05, 0.6),
+                       reflectance=rng.uniform(0, 0.08), fallback=tuple(rng.uniform(0.15, 0.85, 3)))
+        parts.append(f'<geom name="table" type="box" pos="{_f(0, 0, tz - 0.015)}" size="{_f(tw, td, 0.015)}" material="{tm}"/>')
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                parts.append(f'<geom name="leg_{sx}{sy}" type="box" pos="{_f(sx * (tw - 0.03), sy * (td - 0.03), (tz - 0.03) / 2)}" '
+                             f'size="{_f(0.02, 0.02, (tz - 0.03) / 2)}" material="{tm}"/>')
+        scene.floor_z, scene.room = tz, (tw, td)
+        desk_taken: list[tuple[float, float, float]] = []
+        plain = list(OBJECTS)
+        rng.shuffle(plain)
+        for name in plain[: int(rng.integers(0, 5))]:          # a few small things, never a cluttered desk
+            shape, size, rgba = OBJECTS[name]
+            r = max(size)
+            spot = _free_spot(rng, (tw, td), desk_taken, r, margin=0.04)
+            if not spot:
+                continue
+            z = size[1] if shape == "cylinder" else size[0] if shape == "sphere" else size[-1]
+            slug = name.replace(" ", "_")
+            parts.append(f'<body name="obj_{slug}" pos="{_f(*spot, tz + z + 0.001)}"><freejoint/>'
+                         f'<geom name="obj_{slug}" type="{shape}" size="{_f(*size)}" rgba="{_f(*rgba)}" mass="0.05"/></body>')
+            scene.objects[f"obj_{slug}"], scene.labels[f"obj_{slug}"] = spot, name
+            scene.obstacles.append((spot[0], spot[1], r))
+        scene.spawn = (0.0, 0.0, tz, scene.spawn[3])
     elif world == "balance":
         scene.start_pitch = math.radians(62)
     elif world != "empty":
@@ -249,7 +293,7 @@ def build(world: str = "room", seed: int | None = None, assets: "Assets | None" 
         lights.append(f'<light name="light_{k}" pos="{_f(lx, ly, rng.uniform(1.6, 2.6))}" dir="{_f(-lx * 0.3, -ly * 0.3, -1)}" '
                       f'diffuse="{_f(*(np.array(kel) * power))}" specular="0.15 0.15 0.15" castshadow="{"true" if k == 0 else "false"}" '
                       f'attenuation="1 0 0.05"/>')
-    ambient = rng.uniform(0.12, 0.3)
+    ambient = rng.uniform(0.04, 0.3) if world == "desk" else rng.uniform(0.12, 0.3)   # desks are often dim
 
     sx, sy, sz, yaw = scene.spawn
     robot = vector_mjcf((sx, sy, sz + 0.0005), yaw)

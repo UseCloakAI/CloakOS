@@ -11,8 +11,9 @@
     if (!task.options.length) {
       task.innerHTML = Object.entries(st.tasks).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
       sens.innerHTML = Object.entries(st.sensors).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+      sens.value = 'map';
     }
-    sens.disabled = task.value === 'balance';
+    formFit();
     $('#rl-missing').hidden = !st.available;
     $('#rl-missing').textContent = st.available ? `Training isn't installed here: ${st.available}.` : '';
     $('#rl-start').hidden = !!st.running;
@@ -27,10 +28,11 @@
     $('#rl-policies').innerHTML = list.map(p => {
       const l = p.last || {};
       const stats = [l.steps != null && `${(l.steps / 1000).toFixed(0)}k steps`, l.reward != null && `reward ${l.reward}`,
-        l.success != null && p.task === 'goto' && `success ${(l.success * 100).toFixed(0)}%`, l.fps && `${l.fps} steps/s`].filter(Boolean).join(' · ');
+        l.success != null && p.task === 'goto' && `success ${(l.success * 100).toFixed(0)}%`,
+        l.success != null && p.task === 'desk-pixels' && `stays on ${(l.success * 100).toFixed(0)}%`, l.round && `round ${l.round}`, l.fps && `${l.fps} steps/s`].filter(Boolean).join(' · ');
       return `<div class="sc-card ${p.name === chartName ? 'sel' : ''}">
         <div class="sc-head"><b>${esc(p.task)}</b><span class="res-tag">${p.training ? 'Training' : p.ready ? 'Ready' : 'Empty'}</span>
-          <span class="sc-meta">${esc(p.sensors)} sensors · ${new Date((p.created || 0) * 1000).toLocaleString()}</span></div>
+          <span class="sc-meta">${esc(p.sensors)} sensors${p.built_on || p.resumed_from ? ` · built on ${esc(p.built_on || p.resumed_from)}` : ''}${p.teacher ? ` · teacher ${esc(p.teacher)}` : ''} · ${new Date((p.created || 0) * 1000).toLocaleString()}</span></div>
         <p>${esc(stats || 'starting…')}</p>
         <div class="sc-foot"><span class="sc-checks">${esc(p.name)}</span>
           <button class="chip" onclick="rlChart('${p.name}')">Chart</button>
@@ -69,8 +71,24 @@
     g.fillText(`${(x0 / 1000).toFixed(0)}k`, 40, h - 12); g.fillText(`${(x1 / 1000).toFixed(0)}k steps`, w - 80, h - 12);
   }
 
+  // Build on = keep training an earlier policy of the same skill (stacking). The pixel student
+  // also picks its desk teacher and, optionally, teleop recordings from the real desk.
+  const keep = (sel, html) => { const v = [...sel.selectedOptions].map(o => o.value); sel.innerHTML = html; [...sel.options].forEach(o => { o.selected = v.includes(o.value); }); };
+  function formFit() {
+    if (!st) return;
+    const t = $('#rl-task').value, ready = (st.policies || []).filter(p => p.ready && !p.training);
+    $('#rl-sensors').disabled = ['balance', 'desk', 'desk-pixels', 'recover'].includes(t);
+    keep($('#rl-resume'), '<option value="">Start fresh</option>' + ready.filter(p => p.task === t && (t.startsWith('desk') || p.sensors === $('#rl-sensors').value))
+      .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join(''));
+    const px = t === 'desk-pixels';
+    $('#rl-teacher-row').hidden = $('#rl-real-row').hidden = !px;
+    keep($('#rl-teacher'), ready.filter(p => p.task === 'desk').map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('') || '<option value="">Train a Desk teacher first</option>');
+    keep($('#rl-real'), (st.recordings || []).map(e => `<option value="${esc(e.name)}">${esc(e.name)} · ${e.frames} frames</option>`).join(''));
+  }
+
   window.rlStart = async () => {
-    const r = await post('/api/rl/train', { task: $('#rl-task').value, sensors: $('#rl-sensors').value, steps: +$('#rl-steps').value });
+    const r = await post('/api/rl/train', { task: $('#rl-task').value, sensors: $('#rl-sensors').value, steps: +$('#rl-steps').value,
+      resume: $('#rl-resume').value, teacher: $('#rl-teacher').value, real: [...$('#rl-real').selectedOptions].map(o => o.value) });
     if (!r.ok) alert(r.error); else chartName = r.name;
     refresh();
   };
@@ -87,7 +105,8 @@
     if (chartName === name) chartName = null;
     refresh();
   };
-  $('#rl-task').addEventListener('change', () => { $('#rl-sensors').disabled = $('#rl-task').value === 'balance'; });
+  $('#rl-task').addEventListener('change', formFit);
+  $('#rl-sensors').addEventListener('change', formFit);
 
   let calTimer = null;
   const calShow = async () => {
