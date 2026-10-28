@@ -317,7 +317,10 @@ class Brain:
             behavior = self.policy.current if self.policy else "-"
             self.eyes.status = self.activity()
             self.eye_frame = self.eyes.frame(self.eyes.shape(self.drives.values, behavior, gaze))
-            if self.eyes_on and self.body.ready:
+            # Vector's sound and screen share one process: while a sound plays, send fewer frames
+            audio = getattr(getattr(self.link, "client", None), "_audio_lock", None)
+            busy = audio is not None and audio.locked()
+            if self.eyes_on and self.body.ready and (not busy or t0 - last_sent >= 0.2):
                 px = rgb565(self.eye_frame)
                 if px != sent or t0 - last_sent > 1.0:          # refresh now and then so it never times out
                     await self.body.face(px, 2500)

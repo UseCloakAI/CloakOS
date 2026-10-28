@@ -113,6 +113,10 @@ SOUNDS = {
     "edge":     lambda p, s: [("sting", (392.0, 0.16)), ("gap", (0.09,)), ("sting", (370.0, 0.42))],     # dun dun!
     "stuck":    lambda p, s: [("ping", (1760.0, 0.7))],                                                 # sonar ping
     # reversing beeper, the way a big truck does it, but in Cloak's chirpy voice
+    # the edge alarm in ONE stream (two streams back to back stressed Vector's sound process: error 8xx)
+    "edge_alarm": lambda p, s: [("sting", (392.0, 0.16)), ("gap", (0.09,)), ("sting", (370.0, 0.42)), ("gap", (0.2,)),
+                                ("beep", (1180 * p, 0.17)), ("gap", (0.13,)), ("beep", (1180 * p, 0.17)), ("gap", (0.13,)),
+                                ("beep", (1180 * p, 0.17))],
     "backup":   lambda p, s: [("beep", (1180 * p, 0.17)), ("gap", (0.13,)), ("beep", (1180 * p, 0.17)), ("gap", (0.13,)),
                               ("beep", (1180 * p, 0.17)), ("gap", (0.13,)), ("beep", (1180 * p, 0.17))],
     "yawn":     lambda p, s: [("n", (500 * p, 750 * p, 0.3 * s)), ("n", (750 * p, 350 * p, 0.5 * s))],
@@ -159,11 +163,7 @@ class Sfx:
 
     def _on_edge(self, ev: "Event") -> None:
         """Dun dun! then the reversing beeper while it backs away."""
-        if self.play("edge", 1.5, force=True):
-            async def beeps():
-                await asyncio.sleep(0.45)
-                self.play("backup", 0.0, force=True)
-            asyncio.ensure_future(beeps())
+        self.play("edge_alarm", 2.0, force=True)
 
     def _on_behavior(self, ev: "Event") -> None:
         hit = BEHAVIOR_START.get(ev.data.get("name"))
