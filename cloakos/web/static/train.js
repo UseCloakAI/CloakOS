@@ -31,11 +31,12 @@
         l.success != null && p.task === 'goto' && `success ${(l.success * 100).toFixed(0)}%`,
         l.success != null && p.task === 'desk-pixels' && `stays on ${(l.success * 100).toFixed(0)}%`, l.round && `round ${l.round}`, l.fps && `${l.fps} steps/s`].filter(Boolean).join(' · ');
       return `<div class="sc-card ${p.name === chartName ? 'sel' : ''}">
-        <div class="sc-head"><b>${esc(p.task)}</b><span class="res-tag">${p.training ? 'Training' : p.ready ? 'Ready' : 'Empty'}</span>
+        <div class="sc-head"><b>${esc(p.task)}</b><span class="res-tag">${p.training ? 'Training' : p.can_continue ? 'Paused' : p.ready ? 'Ready' : 'Empty'}</span>
           <span class="sc-meta">${esc(p.sensors)} sensors${p.built_on || p.resumed_from ? ` · built on ${esc(p.built_on || p.resumed_from)}` : ''}${p.teacher ? ` · teacher ${esc(p.teacher)}` : ''} · ${new Date((p.created || 0) * 1000).toLocaleString()}</span></div>
         <p>${esc(stats || 'starting…')}</p>
         <div class="sc-foot"><span class="sc-checks">${esc(p.name)}</span>
           <button class="chip" onclick="rlChart('${p.name}')">Chart</button>
+          ${p.can_continue && !st.running ? `<button class="chip" onclick="rlContinue('${p.name}')">Continue</button>` : ''}
           ${p.ready ? `<button class="chip" onclick="rlUse('${p.name}')">Use</button>` : ''}
           ${p.training ? '' : `<button class="chip" onclick="rlDelete('${p.name}')">Delete</button>`}</div>
       </div>`;
@@ -90,6 +91,11 @@
     const r = await post('/api/rl/train', { task: $('#rl-task').value, sensors: $('#rl-sensors').value, steps: +$('#rl-steps').value,
       resume: $('#rl-resume').value, teacher: $('#rl-teacher').value, real: [...$('#rl-real').selectedOptions].map(o => o.value) });
     if (!r.ok) alert(r.error); else chartName = r.name;
+    refresh();
+  };
+  window.rlContinue = async name => {
+    const r = await post('/api/rl/continue', { name });
+    if (!r.ok) alert(r.error); else chartName = name;
     refresh();
   };
   window.rlStop = async () => { await post('/api/rl/stop'); refresh(); };

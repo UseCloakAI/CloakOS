@@ -65,6 +65,14 @@ def make_rl_router(brain: "Brain") -> APIRouter:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return JSONResponse({"ok": True, "name": name})
 
+    @r.post("/continue")
+    async def cont(body: dict = Body(...)) -> JSONResponse:
+        try:
+            name = t.resume_run(str(body.get("name", "")))
+        except (RuntimeError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, "name": name})
+
     @r.post("/stop")
     async def stop() -> dict[str, Any]:
         await asyncio.to_thread(t.stop)

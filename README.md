@@ -259,6 +259,10 @@ PPO ([Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)) in the si
 3. **Stacking:** pick a policy under **Build on** to keep training it. The teacher continues its PPO; the student keeps its weights and every lesson it has seen.
 4. **Real desk:** record yourself driving with teleop on your desk, then pick those recordings under **Real desk drives** when you train a student. They count 3x, so every real session makes it more accurate on your desk.
 
+**Long runs:** Weekend (10M) and Marathon (30M). Every run saves a checkpoint (teacher every minute, student every round, written safely). If the Mac dies, sleeps or you hit Stop, the run shows **Paused**: hit **Continue** and it picks up where it left off. On macOS training keeps the Mac awake (`caffeinate`) while plugged in.
+
+**Camera lag:** Settings → Calibration → **Camera lag** nods the head and times when the picture moves. Training uses that number instead of the 0.2-0.5 s guess.
+
 Terminal: `python -m cloakos.rl.student --teacher data/policies/desk-map-... --out data/policies/desk-pixels-1 --steps 200000 [--init <earlier student>] [--real data/episodes/<rec> ...]`.
 
 | Skill | What it learns | Runs on the real robot |

@@ -2,6 +2,7 @@
 
   map    (simulator + camera AI) compare the AI-built map's range readings with the sim's true ones
   robot  (real Vector or sim)    command lag, stop lag, wheel speed ratio and distance-sensor noise
+  camera (real Vector or sim)    how late camera frames arrive: nod the head, time when the picture moves
 
 The numbers go into data/calibration.json; paste them to Claude to tune training to the real thing.
 """
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .connection import Action
 from .rl.envs import RAY_FOV, RAY_MAX
 
 if TYPE_CHECKING:
@@ -48,7 +50,7 @@ class Calibrator:
             return "Connect Vector (or start the simulator) first."
         if kind == "map" and b.link.target != "sim":
             return "The map comparison needs the simulator (it has the true answers)."
-        if kind not in ("map", "robot"):
+        if kind not in ("map", "robot", "camera"):
             return "Unknown calibration."
         self.kind, self.progress = kind, "starting"
         self.task = asyncio.ensure_future(self._run(kind, seconds))
@@ -56,7 +58,7 @@ class Calibrator:
 
     async def _run(self, kind: str, seconds: float) -> None:
         try:
-            out = await (self._map(seconds) if kind == "map" else self._robot())
+            out = await (self._map(seconds) if kind == "map" else self._camera() if kind == "camera" else self._robot())
             self.result = {**self.result, kind: out, "target": self.brain.link.target, "when": time.time()}
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(self.result, indent=1))
@@ -108,6 +110,85 @@ class Calibrator:
         }
 
     # ── command lag and sensor noise ───────────────────────────
+
+    async def _take_control(self) -> str:
+        b = self.brain
+        if b.frozen:
+            raise RuntimeError("Vector is frozen: unfreeze it first.")
+        prev_mode = b.mode
+        await b.set_mode("idle")
+        await b.link.set_control(True)
+        for _ in range(60):
+            if b.body.ready:
+                return prev_mode
+            await asyncio.sleep(0.05)
+        await b.set_mode(prev_mode)
+        raise RuntimeError("couldn't get control of Vector (is it busy?)")
+
+    async def _give_back(self, prev_mode: str) -> None:
+        b = self.brain
+        await b.body.stop()
+        if prev_mode == "idle":
+            await b.link.set_control(False)
+        else:
+            await b.set_mode(prev_mode)
+
+    async def _camera(self) -> dict:
+        """Nod the head; compare when the head sensor says it moved with when the picture changed.
+        Point Vector at something with detail (not a blank wall), lights on."""
+        from PIL import Image
+
+        b = self.brain
+        w, body = b.world, b.body
+        if w.frame is None:
+            raise RuntimeError("no camera frames coming in")
+
+        def small(img):
+            return np.asarray(img.convert("L").resize((80, 45), Image.BILINEAR), np.float32)
+
+        prev_mode = await self._take_control()
+        sense, image, motion, fps = [], [], [], []
+        try:
+            for i in range(6):
+                self.progress = f"nod {i + 1} of 6 (keep things still in front of Vector)"
+                await body.apply(Action(0, 0, -1.5 if i % 2 == 0 else 1.5, 0), "calibrate")   # settle at one end
+                await asyncio.sleep(1.2)
+                await body.apply(Action(0, 0, 0, 0), "calibrate")
+                await asyncio.sleep(1.0)
+                base, base_head = small(w.frame), w.head_angle
+                noise, fid, n0, t_f = [], w.frame_id, 0, time.monotonic()
+                while time.monotonic() - t_f < 0.6:            # how much a still picture flickers
+                    if w.frame_id != fid:
+                        fid, n0 = w.frame_id, n0 + 1
+                        noise.append(float(np.abs(small(w.frame) - base).mean()))
+                    await asyncio.sleep(0.01)
+                fps.append(n0 / 0.6)
+                thresh = max(4.0, 4 * (float(np.median(noise)) if noise else 1.0))
+                t0 = time.monotonic()
+                await body.apply(Action(0, 0, 2.5 if i % 2 == 0 else -2.5, 0), "calibrate")
+                t_head = t_img = None
+                while time.monotonic() - t0 < 2.0 and (t_head is None or t_img is None):
+                    if t_head is None and abs(w.head_angle - base_head) > 0.03:
+                        t_head = time.monotonic() - t0
+                    if t_img is None and w.frame_id != fid:
+                        fid = w.frame_id
+                        if float(np.abs(small(w.frame) - base).mean()) > thresh:
+                            t_img = time.monotonic() - t0
+                    await asyncio.sleep(0.005)
+                await body.apply(Action(0, 0, 0, 0), "calibrate")
+                if t_head is not None and t_img is not None:
+                    sense.append(t_head)
+                    image.append(t_img)
+                    motion.append(t_img - t_head)
+                await asyncio.sleep(0.3)
+        finally:
+            await self._give_back(prev_mode)
+        if not image:
+            raise RuntimeError("the picture never changed: point Vector at something with detail, lights on")
+        med = lambda a: round(float(np.median(a)), 3) if a else None
+        return {"command_to_head_sensor_s": med(sense), "command_to_picture_s": med(image),
+                "picture_behind_sensors_s": med(motion), "frames_per_s": round(float(np.median(fps)), 1),
+                "trials_ok": len(image)}
 
     async def _robot(self) -> dict:
         b = self.brain

@@ -29,6 +29,13 @@ def export_numpy(model, path: Path) -> None:
     tmp.replace(path)
 
 
+def save_model(model, out: Path) -> None:
+    """Write-then-swap, so a crash mid-save never leaves a broken checkpoint."""
+    model.save(out / "model.tmp.zip")
+    (out / "model.tmp.zip").replace(out / "model.zip")
+    export_numpy(model, out / "policy.npz")
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="cloakos.rl.train")
     ap.add_argument("--task", default="goto")
@@ -52,10 +59,15 @@ def main(argv: list[str] | None = None) -> None:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     spec = make_spec(a.task, a.sensors)
+    same_run = bool(a.resume) and Path(a.resume).resolve().parent == out.resolve()
+    prev_meta = json.loads((out / "meta.json").read_text()) if same_run and (out / "meta.json").exists() else None
     meta = {"task": a.task, "sensors": spec.sensors, "obs_size": spec.obs_size, "control_hz": spec.control_hz,
             "max_speed": spec.max_speed, "n_rays": spec.n_rays, "steps": a.steps, "envs": a.envs,
             "created": time.time(), "algo": "PPO",
             "resumed_from": Path(a.resume).parent.name if a.resume else None}
+    if prev_meta:                    # picking a stopped run back up: same folder, same goal
+        meta = {**prev_meta, "continued": prev_meta.get("continued", 0) + 1}
+        meta.pop("finished", None)
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     progress = (out / "progress.jsonl").open("a")
 
@@ -93,28 +105,33 @@ def main(argv: list[str] | None = None) -> None:
                 row["bumps"] = round(float(np.mean([e["bumps"] for e in recent])), 2)
             progress.write(json.dumps(row) + "\n")
             progress.flush()
-            if time.time() - self.last_save > 60:
-                self.model.save(out / "model.zip")
-                export_numpy(self.model, out / "policy.npz")
+            if time.time() - self.last_save > 60:          # a checkpoint a minute: a dead Mac loses at most that
+                save_model(self.model, out)
                 self.last_save = time.time()
 
     if a.resume:
         model = PPO.load(a.resume, env=vec, device="cpu")
+        print(f"continuing from {model.num_timesteps} steps", flush=True)
     else:
         model = PPO("MlpPolicy", vec, device="cpu", seed=a.seed, verbose=0,
                     n_steps=1024 if a.task != "balance" else 512, batch_size=256, gamma=0.99 if a.task != "balance" else 0.98,
                     learning_rate=3e-4, ent_coef=0.005, policy_kwargs={"net_arch": [128, 128]})
     try:
-        model.learn(total_timesteps=a.steps, callback=Report(), reset_num_timesteps=not a.resume)
+        start = int(model.num_timesteps)
+        todo = max(0, int(meta["steps"]) - start) if prev_meta else a.steps
+        model.learn(total_timesteps=todo, callback=Report(), reset_num_timesteps=not a.resume)
     finally:
-        model.save(out / "model.zip")
-        export_numpy(model, out / "policy.npz")
-        meta["finished"] = time.time()
+        save_model(model, out)
+        done = int(model.num_timesteps) - start >= todo        # stopped early or killed: left open to Continue
+        if done:
+            meta["finished"] = time.time()
+        (out / "STOP").unlink(missing_ok=True)
         meta["trained_steps"] = int(model.num_timesteps)
         (out / "meta.json").write_text(json.dumps(meta, indent=1))
         progress.close()
         vec.close()
-    finish(out)
+    if done:
+        finish(out)
 
 
 def finish(out: Path) -> None:

@@ -78,9 +78,34 @@ class Trainer:
             cmd += ["--resume", str(self.root / resume / "model.zip")]
         return self._launch(name, out, cmd)
 
-    def _launch(self, name: str, out: Path, cmd: list[str]) -> str:
-        log.info("training: %s", " ".join(cmd[2:]))
-        self.proc = subprocess.Popen(cmd, stdout=(out / "train.log").open("w"), stderr=subprocess.STDOUT)
+    def resume_run(self, name: str) -> str:
+        """Pick a stopped or crashed run back up in its own folder, from its last checkpoint."""
+        if self.running():
+            raise RuntimeError("a training run is already going")
+        out = self.root / name
+        try:
+            meta = json.loads((out / "meta.json").read_text())
+        except (OSError, ValueError):
+            raise ValueError(f"no run {name}")
+        if meta.get("finished"):
+            raise ValueError(f"{name} already finished; use Build on to train it more")
+        if meta.get("task") == "desk-pixels":
+            if not (out / "student.pt").exists():
+                raise ValueError("it stopped before its first checkpoint; start it again")
+            cmd = [sys.executable, "-m", "cloakos.rl.student", "--teacher", str(self.root / meta["teacher"]),
+                   "--out", str(out), "--steps", str(meta["steps"]), "--continue"]
+        else:
+            if not (out / "model.zip").exists():
+                raise ValueError("it stopped before its first checkpoint; start it again")
+            cmd = [sys.executable, "-m", "cloakos.rl.train", "--task", meta["task"], "--sensors", meta["sensors"],
+                   "--steps", str(meta["steps"]), "--out", str(out), "--resume", str(out / "model.zip")]
+        return self._launch(name, out, cmd, append=True)
+
+    def _launch(self, name: str, out: Path, cmd: list[str], append: bool = False) -> str:
+        if sys.platform == "darwin" and shutil.which("caffeinate"):
+            cmd = ["caffeinate", "-ims", *cmd]           # keep the Mac awake while it trains (lid open / plugged in)
+        log.info("training: %s", " ".join(cmd))
+        self.proc = subprocess.Popen(cmd, stdout=(out / "train.log").open("a" if append else "w"), stderr=subprocess.STDOUT)
         self.job = name
         return name
 
@@ -115,6 +140,8 @@ class Trainer:
             out.append({"name": d.name, **{k: meta.get(k) for k in ("task", "sensors", "steps", "trained_steps", "created", "finished",
                                                                     "teacher", "built_on", "resumed_from")},
                         "ready": (d / "policy.npz").exists(), "training": d.name == self.running(),
+                        "can_continue": not meta.get("finished") and d.name != self.running()
+                        and ((d / "model.zip").exists() or (d / "student.pt").exists()),
                         "last": rows[-1] if rows else None, "log_tail": self._tail(d / "train.log")})
         return out
 
