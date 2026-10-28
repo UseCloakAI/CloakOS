@@ -271,7 +271,6 @@ function toggleRecord() { sendWS({ type: 'record', on: !(S && S.recording && S.r
 function toggleFreeze() { sendWS({ type: 'freeze', on: !(S && S.frozen) }); }
 async function deleteEpisode(ev, name) {
   ev.stopPropagation();
-  if (!confirm(`Delete recording ${name}? This can't be undone.`)) return;
   const r = await fetch('/api/episodes/' + encodeURIComponent(name), { method: 'DELETE' });
   if (!r.ok) alert("Couldn't delete it (still recording?)");
   loadInfo();
