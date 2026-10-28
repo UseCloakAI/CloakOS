@@ -453,6 +453,7 @@ class Brain:
             "target": self.link.target,
             "volume": self.link.volume,
             "has_control": self.link.has_control,
+            "prox_raw": self.world.prox_raw,
             "eyes": {"sent_ok": self.body.face_ok, "error": self.body.face_error, "on": self.eyes_on},
             "mode": self.mode,
             "behavior": p.current if p else "-",

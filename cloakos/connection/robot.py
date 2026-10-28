@@ -294,7 +294,12 @@ class RobotLink:
         w.animating = c.status("animating")
         w.touching = bool(st.touch_data.is_being_touched)
         prox = st.prox_data
-        w.proximity_mm = None if prox.unobstructed or not prox.found_object else float(prox.distance_mm)
+        # trust a solid in-range reading even when Vector doesn't set found_object (it rarely does)
+        d = float(prox.distance_mm)
+        solid = prox.found_object or (not prox.unobstructed and 20 < d < 400 and prox.signal_quality > 0.02)
+        w.proximity_mm = None if prox.is_lift_in_fov or not solid else d
+        w.prox_raw = {"mm": int(d), "quality": round(float(prox.signal_quality), 3), "found": bool(prox.found_object),
+                      "clear": bool(prox.unobstructed), "lift": bool(prox.is_lift_in_fov)}
         w.head_angle = round(st.head_angle_rad, 4)
         w.lift_mm = round(st.lift_height_mm, 1)
         w.left_mmps = round(st.left_wheel_speed_mmps, 1)

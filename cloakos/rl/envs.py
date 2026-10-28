@@ -42,6 +42,8 @@ SENSORS = {"map": "Map ranges + robot sensors (recommended)", "robot": "Robot se
 ALIASES = {"explore": "wander", "rays": "map"}       # names used by older policies
 RAY_FOV = math.radians(180)
 RAY_MAX = 1.0
+REAL_LAG_STEPS = (3, 5)          # command -> motion, in 0.1 s steps (calibration: 0.41 s)
+REAL_WHEEL_GAIN = (0.82, 0.92)   # wheels deliver this share of the asked speed (calibration: 0.86)
 
 
 @dataclass
@@ -212,8 +214,10 @@ if gym is not None:
             self.visited = set()
             # latency like the real robot over Wi-Fi: commands land 0-200 ms late, readings 0-100 ms stale
             from collections import deque
-            self.act_delay = int(self.rng.integers(0, 3))
+            # measured on the real Vector (calibration): ~0.41 s from command to motion, wheels 86% of asked
+            self.act_delay = int(self.rng.integers(REAL_LAG_STEPS[0], REAL_LAG_STEPS[1] + 1))
             self.obs_delay = int(self.rng.integers(0, 2))
+            self.wheel_gain = float(self.rng.uniform(*REAL_WHEEL_GAIN))
             self._act_q = deque([np.zeros(3, np.float32)] * self.act_delay)
             self._obs_q = deque(maxlen=self.obs_delay + 1)
             s = self.sim.snapshot
@@ -233,6 +237,7 @@ if gym is not None:
                 self.last_action = a[:2].astype(np.float32)
             else:
                 left, right = float(a[0]) * spec.max_speed, float(a[1]) * spec.max_speed
+                left, right = left * self.wheel_gain, right * self.wheel_gain
                 self.last_action = a.astype(np.float32)
             sim.set_wheels(left, right, 400.0 if spec.task != "recover" else 0.0)   # same ramp as Body.apply
             sim.step(1.0 / spec.control_hz)
