@@ -186,14 +186,23 @@ class VectorClient:
             height_mm=mm, max_speed_rad_per_sec=speed, accel_rad_per_sec2=10.0,
             duration_sec=duration, id_tag=self._tag()), timeout=10)
 
+    @staticmethod
+    def _result(name: str, r) -> None:
+        """Vector refuses some moves (at an edge, picked up...): say so instead of failing silently."""
+        code = getattr(getattr(r, "result", None), "code", None)
+        if code not in (None, 0, 1):
+            log.warning("Vector refused %s: result %s %s", name, code, str(getattr(r, "result", ""))[:120].replace("\n", " "))
+
     async def turn(self, deg: float, speed_dps: float = 90.0) -> None:
-        await self.stub.TurnInPlace(m.TurnInPlaceRequest(
+        r = await self.stub.TurnInPlace(m.TurnInPlaceRequest(
             angle_rad=math.radians(deg), speed_rad_per_sec=math.radians(speed_dps), accel_rad_per_sec2=math.radians(360),
             tol_rad=math.radians(2), id_tag=self._tag()), timeout=15)
+        self._result("turn", r)
 
     async def straight(self, mm: float, speed_mmps: float = 80.0) -> None:
-        await self.stub.DriveStraight(m.DriveStraightRequest(
+        r = await self.stub.DriveStraight(m.DriveStraightRequest(
             speed_mmps=abs(speed_mmps), dist_mm=mm, should_play_animation=False, id_tag=self._tag()), timeout=15)
+        self._result("drive straight", r)
 
     async def drive_on_charger(self) -> bool:
         """Vector's own dock: finds the charger's marker and backs on. Can take a minute or two."""
