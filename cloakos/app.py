@@ -80,6 +80,7 @@ class Brain:
         self._stuck_s = 0.0
         self._stuck_ping = 0.0
         self._tipped_s = 0.0
+        self._eye_err_t = 0.0
         self._edge_quiet_until = 0.0             # no eye frames / sounds while Vector handles an edge
         self.bus.on("goto.*", self._on_goto)
         self.mode = "idle"
@@ -363,6 +364,28 @@ class Brain:
         sent, last_sent, slow = None, 0.0, 0
         while not self._stop.is_set():
             t0 = time.monotonic()
+            try:
+                period, sent, last_sent, slow = await self._eye_frame(period, sent, last_sent, slow, t0)
+            except asyncio.CancelledError:
+                raise
+            except Exception:                    # never let one bad frame kill the eyes (stock eyes come back)
+                if time.time() - self._eye_err_t > 10:
+                    self._eye_err_t = time.time()
+                    log.exception("eyes: frame failed (still running)")
+            await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
+
+    async def _eye_watchdog(self) -> None:
+        while not self._stop.is_set():
+            try:
+                await self._eye_loop()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("eyes: loop crashed, restarting")
+            await asyncio.sleep(0.5)
+
+    async def _eye_frame(self, period: float, sent, last_sent: float, slow: int, t0: float):
+        if True:
             face = self.world.face
             gaze = (face.cx, face.cy) if face is not None and self.world.face_visible(1.0) else None
             behavior = self.policy.current if self.policy else "-"
@@ -382,7 +405,9 @@ class Brain:
                     if slow > 5:                                 # Vector is struggling: back off
                         period, slow = min(0.25, period * 1.3), 0
                         log.info("eyes: Vector is slow to draw, now %.0f fps", 1 / period)
-            await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
+                    elif slow == 0 and period > 1.0 / self.eye_fps:   # and speed back up when it copes
+                        period = max(1.0 / self.eye_fps, period * 0.97)
+        return period, sent, last_sent, slow
 
     def _check_stuck(self, dt: float) -> None:
         """Wheels told to move but nothing happens: pushing against something, or a tread caught.
@@ -440,6 +465,11 @@ class Brain:
             ok = await self.body.go_home()
         finally:
             self._homing = False
+        # Vector's dock runs its own behaviors (and face); once it's done, take control and the face back
+        if not self.link.has_control:
+            log.info("home: Vector's docking kept control; taking it back")
+            await self.link.set_control(True)
+        self.body._sent = None                       # resend everything under the (possibly new) session
         self.eyes.flash("Home!" if ok or self.world.on_charger else "Couldn't find home", 2.0)
         self.react("happy" if ok or self.world.on_charger else "sad")
         return ok
@@ -526,7 +556,7 @@ class Brain:
         tasks = [
             asyncio.create_task(self.link.run(), name="link"),
             asyncio.create_task(self._tick_loop(), name="tick"),
-            asyncio.create_task(self._eye_loop(), name="eyes"),
+            asyncio.create_task(self._eye_watchdog(), name="eyes"),
             asyncio.create_task(self.voice.start(), name="voice"),
             asyncio.create_task(self.mapper.run(), name="mapper"),
         ]
