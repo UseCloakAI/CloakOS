@@ -255,7 +255,7 @@ PPO ([Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)) in the si
 ### Desk: teacher → pixel student
 
 1. **Desk** (teacher): PPO on random desks (40-120 x 30-80 cm, 0-4 small things, dim to bright, head and camera a little different every time). It cheats: it sees the exact edges. Sim-only. Set `CLOAK_DESK=90x60` (cm) before training and half the desks are your size.
-2. **Desk from the camera** (student): copies the teacher with DAgger. It only sees what the real Vector has: two camera frames (JPEG'd, grainy, like the real stream) plus wheel speeds, distance sensor, cliff and tilt. This is the one that runs on the robot. The cliff reflex stays on underneath it.
+2. **Desk from the camera** (student): copies the teacher with DAgger. It only sees what the real Vector has: two camera frames (JPEG'd, grainy, 0.2-0.5 s late and sometimes dropped, like the real Wi-Fi stream) plus wheel speeds, distance sensor, cliff and tilt. This is the one that runs on the robot. The cliff reflex stays on underneath it.
 3. **Stacking:** pick a policy under **Build on** to keep training it. The teacher continues its PPO; the student keeps its weights and every lesson it has seen.
 4. **Real desk:** record yourself driving with teleop on your desk, then pick those recordings under **Real desk drives** when you train a student. They count 3x, so every real session makes it more accurate on your desk.
 

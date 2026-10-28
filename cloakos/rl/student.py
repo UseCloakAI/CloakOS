@@ -26,6 +26,30 @@ from .pixelnet import IMG_H, IMG_W, PROPRIO
 MAX_SPEED = 150.0
 REAL_WEIGHT = 3          # a real-desk sample counts this many times
 EXAM_SEEDS = range(900_001, 900_021)
+CAM_LAG_STEPS = (2, 5)   # Vector's camera over Wi-Fi: a frame is 0.2-0.5 s old when the brain gets it
+CAM_DROP = 0.15          # and sometimes the next one doesn't make it in time
+
+
+class LaggyCamera:
+    """The real stream as the brain sees it: late, sometimes stuck on the last frame."""
+
+    def __init__(self, rng) -> None:
+        self.rng = rng
+        self.reset()
+
+    def reset(self) -> None:
+        self.lag = int(self.rng.integers(CAM_LAG_STEPS[0], CAM_LAG_STEPS[1] + 1))
+        self.shots: list = []
+        self.cur = self.prev = None
+
+    def step(self, img) -> tuple:
+        """Feed this tick's render; returns (newest frame delivered, the one before it, is it new)."""
+        self.shots.append(img)
+        self.shots = self.shots[-(self.lag + 1):]
+        new = self.cur is None or self.rng.random() >= CAM_DROP
+        if new:
+            self.prev, self.cur = self.cur, self.shots[0]
+        return self.cur, self.prev if self.prev is not None else self.cur, new
 
 
 # ── sim side (worker processes: numpy + MuJoCo only, never torch) ──────────────
@@ -40,18 +64,23 @@ def collect(job: tuple) -> dict:
     teacher = NumpyPolicy(Path(teacher_path))
     student = PixelNet(student_path) if student_path else None
     rng = np.random.default_rng(seed)
-    frames, prev, proprio, labels, eps = [], [], [], [], []
+    cam = LaggyCamera(rng)
+    frames, cur, prev, proprio, labels, eps = [], [], [], [], [], []
     obs, _ = env.reset()
     n = by_student = 0
     for _ in range(steps):
-        frames.append(prepare(env.sim.grab(IMG_W, IMG_H)))
-        prev.append(len(frames) - (2 if n else 1))
+        c, pv, new = cam.step(prepare(env.sim.grab(IMG_W, IMG_H)))
+        if new:                                          # store each delivered frame once
+            frames.append(c)
+        ci = len(frames) - 1
+        cur.append(ci)
+        prev.append(ci - 1 if pv is not c and ci > 0 else ci)
         p = obs[:PROPRIO].copy()
         proprio.append(p)
         label, _ = teacher.predict(obs)                  # what the teacher would do here, always
         labels.append(label)
         if student is not None and rng.random() >= beta:
-            a = student.act(frames[-1], frames[prev[-1]], p)
+            a = student.act(frames[cur[-1]], frames[prev[-1]], p)
             by_student += 1
         else:
             a = label
@@ -61,8 +90,9 @@ def collect(job: tuple) -> dict:
             eps.append({"cells": info.get("cells", 0), "fell": bool(info.get("fell")), "bumps": info.get("bumps", 0),
                         "steps": n, "student": by_student / n})
             obs, _ = env.reset()
+            cam.reset()
             n = by_student = 0
-    return {"frames": np.stack(frames), "prev": np.array(prev, np.int32), "proprio": np.stack(proprio).astype(np.float32),
+    return {"frames": np.stack(frames), "cur": np.array(cur, np.int32), "prev": np.array(prev, np.int32), "proprio": np.stack(proprio).astype(np.float32),
             "labels": np.stack(labels).astype(np.float32), "episodes": eps}
 
 
@@ -74,14 +104,15 @@ def exam(job: tuple) -> dict:
 
     env = VectorEnv("desk", "map", seed=0, worlds_per_reload=1)
     net = PixelNet(student_path)
+    cam = LaggyCamera(np.random.default_rng(1))
     rows = []
     for seed in seeds:
         obs, _ = env.reset(seed=seed)
-        last = cur = prepare(env.sim.grab(IMG_W, IMG_H))
+        cam.reset()
         steps = bumps = 0
         while True:
-            last, cur = cur, prepare(env.sim.grab(IMG_W, IMG_H))
-            obs, _, done, trunc, info = env.step(net.act(cur, last if steps else cur, obs[:PROPRIO]))
+            cur, last, _ = cam.step(prepare(env.sim.grab(IMG_W, IMG_H)))
+            obs, _, done, trunc, info = env.step(net.act(cur, last, obs[:PROPRIO]))
             steps += 1
             bumps += bool(info.get("bump"))
             if done or trunc:
@@ -211,7 +242,8 @@ class Data:
             lab = np.empty((size, 2), np.float32)
             for j, (k, i) in enumerate(b):
                 p = self.parts[k][0]
-                img[j, :3], img[j, 3:] = p["frames"][i], p["frames"][p["prev"][i]]
+                img[j, :3] = p["frames"][p["cur"][i] if "cur" in p else i]
+                img[j, 3:] = p["frames"][p["prev"][i]]
                 prop[j], lab[j] = p["proprio"][i], p["labels"][i]
             yield img, prop, lab
 
@@ -303,7 +335,7 @@ def main(argv: list[str] | None = None) -> None:
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
-                    losses.append(float(loss))
+                    losses.append(loss.item())
             net.eval()
             torch.save(net.state_dict(), out / "student.pt")
             z = fold(net)
