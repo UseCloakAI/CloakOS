@@ -80,6 +80,7 @@ class Brain:
         self._stuck_s = 0.0
         self._stuck_ping = 0.0
         self._tipped_s = 0.0
+        self._edge_quiet_until = 0.0             # no eye frames / sounds while Vector handles an edge
         self.bus.on("goto.*", self._on_goto)
         self.mode = "idle"
         self.policy: Policy | None = None
@@ -150,7 +151,10 @@ class Brain:
         from .voice.commander import decide
 
         here = tuple(self.policies["goto"].skills.snapshot()["pos"][:2]) if self.link.connected else None
-        d = await decide(self.voice.llm, text, self.mapper.known(), here)
+        from .voice.commander import fallback
+        if fallback(text, self.mapper.known()).action == "none":     # it's going to the LLM: show it's thinking
+            self.eyes.flash("Thinking…", 3.0)
+        d = await decide(self.voice.llm, text, self.mapper.known(), here, self.sensor_report())
         if d.action == "go_to" and d.target:
             ok = await self.go_to(d.target)
             if not ok:
@@ -159,6 +163,12 @@ class Brain:
             await self.set_frozen(True, source="voice")
         elif d.action == "go_home":
             asyncio.ensure_future(self.go_home())
+        elif d.action in ("look_around", "chill"):
+            if self.frozen:
+                await self.set_frozen(False, source="voice")
+            await self.set_mode("auto")
+            if hasattr(self.policy, "prefer"):
+                self.policy.prefer(d.action, 45.0)
         elif d.action == "moves" and d.steps:
             asyncio.ensure_future(self.run_moves(d.steps))
         elif d.action == "wander":
@@ -170,7 +180,31 @@ class Brain:
         self.bus.emit("command", text=text, say=d.say, action=d.action, target=d.target, source=d.source)
         return {"say": d.say, "action": d.action, "target": d.target, "source": d.source}
 
-    MOVE_WORDS = {"forward": "Forward", "back": "Backing up", "turn": "Turning", "head": "Looking", "lift": "Lift", "wait": "Waiting"}
+    def sensor_report(self) -> dict:
+        """Everything the body knows right now, in words the LLM can use."""
+        w = self.world
+        if not self.link.connected:
+            return {}
+        pose = w.pose or (0.0, 0.0, 0.0)
+        return {
+            "doing": self.activity() or (self.policy.current if self.policy else self.mode),
+            "mode": self.mode,
+            "in front (distance sensor)": f"{w.proximity_mm:.0f} mm" if w.proximity_mm else "nothing within 40 cm",
+            "edge under the front": "YES" if w.cliff else "no",
+            "edges felt recently": len(w.edges),
+            "picked up / held": "yes" if (w.picked_up or w.held) else "no",
+            "on charger": "yes" if w.on_charger else "no",
+            "battery": {1: "low", 2: "ok", 3: "full"}.get(w.battery_level, "?"),
+            "head angle": f"{math.degrees(w.head_angle or 0):.0f} deg",
+            "lift": f"{w.lift_mm or 0:.0f} mm",
+            "wheels": f"{w.left_mmps or 0:.0f} / {w.right_mmps or 0:.0f} mm/s",
+            "position": f"x {pose[0] / 10:.0f} cm, y {pose[1] / 10:.0f} cm, facing {math.degrees(pose[2]):.0f} deg",
+            "sees a face": "yes" if w.face_visible(2.0) else "no",
+            "frozen": "yes (stuck)" if self.stuck else "yes" if self.frozen else "no",
+            "mood": ", ".join(f"{k} {v:.1f}" for k, v in self.drives.values.items()),
+        }
+
+    MOVE_WORDS = {"forward": "Forward", "back": "Backing up", "turn": "Turning", "head": "Looking", "lift": "Lift", "wait": "Waiting", "emote": ""}
 
     async def run_moves(self, steps: list) -> None:
         """Precise steps from a command or the LLM, one after another. Autonomy pauses meanwhile (teleop
@@ -198,6 +232,8 @@ class Brain:
                     await self.body.lift_height(val, 8)
                 elif kind == "wait":
                     await asyncio.sleep(val)
+                elif kind == "emote":
+                    await self.body.emote(val)
         finally:
             await self.set_mode(back_to)
 
@@ -217,10 +253,18 @@ class Brain:
         return True
 
     def _on_edge(self, ev: Event) -> None:
-        self.eyes.alert("edge", 0.9)                    # alarm first, then say what it's doing
-        self.eyes.flash("Backing up", 2.0)
+        # Vector's own edge reaction runs right now: sending eye frames or sound on top of it crashed
+        # its display/sound process (error 800). Stay quiet until the back-off is done, then alarm.
+        self._edge_quiet_until = time.time() + 6.0
 
     def _on_edge_cleared(self, ev: Event) -> None:
+        self._edge_quiet_until = time.time() + 0.6       # a beat for control to settle
+        async def alarm():
+            await asyncio.sleep(0.6)
+            self.eyes.alert("edge", 0.9)
+            self.eyes.flash("Backed up" if ev.data.get("cleared") else "Stuck at an edge", 2.0)
+            self.bus.emit("edge.alarm")
+        asyncio.ensure_future(alarm())
         if not ev.data.get("cleared"):                  # couldn't get off the edge: that's stuck
             self._become_stuck("couldn't get clear of an edge")
 
@@ -327,7 +371,8 @@ class Brain:
             # Vector's sound and screen share one process: while a sound plays, send fewer frames
             audio = getattr(getattr(self.link, "client", None), "_audio_lock", None)
             busy = audio is not None and audio.locked()
-            if self.eyes_on and self.body.ready and (not busy or t0 - last_sent >= 0.2):
+            quiet = time.time() < self._edge_quiet_until or getattr(self.link, "edge_reacting", False)
+            if self.eyes_on and self.body.ready and not quiet and (not busy or t0 - last_sent >= 0.2):
                 px = rgb565(self.eye_frame)
                 if px != sent or t0 - last_sent > 1.0:          # refresh now and then so it never times out
                     await self.body.face(px, 2500)

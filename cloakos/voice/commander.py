@@ -13,26 +13,39 @@ from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
-ACTIONS = ("go_to", "wander", "stop", "go_home", "moves", "none")
-MOVES = ("forward", "back", "turn", "head", "lift", "wait")
+ACTIONS = ("go_to", "wander", "stop", "go_home", "moves", "look_around", "chill", "none")
+MOVES = ("forward", "back", "turn", "head", "lift", "wait", "emote")
+EMOTES = ("happy", "curious", "sad", "scared", "greet", "sleepy", "bored", "startle", "wake")
 MAX_MM, MAX_STEPS = 500, 10
 
-SYSTEM = """You are the mind of Vector, a small curious desk robot. Your human talks to you.
-Decide what to say and what to do. You can only do these actions:
-- "go_to": drive to one of the objects you remember (use its id from the list)
-- "wander": roam around exploring
-- "stop": stop moving and stay put
+SYSTEM = """You are the mind of Vector, a small curious desk robot. You have full control of its body.
+Your human talks to you. Look at what your sensors say, then decide what to say and what to do.
+
+What you can do (pick one action):
+- "moves": precise steps, done in order. Steps:
+    ["forward", mm]  drive forward (up to 500)        ["back", mm]   drive backward (up to 500)
+    ["turn", deg]    turn in place, + = left, - = right (up to 360)
+    ["head", deg]    head angle, -20 (down) .. 45 (up)  ["lift", x]   lift arm, 0 = down .. 1 = up
+    ["wait", s]      pause (up to 5)                   ["emote", name] happy|curious|sad|scared|greet|sleepy|bored
+  e.g. "lift your head up" -> [["head", 35]]; "do a little dance" -> [["turn", 30], ["turn", -60], ["turn", 30], ["emote", "happy"]]
+- "go_to": drive to an object you remember (target = its id from the list below)
 - "go_home": drive back onto the charger
-- "moves": precise steps, done in order, e.g. [["back", 50], ["turn", 90], ["forward", 100]]:
-    forward/back <mm, up to 500>, turn <degrees, + = left, - = right>, head <degrees -20..45>,
-    lift <0 = down .. 1 = up>, wait <seconds>
+- "wander": explore on your own       - "look_around": stay put and look around     - "chill": sit and relax
+- "stop": stop everything and stay put
 - "none": just talk
+
+Safety is handled for you: you won't drive off an edge, and "stop" always wins. Don't refuse moves.
+If a move makes no sense right now (e.g. forward while something is 3 cm in front), say so and pick a better one.
+
+Your sensors right now:
+{sensors}
 
 Objects you remember (id, what it is, how far from you):
 {objects}
 
 Reply with ONLY a JSON object, nothing else:
-{{"say": "<1 to 8 words, warm and simple, no emoji>", "action": "go_to|wander|stop|go_home|moves|none", "target": "<object id or null>", "steps": [["forward", 100]]}}
+{{"say": "<1 to 8 words, warm and simple, no emoji>", "action": "moves|go_to|go_home|wander|look_around|chill|stop|none",
+  "target": "<object id or null>", "steps": [["head", 35]]}}
 If they ask you to go to something you don't remember, say you haven't seen it and use "none"."""
 
 
@@ -55,6 +68,12 @@ def _objects_text(objects: list[dict], here: tuple[float, float] | None) -> str:
         d = f"{math.dist(here, o['pos'][:2]):.1f} m" if here else "?"
         rows.append(f"- {o['id']}: {o['label']}, {d}")
     return "\n".join(rows)
+
+
+def _sensors_text(s: dict | None) -> str:
+    if not s:
+        return "(no robot connected)"
+    return "\n".join(f"- {k}: {v}" for k, v in s.items())
 
 
 def parse(text: str, objects: list[dict]) -> Decision | None:
@@ -90,7 +109,12 @@ def clean_steps(raw) -> list | None:
     out = []
     for st in (raw or [])[:MAX_STEPS]:
         try:
-            kind, val = str(st[0]).lower(), float(st[1])
+            kind = str(st[0]).lower()
+            if kind == "emote":
+                if str(st[1]).lower() in EMOTES:
+                    out.append(["emote", str(st[1]).lower()])
+                continue
+            val = float(st[1])
         except (TypeError, ValueError, IndexError):
             continue
         if kind not in MOVES:
@@ -102,7 +126,7 @@ def clean_steps(raw) -> list | None:
 
 
 MOVE_RE = re.compile(r"\b(forward|ahead|back(?:\s*up)?|backward|backwards|reverse|turn\s+(?:left|right)|turn\s+around|"
-                     r"look\s+(?:up|down)|lift\s+(?:up|down)|raise\s+(?:your\s+)?lift|lower\s+(?:your\s+)?lift)"
+                     r"look\s+(?:up|down)|(?:(?:lift|raise|put|move|tilt)\s+(?:your\s+)?)?head\s+(?:up|down)|lift\s+(?:up|down)|raise\s+(?:your\s+)?lift|lower\s+(?:your\s+)?lift)"
                      r"(?:\s+(?:by\s+)?(-?\d+(?:\.\d+)?)\s*(cm|centimeters?|mm|millimeters?|in|inch(?:es)?|deg(?:rees?)?|°)?)?", re.I)
 
 
@@ -124,10 +148,8 @@ def moves_from_text(t: str) -> list | None:
         elif word.startswith("turn"):
             deg = n if n is not None else 90
             steps.append(["turn", deg if "left" in word else -deg])
-        elif "look up" in word:
-            steps.append(["head", 35])
-        elif "look down" in word:
-            steps.append(["head", -15])
+        elif "head" in word or word.startswith("look"):
+            steps.append(["head", 35 if word.endswith("up") else -15])
         elif "up" in word or "raise" in word:
             steps.append(["lift", 1])
         else:
@@ -162,12 +184,14 @@ def fallback(text: str, objects: list[dict]) -> Decision:
     return Decision(None, "none", source="rules")
 
 
-async def decide(llm, text: str, objects: list[dict], here: tuple[float, float] | None) -> Decision:
+async def decide(llm, text: str, objects: list[dict], here: tuple[float, float] | None,
+                 sensors: dict | None = None) -> Decision:
     quick = fallback(text, objects)
     if quick.action != "none":                  # clear commands act instantly, no round trip
         return quick
-    reply = await llm.ask(text, SYSTEM.format(objects=_objects_text(objects, here)),
-                          model=getattr(llm, "chat_model", None), temperature=0.4, timeout=6.0)
+    model = getattr(llm, "command_model", None) or getattr(llm, "chat_model", None)
+    reply = await llm.ask(text, SYSTEM.format(objects=_objects_text(objects, here), sensors=_sensors_text(sensors)),
+                          model=model, temperature=0.3, timeout=getattr(llm, "command_timeout", 30.0), max_tokens=400)
     d = parse(reply, objects) if reply else None
     if d is None:
         if quick.say:

@@ -45,8 +45,8 @@ class DriveModel:
             "idle_after": 10.0,
             "boredom_idle": 0.004,
             "curiosity_idle": 0.002,
-            "energy_active": -0.0015,
-            "energy_rest": 0.006,
+            "energy_active": -0.004,     # ~a few minutes of exploring makes it want a rest
+            "energy_rest": 0.007,
             "battery_low_cap": 0.3,
             **(cfg.get("rates", {}) or {}),
         }

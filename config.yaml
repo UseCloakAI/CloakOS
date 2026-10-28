@@ -57,8 +57,8 @@ rates:                # per second
   idle_after: 10      # seconds without stimulus before idle drift kicks in
   boredom_idle: 0.004
   curiosity_idle: 0.002
-  energy_active: -0.0015
-  energy_rest: 0.006
+  energy_active: -0.004    # ~a few minutes of exploring makes it want a rest
+  energy_rest: 0.007
   battery_low_cap: 0.3
 
 impulses:             # sense event -> drive deltas
@@ -110,6 +110,7 @@ behaviors:
   sulk:          {weight: 1.0, min_s: 12}
   nap:           {weight: 1.0, min_s: 30, wake_at: 0.85}
   startle:       {weight: 1.0}
+  chill:         {weight: 1.0}
   idle:          {weight: 1.0}
 
 # ── voice ──────────────────────────────────────────────
@@ -142,7 +143,8 @@ llm:                  # Cloak by default (api.usecloak.org, no key needed); or a
   base_url: null      # cloak: https://api.usecloak.org · openai: e.g. http://localhost:11434/v1 (Ollama)
   api_key: null
   model: null         # cloak: pneuma (fast lines) · openai: your model name
-  chat_model: null    # cloak: logos (understands commands like "go to the mug")
+  chat_model: null    # cloak: logos (chat)
+  command_model: null # cloak: kairos (drives the body: sees all sensors, plans precise moves)
   timeout_s: 2.5
   temperature: 1.0
   max_words: 6

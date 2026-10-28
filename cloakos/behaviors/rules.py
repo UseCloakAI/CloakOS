@@ -2,11 +2,17 @@
 
 Anti-flicker: the running behavior gets a stickiness bonus and can't be replaced before
 its min_s, unless the challenger is a reflex (interrupt=True).
+
+Variety, without scripting: a behavior gets "tired" the longer it runs (its appeal drops)
+and recovers while others run; and when it's time to change, the next one is picked among
+the good options with some randomness (weighted by score), not always the single top one.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import random
 import time
 
 from ..bus import Bus
@@ -29,6 +35,11 @@ class RulePolicy(Policy):
         self.scores: dict[str, float] = {}
         self._task: asyncio.Task | None = None
         self._since = 0.0
+        b_cfg = cfg.get("behaviors", {}) or {}
+        self.tiring = float(b_cfg.get("tiring", 0.35))           # how much appeal a fully "tired" behavior loses
+        self.temperature = float(b_cfg.get("temperature", 0.07))  # randomness of the pick (0 = always the top one)
+        self.fatigue: dict[str, float] = {b.name: 0.0 for b in self.behaviors}
+        self._last_t = time.time()
 
     @property
     def current(self) -> str:
@@ -39,18 +50,47 @@ class RulePolicy(Policy):
         return bool(self.active and self.active.resting)
 
     async def step(self, obs: Obs) -> None:
-        self.scores = {b.name: round(b.weight * b.score(obs.drives, obs.world), 3) for b in self.behaviors}
-        best = max(self.behaviors, key=lambda b: self.scores[b.name])
+        now = time.time()
+        dt, self._last_t = min(1.0, now - self._last_t), now
         cur = self.active
+        for b in self.behaviors:                          # tire while running, recover while not
+            f = self.fatigue[b.name]
+            if b is cur:
+                f += dt / b.typical_s
+            else:
+                f -= dt / (b.typical_s * 1.5)
+            self.fatigue[b.name] = max(0.0, min(1.5, f))
+        pref = getattr(self, "_prefer", None)
+        boost = pref[0] if pref and now < pref[1] else None
+        self.scores = {b.name: round(b.weight * b.score(obs.drives, obs.world)
+                                     - (0.0 if b.interrupt else self.tiring * self.fatigue[b.name])
+                                     + (1.0 if b.name == boost else 0.0), 3)
+                       for b in self.behaviors}
+        best = max(self.behaviors, key=lambda b: self.scores[b.name])
         if cur is None or self._task is None or self._task.done():
-            await self._switch(best)
+            await self._switch(self._pick(cur))
             return
         if best is cur:
             return
-        ran = time.time() - self._since
-        beats = self.scores[best.name] > self.scores[cur.name] + self.stickiness
-        if beats and (ran >= cur.min_s or (best.interrupt and not cur.interrupt)):
-            await self._switch(best)
+        ran = now - self._since
+        if best.interrupt and not cur.interrupt and self.scores[best.name] > self.scores[cur.name] + self.stickiness:
+            await self._switch(best)                      # reflexes don't wait
+            return
+        if ran >= cur.min_s and self.scores[best.name] > self.scores[cur.name] + self.stickiness:
+            nxt = self._pick(cur)
+            if nxt is not cur:
+                await self._switch(nxt)
+
+    def prefer(self, name: str, seconds: float) -> None:
+        """Someone asked for this (e.g. "look around"): favour it for a while."""
+        self._prefer = (name, time.time() + seconds)
+
+    def _pick(self, cur: Behavior | None) -> Behavior:
+        """Softmax over the non-reflex options: usually a top one, sometimes the runner-up."""
+        opts = [b for b in self.behaviors if not b.interrupt or b is cur]
+        top = max(self.scores[b.name] for b in opts)
+        weights = [math.exp((self.scores[b.name] - top) / max(1e-3, self.temperature)) for b in opts]
+        return random.choices(opts, weights)[0]
 
     async def _switch(self, b: Behavior) -> None:
         prev = self.active
