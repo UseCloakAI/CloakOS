@@ -146,3 +146,36 @@ def test_camera_thread_falls_back_to_physics_thread(monkeypatch):
     sim._render_once({"thread": True})
     assert sim._separate_render is False and sim.camera_on        # still on, now via the physics thread
     assert "no GL context" in sim.render_error
+
+
+async def test_emergency_stop_halts_everything_until_released(tmp_path):
+    cfg = Config(load_config("config.yaml"))
+    cfg["datalog"]["dir"] = str(tmp_path)
+    cfg["voice"]["enabled"] = False
+    cfg["sim"].update(enabled=True, camera=False, assets=False, world="empty", seed=5)
+    brain = Brain(cfg)
+    task = asyncio.create_task(brain.run(mode="auto", web=False))
+    for _ in range(80):
+        await asyncio.sleep(0.1)
+        if brain.link.has_control:
+            break
+    sim = brain.link.sim
+    await brain.set_estop(True)
+    assert brain.mode == "teleop" and brain.body.halted
+    await brain.set_mode("auto")                     # nothing autonomous while it's on
+    assert brain.mode == "teleop"
+    await asyncio.sleep(0.5)
+    p, head = list(sim.snapshot["pos"]), sim.snapshot["head_angle"]
+    for _ in range(8):
+        brain.teleop.input(throttle=1.0, head=1.0)
+        await asyncio.sleep(0.1)
+    assert math.dist(p[:2], sim.snapshot["pos"][:2]) < 0.01 and abs(sim.snapshot["head_angle"] - head) < 0.05
+    assert (await brain.command("go forward 100 mm"))["action"] == "none"
+    await brain.set_estop(False)
+    assert not brain.body.halted and brain.eyes._icon[0] == "clear"
+    for _ in range(10):
+        brain.teleop.input(throttle=1.0)
+        await asyncio.sleep(0.1)
+    assert math.dist(p[:2], sim.snapshot["pos"][:2]) > 0.02    # drives again once released
+    brain.request_stop()
+    await asyncio.wait_for(task, 10)

@@ -90,6 +90,8 @@ class Brain:
         self._tick_events: list[dict[str, Any]] = []
         self._stop = asyncio.Event()
         self.frozen = False
+        self.estop = False               # emergency stop (Shift+Space / the red button): everything halts
+        self._estop_ping = 0.0
         from .calibrate import Calibrator
         self.calibrator = Calibrator(self)
         self.tester = None                       # sim.tester.Tester, made on first use
@@ -128,20 +130,50 @@ class Brain:
             self._taps = []
             asyncio.ensure_future(self.set_frozen(not self.frozen, source="button"))
 
-    async def set_frozen(self, on: bool, source: str = "ui") -> None:
-        """Freeze: every motor stops and stays stopped (behaviors, teleop, emotes all blocked).
-        Control is kept, so stock Vector doesn't wander off either. Eyes go still."""
-        if on == self.frozen:
+    async def set_estop(self, on: bool, source: str = "ui") -> None:
+        """Emergency stop: every motor stops now and stays stopped, whatever was running is dropped,
+        and nothing autonomous starts again on release (it comes back in Teleop, standing still).
+        The screen shows a pulsing stop sign with a soft ping until it's released; then "All clear"."""
+        if on == self.estop:
             return
-        self.frozen = self.body.frozen = self.eyes.frozen = on
-        if not on:
-            self.stuck = False
+        self.estop = self.body.halted = on
         if on:
             if self.policy is not None:
-                await self.policy.stop()
-            await self.body.stop()
-        elif self.policy is not None:
-            await self.policy.start()
+                try:
+                    await self.policy.stop()
+                except Exception:
+                    log.exception("estop: policy stop")
+            self.body.cmd = type(self.body.cmd)()
+            await self.body._do("stop_all")
+            if self._emote_task and not self._emote_task.done():
+                self._emote_task.cancel()
+            if self.calibrator.task and not self.calibrator.task.done():
+                self.calibrator.task.cancel()
+            if self.tester is not None and getattr(self.tester, "running", False):
+                self.tester.stop()
+            self.policy, self.mode = self.policies.get("teleop"), "teleop"     # nothing autonomous comes back
+            self.bus.emit("mode.changed", mode="teleop")
+            self._estop_ping = 0.0
+            self.eyes.alert("stop", 1.0)
+        else:
+            self.body._sent = None
+            self.eyes.alert("clear", 2.2)
+            self.sfx.play("clear", 0.5, force=True)
+        log.warning("EMERGENCY STOP %s (%s)", "ON" if on else "released", source)
+        self.bus.emit("estop.changed", on=on, source=source)
+
+    async def set_frozen(self, on: bool, source: str = "ui") -> None:
+        """Freeze: the wheels and lift stop and stay stopped. The head, eyes, sounds and behaviors
+        carry on (it can still look around). Control is kept, so stock Vector doesn't wander off either."""
+        if on == self.frozen:
+            return
+        if on:
+            await self.body.drive(0, 0)                  # wheels stopped before the gate closes
+            await self.body.apply(type(self.body.cmd)(0, 0, self.body.cmd.head_rate, 0))
+        self.frozen = self.body.frozen = on
+        if not on:
+            self.stuck = False
+            self.body._sent = None                      # resend the wheels once it's let go
         log.info("freeze %s (%s)", "on" if on else "off", source)
         self.bus.emit("freeze.changed", on=on, source=source)
 
@@ -151,6 +183,8 @@ class Brain:
         """You said something: the LLM (or simple rules) decides what to say and do."""
         from .voice.commander import decide
 
+        if self.estop:
+            return {"say": "Emergency stop is on. Release it first.", "action": "none"}
         here = tuple(self.policies["goto"].skills.snapshot()["pos"][:2]) if self.link.connected else None
         from .voice.commander import fallback
         if fallback(text, self.mapper.known()).action == "none":     # it's going to the LLM: show it's thinking
@@ -218,7 +252,7 @@ class Brain:
         await self.set_mode("teleop")
         try:
             for kind, val in steps:
-                if self.frozen:                          # "stop" (or stuck) cancels the rest
+                if self.frozen or self.estop:            # "stop", stuck or the emergency stop cancels the rest
                     break
                 self.eyes.flash(self.MOVE_WORDS.get(kind, kind), 1.2)
                 if kind == "forward":
@@ -292,7 +326,7 @@ class Brain:
     # ── modes ──────────────────────────────────────────────────
 
     async def set_mode(self, mode: str) -> None:
-        if mode not in MODES or mode == self.mode:
+        if mode not in MODES or mode == self.mode or (self.estop and mode != "teleop"):
             return
         if self.policy is not None:
             await self.policy.stop()
@@ -345,9 +379,15 @@ class Brain:
             )
             self._emit_crossings(self.drives.update(dt, ctx))
             self._check_stuck(dt)
-            self._charging_rules(w)
+            if self.estop:
+                self.eyes.alert("stop", 0.6)              # the stop sign stays up until released
+                if time.time() - self._estop_ping > 3.0:
+                    self._estop_ping = time.time()
+                    self.sfx.play("estop", 2.5, force=True)
+            else:
+                self._charging_rules(w)
             obs = Obs(time.time(), self.drives.values, w)
-            if self.policy is not None and self.link.has_control and not self.frozen:
+            if self.policy is not None and self.link.has_control:
                 try:
                     await self.policy.step(obs)
                 except Exception:
@@ -553,6 +593,7 @@ class Brain:
             "connection": self.link.state,
             "link_hint": self.link.hint,
             "frozen": self.frozen,
+            "estop": self.estop,
             "target": self.link.target,
             "volume": self.link.volume,
             "has_control": self.link.has_control,

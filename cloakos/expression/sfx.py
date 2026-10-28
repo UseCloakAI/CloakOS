@@ -117,6 +117,9 @@ SOUNDS = {
     "edge_alarm": lambda p, s: [("sting", (392.0, 0.16)), ("gap", (0.09,)), ("sting", (370.0, 0.42))],
     "backup":   lambda p, s: [("beep", (1180 * p, 0.17)), ("gap", (0.13,)), ("beep", (1180 * p, 0.17)), ("gap", (0.13,)),
                               ("beep", (1180 * p, 0.17)), ("gap", (0.13,)), ("beep", (1180 * p, 0.17))],
+    "estop":    lambda p, s: [("ping", (2350.0, 0.16))],                                                 # tiny, soft
+    "clear":    lambda p, s: [("n", (880, 880, 0.08)), ("gap", (0.03,)), ("n", (1175, 1175, 0.08)), ("gap", (0.03,)),
+                              ("n", (1568, 1760, 0.16))],                                                # all clear
     "yawn":     lambda p, s: [("n", (500 * p, 750 * p, 0.3 * s)), ("n", (750 * p, 350 * p, 0.5 * s))],
     "look":     lambda p, s: [("n", (850 * p, 780 * p, 0.08 * s)), ("n", (780 * p, 1100 * p, 0.14 * s))],
 }
@@ -131,8 +134,12 @@ EVENTS = {
 BEHAVIOR_START = {"wander": ("go", 15.0), "nap": ("yawn", 60.0), "look_around": ("look", 15.0), "approach_face": ("face", 20.0)}
 
 
+QUIET = {"estop": 0.3}     # a light reminder, not an alarm
+
+
 def render(name: str, drives: dict[str, float] | None = None, gain: float = 0.97) -> bytes:
     d = drives or {}
+    gain = QUIET.get(name, gain)
     energy, fear, boredom = d.get("energy", 0.6), d.get("fear", 0.0), d.get("boredom", 0.0)
     p = (0.9 + 0.25 * energy - 0.1 * boredom) * random.uniform(0.94, 1.06)
     s = (1.15 - 0.3 * energy + 0.25 * boredom) * random.uniform(0.9, 1.1)

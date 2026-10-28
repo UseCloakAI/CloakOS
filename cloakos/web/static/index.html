@@ -120,6 +120,7 @@
             <div class="status-pill"><span class="live-dot off"></span><span class="conn-label">Offline</span></div>
           </div>
           <div class="topbar-right">
+            <button class="estop-btn" type="button" onclick="toggleEstop()" title="Emergency stop (Shift+Space)" aria-label="Emergency stop">STOP</button>
             <button class="icon-btn freeze-btn" type="button" onclick="toggleFreeze()" title="Freeze (or triple-tap Vector's button)" aria-label="Freeze">
               <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M4.5 6.5l15 11M19.5 6.5l-15 11M9 4l3 2.5L15 4M9 20l3-2.5 3 2.5"/></svg>
             </button>
@@ -498,5 +499,7 @@
 <script type="module" src="/static/sim.js"></script>
 <script src="/static/train.js"></script>
 <script type="module" src="/static/map.js"></script>
+<div id="estop-banner" hidden>EMERGENCY STOP · everything halted · <b>Shift+Space</b> or <button type="button" onclick="toggleEstop()">Release</button></div>
+<div id="estop-clear" hidden>✓ Emergency stop released · all clear</div>
 </body>
 </html>
