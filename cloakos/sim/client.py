@@ -178,7 +178,7 @@ class SimClient(VectorClient):
     async def eye_color(self, hue: float, saturation: float) -> None:
         return None
 
-    async def master_volume(self, level: int) -> None:
+    async def master_volume(self, volume: int) -> None:
         return None
 
     async def face_detection(self, on: bool = True) -> None:

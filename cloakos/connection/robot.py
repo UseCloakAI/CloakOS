@@ -82,6 +82,7 @@ class RobotLink:
                 await self._connect()
                 backoff = 1.0
                 hold = asyncio.create_task(self._hold_control(), name="hold-control")
+                vsync = asyncio.create_task(self._volume_sync(), name="volume-sync")
                 await self._watch()
             except asyncio.CancelledError:
                 raise
@@ -94,6 +95,7 @@ class RobotLink:
             finally:
                 if hold is not None:
                     hold.cancel()
+                    vsync.cancel()
                 await self._disconnect()
             if self._stop.is_set():
                 break
@@ -147,6 +149,8 @@ class RobotLink:
             await client.face_detection(True)
         except Exception as e:
             log.warning("face detection: %s", e)
+        self._serial = bot.serial
+        await self._pull_wirepod_volume()           # changed in wire-pod while CloakOS was off? keep that
         await self._push_volume()
         try:
             self.anim_triggers = await client.anim_triggers()
@@ -239,16 +243,66 @@ class RobotLink:
 
     # ── volume ─────────────────────────────────────────────────
 
+    # One volume everywhere: the CloakOS slider, wire-pod's volume setting and Vector's own speaker
+    # (its settings, so 0 is a real mute of every sound). Slider -> both; wire-pod -> slider.
+
+    @staticmethod
+    def _level(volume: int) -> int:
+        """0..100 -> Vector's settings scale: 0 MUTE, 1 LOW .. 5 HIGH (wire-pod uses the same)."""
+        return 0 if volume <= 0 else 1 + min(4, round(volume / 25))
+
     async def set_volume(self, volume: int) -> None:
         self.volume = max(0, min(100, int(volume)))
+        self._vol_set_t = time.time()
         if self.client is not None:
             await self._push_volume()
 
     async def _push_volume(self) -> None:
         try:
-            await self.client.master_volume(round(self.volume / 25))
+            await self.client.master_volume(self.volume)
         except Exception as e:
             log.debug("master volume: %s", e)
+        await self._wirepod("/api-sdk/volume", volume=self._level(self.volume))
+
+    async def _wirepod(self, path: str, **params: Any) -> str | None:
+        """Best effort call to wire-pod's SDK app for this robot (None if there's no wire-pod)."""
+        serial = getattr(self, "_serial", None)
+        if self.target == "sim" or not serial:
+            return None
+        import httpx
+        url = ((self.full_cfg.get("wirepod", {}) or {}).get("url") or "http://escapepod.local:8080").rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=6) as http:
+                r = await http.get(url + path, params={"serial": serial, **params})
+            return r.text if r.status_code == 200 else None
+        except Exception as e:
+            log.debug("wire-pod %s: %s", path, e)
+            return None
+
+    async def _pull_wirepod_volume(self) -> None:
+        """If wire-pod's volume moved (changed in its web page), move the slider to match."""
+        import json
+        text = await self._wirepod("/api-sdk/get_sdk_settings")
+        try:
+            level = int(json.loads(text)["master_volume"]) if text else None
+        except (ValueError, KeyError, TypeError):
+            return
+        if level is None or level == self._level(self.volume):
+            return
+        self.volume = {0: 0, 1: 10, 2: 25, 3: 50, 4: 75, 5: 100}.get(level, self.volume)
+        log.info("volume set in wire-pod: %d", self.volume)
+        self.bus.emit("volume.changed", volume=self.volume, source="wirepod")
+        try:
+            from ..web.setup_api import env_path, write_env
+            write_env(env_path(), {"CLOAK_VOLUME": str(self.volume)})
+        except Exception as e:
+            log.debug("saving volume: %s", e)
+
+    async def _volume_sync(self) -> None:
+        while True:
+            await asyncio.sleep(10)
+            if time.time() - getattr(self, "_vol_set_t", 0.0) > 8:      # not while the slider is moving
+                await self._pull_wirepod_volume()
 
     # ── control ────────────────────────────────────────────────
 

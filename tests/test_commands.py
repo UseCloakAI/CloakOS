@@ -129,3 +129,29 @@ def test_charging_rules_never_wander_off_half_charged():
         assert modes[-1] == "go_home"
 
     asyncio.run(run())
+
+
+async def test_volume_follows_wirepod_and_mutes_everything(tmp_path, monkeypatch):
+    from cloakos.bus import Bus
+    from cloakos.connection.robot import RobotLink
+    from cloakos.world import World
+
+    monkeypatch.setenv("CLOAK_ENV_FILE", str(tmp_path / ".env"))
+    link = RobotLink({"robot": {"volume": 80}}, Bus(), World())
+    link.target, link._serial = "real", "00e20100"
+    calls = []
+
+    class Client:
+        async def master_volume(self, v):
+            calls.append(("robot", v))
+
+    async def fake(path, **params):
+        calls.append((path, params))
+        return '{"master_volume": 3}' if path.endswith("get_sdk_settings") else "done"
+
+    link.client, link._wirepod = Client(), fake
+    await link._pull_wirepod_volume()                 # changed in wire-pod's page -> slider follows
+    assert link.volume == 50
+    await link.set_volume(0)                          # slider to 0 -> a real mute on the robot and in wire-pod
+    assert ("robot", 0) in calls and ("/api-sdk/volume", {"volume": 0}) in calls
+    assert link._level(100) == 5 and link._level(10) == 1

@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator, Callable
 import grpc
 
 from .discovery import BotInfo
-from .pb import behavior_pb2, messages_pb2, shared_pb2
+from .pb import behavior_pb2, messages_pb2, settings_pb2, shared_pb2
 from .pb import external_interface_pb2_grpc as rpc
 
 log = logging.getLogger(__name__)
@@ -230,9 +230,16 @@ class VectorClient:
     async def eye_color(self, hue: float, saturation: float) -> None:
         await self.stub.SetEyeColor(m.SetEyeColorRequest(hue=hue, saturation=saturation), timeout=2)
 
-    async def master_volume(self, level: int) -> None:
-        """Vector's own speaker volume (stock sounds + ours): 0 low .. 4 high."""
-        await self.stub.SetMasterVolume(m.MasterVolumeRequest(volume_level=max(0, min(4, level))), timeout=5)
+    async def master_volume(self, volume: int) -> None:
+        """Vector's own speaker volume for everything it plays (stock sounds + ours), 0..100.
+        0 is a real mute: the SDK's volume call bottoms out at "low", so it goes through Vector's
+        settings (the same switch as the app's mute), which also sticks across reboots."""
+        volume = max(0, min(100, int(volume)))
+        if volume > 0:
+            await self.stub.SetMasterVolume(m.MasterVolumeRequest(volume_level=min(4, round(volume / 25))), timeout=5)
+        level = 0 if volume == 0 else 1 + min(4, round(volume / 25))         # settings: MUTE, LOW .. HIGH
+        await self.stub.UpdateSettings(settings_pb2.UpdateSettingsRequest(
+            settings=settings_pb2.RobotSettingsConfig(master_volume=level)), timeout=5)
 
     async def face_detection(self, on: bool = True) -> None:
         await self.stub.EnableFaceDetection(m.EnableFaceDetectionRequest(enable=on), timeout=5)
