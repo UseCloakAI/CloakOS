@@ -41,6 +41,7 @@ class Wander(Behavior):
         interest = boredom = 0.0
         steer = pace = 0.0
         head_goal = 5.0
+        avoid_side = rnd.choice((-1.0, 1.0))      # which way it veers from obstacles (sticks, so it doesn't dither)
         t0 = time.time()
         dt = 0.1
 
@@ -74,8 +75,15 @@ class Wander(Behavior):
 
             # avoid what's close in front and edges
             avoid = 0.0
-            if w.proximity_mm is not None and w.proximity_mm < 220:
-                avoid = (1.0 - w.proximity_mm / 220) * (1 if noise(4, t) >= 0 else -1) * 1.6
+            prox = w.proximity_mm
+            if prox is not None and prox < 120:            # right in front: stop, back off, turn away for real
+                await body.drive(0, 0, self.name)
+                await body.straight(-40, 60)
+                await body.turn(avoid_side * rnd.uniform(70, 130), 70)
+                avoid_side = -avoid_side if rnd.random() < 0.3 else avoid_side
+                continue
+            if prox is not None and prox < 300:            # coming up: slow down and veer off firmly
+                avoid = (1.0 - (prox - 120) / 180) * avoid_side * 1.8
             if near_edge(w):
                 await body.drive(0, 0, self.name)
                 await body.turn(self._away_from_edge(body, rnd), 70)       # waits for the back-off first
@@ -92,8 +100,12 @@ class Wander(Behavior):
             # the path: wobble + pull + avoid, eased so it never jerks
             wobble = noise(0, t) * 0.32 + noise(1, t) * 0.14 * (0.5 + energy)
             steer_goal = max(-1.0, min(1.0, wobble + pull + avoid))
-            steer += (steer_goal - steer) * min(1.0, dt * 3.0)
-            pace_goal = (45 + 55 * energy) * (0.75 + 0.25 * noise(3, t)) * (1.0 - 0.6 * abs(avoid))
+            steer += (steer_goal - steer) * min(1.0, dt * (8.0 if avoid else 3.0))   # react fast to obstacles
+            # Vector reacts ~0.4 s late (calibration), so stay at speeds that stop in a couple of cm,
+            # and slower still near edges it has felt before
+            near_old_edge = abs(self._edge_memory(w)) > 0.05
+            pace_goal = (35 + 35 * energy) * (0.75 + 0.25 * noise(3, t)) * (1.0 - 0.6 * min(1.0, abs(avoid)))
+            pace_goal *= 0.5 if near_old_edge else 1.0
             if target is not None:
                 pace_goal *= 0.55 + 0.45 * (1 - min(1.0, target[1] * 3))     # creep up on things
             pace += (pace_goal - pace) * min(1.0, dt * 2.0)

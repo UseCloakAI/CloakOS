@@ -336,7 +336,7 @@ function toggleDark() {
 async function loadInfo() {
   try { info = await (await fetch('/api/info')).json(); } catch { return; }
   const kv = (el, rows) => { $(el).innerHTML = rows.map(([k, v, cls]) => `<dt>${esc(k)}</dt><dd class="${cls || ''}">${esc(v ?? '—')}</dd>`).join(''); };
-  kv('#kv-robot', [['wire-pod', info.wirepod], ['Connection', S ? S.connection : '—'], ['Name', info.robot.name], ['Serial', info.robot.serial], ['Address', info.robot.host], ['Control', S && S.has_control ? 'held by Cloak' : 'stock Vector'], ['Eyes on Vector', !S || !S.eyes ? '—' : S.eyes.error ? 'not showing: ' + S.eyes.error : S.eyes.sent_ok ? `showing (${S.eyes.sent_ok} frames)` : 'none sent yet']]);
+  kv('#kv-robot', [['wire-pod', info.wirepod], ['Connection', S ? S.connection : '—'], ['Name', info.robot.name], ['Serial', info.robot.serial], ['Address', info.robot.host], ['Control', S && S.has_control ? 'held by Cloak' : 'stock Vector'], ['Distance sensor', S && S.prox_raw && S.prox_raw.mm !== undefined ? `${S.prox_raw.mm} mm · quality ${S.prox_raw.quality}${S.prox_raw.found ? ' · object' : ''}${S.prox_raw.clear ? ' · clear' : ''}${S.prox_raw.lift ? ' · lift in view' : ''}` : '—'], ['Eyes on Vector', !S || !S.eyes ? '—' : S.eyes.error ? 'not showing: ' + S.eyes.error : S.eyes.sent_ok ? `showing (${S.eyes.sent_ok} frames)` : 'none sent yet']]);
   if (info.robot.name) $('#sb-name').textContent = info.robot.name;
   if (info.wirepod) $('#wp-link').href = info.wirepod;
   if (info.product) kv('#kv-about', [['Product', info.product.name], ['Version', info.product.version]]);
