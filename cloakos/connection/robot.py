@@ -69,9 +69,11 @@ class RobotLink:
         """Connect and stay connected until stop() is called."""
         backoff = 1.0
         while not self._stop.is_set():
+            hold = None
             try:
                 await self._connect()
                 backoff = 1.0
+                hold = asyncio.create_task(self._hold_control(), name="hold-control")
                 await self._watch()
             except asyncio.CancelledError:
                 raise
@@ -82,6 +84,8 @@ class RobotLink:
                 self.hint = hint_for(msg)
                 log.warning("robot link: %s", msg)
             finally:
+                if hold is not None:
+                    hold.cancel()
                 await self._disconnect()
             if self._stop.is_set():
                 break
@@ -171,6 +175,21 @@ class RobotLink:
             if self._kick.is_set() and not self._stop.is_set():
                 raise _Retarget()
 
+    async def _hold_control(self) -> None:
+        """The moment stock Vector takes control back, ask for it again (not on the next heartbeat)."""
+        while True:
+            client = self.client
+            if client is None:
+                return
+            await client.control_changed.wait()
+            if self._want_control and not client.has_control and self.client is client:
+                await asyncio.sleep(0.05)
+                log.info("stock Vector took over; taking control back")
+                try:
+                    await self._request_control()
+                except Exception as e:
+                    log.debug("re-request control: %s", e)
+
     async def _disconnect(self) -> None:
         client, self.client = self.client, None
         if client is None:
@@ -236,7 +255,7 @@ class RobotLink:
             await self.client.release_control()
 
     async def _request_control(self) -> None:
-        ok = await self.client.request_control(self.cfg.get("control_priority", "default"),
+        ok = await self.client.request_control(self.cfg.get("control_priority", "override"),
                                                float(self.cfg.get("control_timeout_s", 10)))
         if not ok:
             log.warning("behavior control not granted yet")

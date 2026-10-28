@@ -83,9 +83,13 @@ class Body:
         if not self.ready or self.frozen:
             return
         if self._gen != self.link.control_gen:   # new control session: the robot was stopped, resend everything
-            self._gen, prev = self.link.control_gen, Action()
-        if (a.left_mmps, a.right_mmps) != (prev.left_mmps, prev.right_mmps):
-            await self._do("drive_wheels", a.left_mmps, a.right_mmps, 400)
+            self._gen, prev, self._sent = self.link.control_gen, Action(), None
+        wheels = (a.left_mmps, a.right_mmps)
+        if getattr(self.link.world, "cliff", False):  # edge under the nose: no forward (at override priority
+            wheels = (min(0.0, wheels[0]), min(0.0, wheels[1]))   # Vector's own edge stop is off)
+        if wheels != getattr(self, "_sent", None):
+            await self._do("drive_wheels", wheels[0], wheels[1], 400)
+            self._sent = wheels
         if a.head_rate != prev.head_rate:
             await self._do("move_head", a.head_rate)
         if a.lift_rate != prev.lift_rate:
@@ -96,6 +100,7 @@ class Body:
 
     async def stop(self) -> None:
         self.cmd = Action()
+        self._sent = (0.0, 0.0)
         await self._do("stop_all")
 
     # ── discrete ───────────────────────────────────────────────
@@ -137,6 +142,8 @@ class Body:
         await self._do("turn", deg, speed_dps)
 
     async def straight(self, mm: float, speed_mmps: float = 80) -> None:
+        if mm > 0 and getattr(self.link.world, "cliff", False):
+            return                                      # never roll forward over an edge
         self._mark("straight", mm=mm)
         await self._do("straight", mm, speed_mmps)
 

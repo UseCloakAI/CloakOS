@@ -12,7 +12,7 @@ robot:                # all optional: blank = take it from wire-pod. Set serial 
   guid: null
   name: null          # TLS name; read from the robot's cert if blank
   cert_dir: data/certs
-  control_priority: default   # default | override (also ignores cliffs/low battery: careful)
+  control_priority: override  # override = stock Vector behaviors can't take over (CloakOS does the edge stop) | default
   connect_timeout_s: 10
   heartbeat_s: 3
   max_backoff_s: 30
