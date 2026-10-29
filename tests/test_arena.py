@@ -33,6 +33,7 @@ async def test_arena_scores_a_real_run_and_feeds_desk_size(tmp_path, monkeypatch
 
 async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch):
     import math
+    import time
 
     from cloakos.arena.session import Arena
 
@@ -50,14 +51,14 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
     class Body:
         def __init__(self, bot): self.bot = bot
 
-        async def drive(self, l, r, source=None): self.bot["v"] = (l, r)
+        async def drive(self, l, r, source=None): self.bot["q"].append((time.time() + 0.4, (l, r)))   # lands 0.4 s late
 
         async def leave_home(self):
             w.on_charger = False
             self.bot["left"] = True
 
     w = World()
-    bot = {"x": 0.3, "y": 0.15, "th": math.pi / 2, "v": (0.0, 0.0), "odo0": 1.0}   # odometry yaw is offset by 1 rad
+    bot = {"x": 0.3, "y": 0.15, "th": math.pi / 2, "v": (0.0, 0.0), "odo0": 1.0, "q": []}   # odometry yaw is offset by 1 rad
 
     class Brain:
         estop, frozen, mode, link, trainer, world = False, False, "auto", Link(), Trainer(), w
@@ -66,7 +67,9 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
 
         async def go_home(self):
             await self.set_mode("home")
+            t0 = time.time()
             ok = await a.route_to_charger(timeout=40)
+            bot["took"] = time.time() - t0
             bot["arrived"] = ok
             w.on_charger, w.charging = True, True
             return ok
@@ -78,6 +81,8 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
 
     async def physics():                              # the robot moves; the camera and odometry see it
         while True:
+            while bot["q"] and bot["q"][0][0] <= time.time():
+                bot["v"] = bot["q"].pop(0)[1]
             l, r = bot["v"]
             v, om = (l + r) / 2 / 1000, (r - l) / 1000 / 0.048
             bot["x"] += v * math.cos(bot["th"]) * 0.05
@@ -98,6 +103,8 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
         if a.dock_state == "charging":
             break
     assert bot.get("arrived"), "never reached the approach point"
+    print("route took", round(bot["took"], 1), "s")
+    assert bot["took"] < 20                                                         # ~1 m with 0.4 s lag: no zigzagging
     assert math.hypot(bot["x"] - 1.02, bot["y"] - 0.45) < 0.06                      # 18 cm in front of the charger
     assert abs(math.atan2(math.sin(bot["th"] - math.pi), math.cos(bot["th"] - math.pi))) > 2.9   # facing it (yaw ~ 0)
     w.battery_level, w.charging = 3, False             # charged
