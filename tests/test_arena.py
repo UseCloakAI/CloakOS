@@ -107,3 +107,51 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
             break
     assert bot.get("left") and Brain.mode == "auto"
     sim.cancel()
+
+
+async def test_arena_page_puts_vector_in_teleop_and_back(tmp_path, monkeypatch):
+    from cloakos.arena.session import Arena
+
+    monkeypatch.setenv("CLOAK_ENV_FILE", str(tmp_path / ".env"))
+
+    class Brain:
+        estop, mode = False, "auto"
+
+        async def set_mode(self, m): Brain.mode = m
+
+    a = Arena(Brain(), tmp_path)
+    assert await a.enter() == "teleop"
+    assert await a.leave() == "auto"
+    Brain.mode = "home"                                  # charging: leave it alone
+    assert await a.enter() == "home" and await a.leave() == "home"
+
+
+async def test_a_run_can_start_from_the_charger(tmp_path, monkeypatch):
+    from cloakos.arena.session import Arena
+
+    monkeypatch.setenv("CLOAK_ENV_FILE", str(tmp_path / ".env"))
+
+    class World:
+        on_charger, battery_low, pose = True, False, None
+
+    class Link:
+        target, edge_events = "real", 0
+
+    class Trainer:
+        root = tmp_path / "policies"
+
+    class Body:
+        async def leave_home(self):
+            World.on_charger = False
+            a.update_pose({"ok": True, "x": 0.5, "y": 0.3, "yaw": 0.0})
+
+    class Brain:
+        estop, mode, link, trainer, world, body = False, "home", Link(), Trainer(), World(), Body()
+
+        async def set_mode(self, m): Brain.mode = m
+
+    a = Arena(Brain(), tmp_path)
+    a.save_config({"corners": [[0, 0], [1, 0], [1, 1], [0, 1]], "size": [140, 60]})
+    assert await a.start(None, 30) is None
+    assert not World.on_charger and Brain.mode == "teleop" and a.running
+    await a.stop()

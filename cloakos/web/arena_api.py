@@ -43,6 +43,14 @@ def make_arena_router(brain: "Brain") -> APIRouter:
         why = await arena().start(body.get("policy") or None, float(body.get("seconds", 120)))
         return {"ok": why is None, "error": why}
 
+    @r.post("/enter")
+    async def enter() -> dict[str, Any]:
+        return {"mode": await arena().enter()}
+
+    @r.post("/leave")
+    async def leave() -> dict[str, Any]:
+        return {"mode": await arena().leave()}
+
     @r.post("/dock")
     async def dock() -> dict[str, Any]:
         why = arena().dock()

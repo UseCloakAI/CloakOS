@@ -392,6 +392,7 @@
   }
 
   window.arenaShown = on => {
+    if (on !== shown) post(on ? '/api/arena/enter' : '/api/arena/leave').catch(() => {});   // Teleop while you're here
     shown = on;
     clearInterval(poll);
     if (on) {
