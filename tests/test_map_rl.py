@@ -252,5 +252,15 @@ def test_guided_plan_and_keep_training(tmp_path):
     assert p["stage"] == 2 and p["start"]["teacher"] == "desk-map-1" and p["start"]["real"] == ["ep1"]
     t.set_auto(True)
     assert t.auto_tick([]) == "run1" and started[-1]["hours"] == t.SESSION_H
-    t.set_auto(False)
-    assert t.auto_tick([]) is None and not json.loads((tmp_path / "keep_training.json").read_text())["on"]
+    # the Mac dies mid-session: the session's folder has a checkpoint but no "finished"
+    run = t.root / "run1"
+    run.mkdir()
+    (run / "meta.json").write_text(json.dumps({"task": "desk", "sensors": "map", "hours": 2, "trained_s": 1800}))
+    (run / "model.zip").write_bytes(b"x")
+    resumed = []
+    t.resume_run = lambda name: resumed.append(name) or name
+    t2 = Trainer(tmp_path)                             # CloakOS starts again after the reboot
+    t2.start, t2.running, t2.resume_run = t.start, t.running, t.resume_run
+    assert t2.auto["on"] and t2.auto_tick([]) == "run1" and resumed == ["run1"]
+    t2.set_auto(False)
+    assert t2.auto_tick([]) is None and not json.loads((tmp_path / "keep_training.json").read_text())["on"]

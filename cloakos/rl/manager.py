@@ -95,6 +95,14 @@ class Trainer:
 
     SESSION_H = 2.0                    # each session ends with a test, so the best driver is always kept
 
+    def _paused(self, name: str) -> bool:
+        """A run that stopped before its time was up and has a checkpoint to continue from."""
+        try:
+            meta = json.loads((self.root / name / "meta.json").read_text())
+        except (OSError, ValueError):
+            return False
+        return not meta.get("finished") and ((self.root / name / "model.zip").exists() or (self.root / name / "student.pt").exists())
+
     def set_auto(self, on: bool) -> None:
         self.auto = {"on": on, "since": time.time(), "sessions": 0, "trained_s": 0.0} if on else {**self.auto, "on": False}
         self._save_auto()
@@ -114,6 +122,16 @@ class Trainer:
         now, last = time.time(), self.auto.get("last")
         if now < self.auto.get("wait_until", 0):
             return None
+        if last and last.get("session") and self._paused(last["session"]):
+            # the Mac died (or CloakOS was closed) mid-session: carry on with that one, from its last save
+            try:
+                self.resume_run(last["session"])
+                last["start"] = now
+                self._save_auto()
+                return last["session"]
+            except (RuntimeError, ValueError) as e:
+                log.warning("keep training: couldn't continue %s: %s", last["session"], e)
+                last["session"] = None
         if last and last.get("name"):
             ran = now - last["start"]
             self.auto["trained_s"] = self.auto.get("trained_s", 0.0) + ran
@@ -130,7 +148,8 @@ class Trainer:
             self.auto["error"] = str(e)
             self._save_auto()
             return None
-        self.auto.update(sessions=self.auto.get("sessions", 0) + 1, last={"name": name, "start": time.time(), "stage": p["stage"]}, error=None)
+        self.auto.update(sessions=self.auto.get("sessions", 0) + 1, error=None,
+                         last={"name": name, "session": name, "start": time.time(), "stage": p["stage"]})
         self._save_auto()
         return name
 
