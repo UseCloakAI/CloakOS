@@ -129,6 +129,8 @@ def main(argv: list[str] | None = None) -> None:
                 row["reward"] = round(float(np.mean([e["r"] for e in recent])), 3)
                 row["length"] = round(float(np.mean([e["l"] for e in recent])), 1)
                 row["success"] = round(float(np.mean([e["success"] for e in recent])), 3)
+                if a.task in ("desk", "wander"):                 # no goal to reach here: success = stayed on
+                    row["success"] = round(1 - float(np.mean([e["fell"] for e in recent])), 3)
                 row["fell"] = round(float(np.mean([e["fell"] for e in recent])), 3)
                 row["bumps"] = round(float(np.mean([e["bumps"] for e in recent])), 2)
             progress.write(json.dumps(row) + "\n")

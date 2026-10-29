@@ -131,7 +131,9 @@
     $('#rl-bar-fill').style.width = `${(frac * 100).toFixed(1)}%`;
     const el = p && p.since ? Date.now() / 1000 - p.since : 0;
     const left = timed ? p.hours * 3600 * (1 - frac) : l.fps && goal > done ? (goal - done) / l.fps : null;
-    const best = l.success != null ? `stays on the desk ${(l.success * 100).toFixed(0)}% of the time` : null;
+    // desk/roaming runs don't report "success" (only goto does): staying on is 1 - falls
+    const stay = p && (p.task === 'desk' || p.task === 'wander') ? (l.fell != null ? 1 - l.fell : null) : l.success;
+    const best = stay != null ? `stays on the desk ${(stay * 100).toFixed(0)}% of the time` : null;
     const stats = [
       p && [timed ? 'Done' : 'Progress', `${(frac * 100).toFixed(0)}%`],
       el && ['Running', dur(el)],
@@ -195,6 +197,8 @@
     g.strokeStyle = ink; g.globalAlpha = 0.15; g.lineWidth = 1;
     for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(40, 10 + i * (h - 40) / 4); g.lineTo(w - 10, 10 + i * (h - 40) / 4); g.stroke(); }
     g.globalAlpha = 1;
+    const fix = pol && (pol.task === 'desk' || pol.task === 'wander');
+    rows = rows.map(r => fix && r.fell != null ? { ...r, success: 1 - r.fell } : r);
     const pts = rows.filter(r => r.reward != null), lines = LINES[pol && pol.task] || ['reward', 'success'];
     $('#rl-legend').innerHTML = `<span style="color:${acc}">■ ${lines[0]}</span>` + (pts.some(r => r.success) ? ` <span style="color:${grn}">■ ${lines[1]} (0–100%)</span>` : '') +
       ` <span class="sc-meta">${esc(chartName || '')}</span>`;
