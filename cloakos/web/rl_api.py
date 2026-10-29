@@ -21,8 +21,9 @@ def make_rl_router(brain: "Brain") -> APIRouter:
     @r.get("")
     async def status() -> dict[str, Any]:
         lp = brain.learned
+        recs = [e for e in await asyncio.to_thread(brain.recorder.list_episodes) if e["frames"]]
         return {"available": available(), "tasks": TASKS, "sensors": SENSORS, "running": t.running(),
-                "recordings": [e for e in await asyncio.to_thread(brain.recorder.list_episodes) if e["frames"]],
+                "recordings": recs, "plan": await asyncio.to_thread(t.plan, recs), "auto": t.auto,
                 "policies": await asyncio.to_thread(t.policies),
                 "active": {"name": lp.policy_name, "task": lp.spec.task if lp.spec else None, "goal": lp.goal,
                            "status": lp.status, "on": brain.mode == "learned", "blocked": lp.deployable()}}
@@ -59,6 +60,29 @@ def make_rl_router(brain: "Brain") -> APIRouter:
             brain.calibrator.task.cancel()
         return {"ok": True}
 
+    @r.post("/keep")
+    async def keep(body: dict = Body(...)) -> JSONResponse:
+        """Keep training on/off. Off also stops the session that's running."""
+        on = bool(body.get("on"))
+        t.set_auto(on)
+        if on:
+            recs = [e for e in await asyncio.to_thread(brain.recorder.list_episodes) if e["frames"]]
+            await asyncio.to_thread(t.auto_tick, recs)
+        else:
+            await asyncio.to_thread(t.stop)
+        return JSONResponse({"ok": True, "auto": t.auto, "error": t.auto.get("error")})
+
+    @r.post("/next")
+    async def train_next(body: dict = Body(default={})) -> JSONResponse:
+        """The guided button: train whatever's next (see plan) for a number of hours."""
+        recs = [e for e in await asyncio.to_thread(brain.recorder.list_episodes) if e["frames"]]
+        p = await asyncio.to_thread(t.plan, recs)
+        try:
+            name = t.start(**p["start"], steps=0, hours=float(body.get("hours", 8)))
+        except (RuntimeError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, "name": name, "plan": p})
+
     @r.post("/train")
     async def train(body: dict = Body(...)) -> JSONResponse:
         try:
@@ -90,6 +114,8 @@ def make_rl_router(brain: "Brain") -> APIRouter:
 
     @r.post("/stop")
     async def stop() -> dict[str, Any]:
+        if t.auto.get("on"):
+            t.set_auto(False)                           # Stop means stop, not "start the next session"
         await asyncio.to_thread(t.stop)
         return {"ok": True}
 

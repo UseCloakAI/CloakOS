@@ -230,3 +230,27 @@ def test_edge_reflex_matches_robot():
     s2 = {**s, "cliff": False}
     tail = [r.step(s2) for _ in range(30)]
     assert 0.0 in tail and tail[-1] is None      # stops once clear, then gives the wheels back
+
+
+def test_guided_plan_and_keep_training(tmp_path):
+    import json
+    import time
+
+    from cloakos.rl.manager import Trainer
+
+    t = Trainer(tmp_path)
+    started = []
+    t.start = lambda **kw: started.append(kw) or f"run{len(started)}"
+    t.running = lambda: None
+    assert t.plan()["stage"] == 1 and t.plan()["start"]["task"] == "desk"      # nothing yet: the simulator first
+    d = t.root / "desk-map-1"
+    d.mkdir(parents=True)
+    (d / "meta.json").write_text(json.dumps({"task": "desk", "sensors": "map", "created": 1}))
+    (d / "policy.npz").write_bytes(b"x")
+    (d / "exam.json").write_text(json.dumps({"passed": True, "score": 1050}))
+    p = t.plan([{"name": "ep1", "frames": 50, "created": time.time()}])
+    assert p["stage"] == 2 and p["start"]["teacher"] == "desk-map-1" and p["start"]["real"] == ["ep1"]
+    t.set_auto(True)
+    assert t.auto_tick([]) == "run1" and started[-1]["hours"] == t.SESSION_H
+    t.set_auto(False)
+    assert t.auto_tick([]) is None and not json.loads((tmp_path / "keep_training.json").read_text())["on"]

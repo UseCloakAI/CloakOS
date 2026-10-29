@@ -35,8 +35,9 @@ def make_arena_router(brain: "Brain") -> APIRouter:
 
     @r.post("/pose")
     async def pose(body: dict = Body(...)) -> dict[str, Any]:
-        arena().update_pose(body)
-        return {"ok": True}
+        a = arena()
+        a.update_pose(body)
+        return {"ok": True, **a.imu()}
 
     @r.post("/run")
     async def run(body: dict = Body(...)) -> dict[str, Any]:

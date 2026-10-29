@@ -401,7 +401,8 @@
       g.strokeStyle = '#22c55e'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, Math.max(8, Math.sqrt(f.area) * b.w / PW), 0, Math.PI * 2); g.stroke();
       if (f.dotPx) { const [dx, dy] = P(f.dotPx); g.fillStyle = '#22c55e'; g.fillRect(dx - 3, dy - 3, 6, 6); }
       if (Hinv) {                                    // which way it faces: an arrow 10 cm long on the desk
-        const [hx, hy] = D([f.x + Math.cos(f.yaw) * 0.1, f.y + Math.sin(f.yaw) * 0.1]);
+        const ay = f.show != null ? f.show : f.yaw;
+        const [hx, hy] = D([f.x + Math.cos(ay) * 0.1, f.y + Math.sin(ay) * 0.1]);
         g.strokeStyle = '#22c55e'; g.lineWidth = 3; g.beginPath(); g.moveTo(x, y); g.lineTo(hx, hy); g.stroke();
         const ang = Math.atan2(hy - y, hx - x);
         g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx - 9 * Math.cos(ang - 0.5), hy - 9 * Math.sin(ang - 0.5));
@@ -522,8 +523,13 @@
      should be by now. Plausible ones are blended in; a sudden jump is ignored unless it holds for
      several frames (then it really moved, e.g. picked up). Short dropouts coast on its last motion.
      While the markers were seen in the last second, the shape guess isn't allowed to take over. */
+  let imu = null;                                     // Vector's own gyro: turn rate now, and its heading kept true by the camera
   const T = { pos: null, vel: [0, 0], yaw: 0, om: 0, t: 0, seen: 0, markerT: 0, far: 0, farPos: null, yawFar: 0, px: null, src: 'hold' };
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+  function shown_yaw() {                             // what the arrow shows: the gyro heading if fresh, else the camera's
+    if (imu && imu.yaw != null && performance.now() / 1000 - imu.t < 0.5) return wrap(imu.yaw + imu.om * (performance.now() / 1000 - imu.t));
+    return T.yaw;
+  }
   function smooth(raw) {
     if (!raw) return raw;
     const now = performance.now() / 1000;
@@ -553,15 +559,17 @@
       T.vel = [0.6 * T.vel[0] + 0.4 * v[0] * Math.min(1, cap / (sp || 1)), 0.6 * T.vel[1] + 0.4 * v[1] * Math.min(1, cap / (sp || 1))];
       T.pos = np;
       // heading: predicted from how fast it's turning, then pulled toward the reading (markers: mostly trusted)
+      const fresh = imu && performance.now() / 1000 - imu.t < 0.5;
+      if (fresh) T.om = imu.om;                       // the gyro knows the turn rate right now: no guessing
       const py = wrap(T.yaw + T.om * dt), dy = wrap(m.yaw - py);
       if (Math.abs(dy) > 1.2 && m.src !== 'light') { T.yawFar++; if (T.yawFar >= 3) { T.yaw = m.yaw; T.om = 0; T.yawFar = 0; } }
       else {
         const ny = wrap(py + (m.src === 'light' ? 0.75 : 0.3) * dy);
-        T.om = Math.max(-4, Math.min(4, 0.5 * T.om + 0.5 * wrap(ny - T.yaw) / dt));
+        if (!fresh) T.om = Math.max(-4, Math.min(4, 0.5 * T.om + 0.5 * wrap(ny - T.yaw) / dt));
         T.yaw = ny; T.yawFar = 0;
       }
       T.seen = now; T.px = m.px; T.src = m.src;
-      return { ...m, x: T.pos[0], y: T.pos[1], yaw: T.yaw, desk: T.pos.slice() };
+      return { ...m, x: T.pos[0], y: T.pos[1], yaw: T.yaw, show: shown_yaw(), desk: T.pos.slice() };
     }
     if (now - T.seen < 0.7) {                         // short dropout: coast
       T.vel = [T.vel[0] * 0.8, T.vel[1] * 0.8]; T.pos = pred; T.yaw = wrap(T.yaw + T.om * dt); T.om *= 0.7;
@@ -576,7 +584,8 @@
     else if (f) last = { ...(last || {}), ok: false };
     draw(f);
     if (++tick % 5 === 0) info(f);
-    if (f && H) post('/api/arena/pose', f.ok ? { ok: true, x: f.x, y: f.y, yaw: f.yaw, yaw_src: f.src } : { ok: false }).catch(() => {});
+    if (f && H) post('/api/arena/pose', f.ok ? { ok: true, x: f.x, y: f.y, yaw: f.yaw, yaw_src: f.src } : { ok: false })
+      .then(r => { if (r && r.ok) imu = { yaw: r.yaw, om: r.om, t: performance.now() / 1000 }; }).catch(() => {});
   }
 
   // tracking runs at most 10x a second and never more than about a third of the time, so the page

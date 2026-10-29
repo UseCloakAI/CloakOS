@@ -293,12 +293,15 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--real", nargs="*", default=[], help="recordings from the real desk (teleop)")
     ap.add_argument("--max-samples", type=int, default=150_000, help="memory cap (~15 KB each)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--hours", type=float, default=None, help="train for this long instead of a step count (then test)")
     a = ap.parse_args(argv)
 
     import torch
 
     out = Path(a.out)
     (out / "data").mkdir(parents=True, exist_ok=True)
+    if a.hours:                                           # a time budget: 25k-step rounds until the time's up
+        a.steps, a.rounds = 25_000 * 10_000, 10_000
     a.rounds = a.rounds or int(np.clip(a.steps // 25_000, 4, 400))
     teacher = Path(a.teacher)
     tmeta = json.loads((teacher / "meta.json").read_text())
@@ -341,6 +344,10 @@ def main(argv: list[str] | None = None) -> None:
             print(f"real desk: {len(part['labels'])} teleop steps", flush=True)
     meta.setdefault("rounds", rounds_done)
     meta["rounds_total"] = a.rounds
+    if a.hours and not prev_meta:
+        meta["hours"] = a.hours
+    budget = float(meta.get("hours") or 0) * 3600
+    t_run, trained_s, hit = time.time(), float(meta.get("trained_s", 0.0)), False
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
     progress = (out / "progress.jsonl").open("a")
     opt = torch.optim.Adam(net.parameters(), lr=3e-4 if (a.init or prev_meta) else 1e-3)
@@ -352,6 +359,9 @@ def main(argv: list[str] | None = None) -> None:
     with ctx.Pool(a.envs) as pool:
         for k in range(rounds_done, a.rounds):
             if (out / "STOP").exists():
+                break
+            if budget and trained_s + time.time() - t_run >= budget:     # time's up: that counts as done
+                hit = True
                 break
             beta = 1.0 if k == 0 else 0.5 ** k            # who drives: the teacher at first, the student later
             student = str(out / "policy.npz") if (out / "policy.npz").exists() else None
@@ -395,14 +405,18 @@ def main(argv: list[str] | None = None) -> None:
                    "fell": round(float(np.mean([e["fell"] for e in driven])), 3) if driven else None,
                    "bumps": round(float(np.mean([e["bumps"] for e in driven])), 2) if driven else None,
                    "fps": int(total / max(1e-6, time.time() - t0))}
+            if budget:
+                row["done"] = round(min(1.0, (trained_s + time.time() - t_run) / budget), 4)
             progress.write(json.dumps(row) + "\n")
             progress.flush()
             print(json.dumps(row), flush=True)
             meta.update(rounds=k + 1, trained_steps=total, lessons=len(data))      # a checkpoint every round
+            if budget:
+                meta["trained_s"] = trained_s + time.time() - t_run
             (out / "meta.json").write_text(json.dumps(meta, indent=1))
         progress.close()
         (out / "STOP").unlink(missing_ok=True)
-        if meta["rounds"] < a.rounds or not (out / "policy.npz").exists():
+        if (meta["rounds"] < a.rounds and not hit) or not (out / "policy.npz").exists():
             return                                       # stopped early: left open to Continue
         meta["finished"] = time.time()
         (out / "meta.json").write_text(json.dumps(meta, indent=1))

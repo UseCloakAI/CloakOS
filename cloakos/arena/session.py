@@ -76,9 +76,33 @@ class Arena:
         # between the two, so heading = odometry + offset is good all the time.
         odo = self._odo_yaw()
         if p.get("ok") and odo is not None and p.get("yaw_src") in ("light", "motion"):
-            d = math.atan2(math.sin(float(p["yaw"]) - odo - self._yaw_off), math.cos(float(p["yaw"]) - odo - self._yaw_off))
+            cam = float(p["yaw"])
+            prev = self._yaw_prev
+            if prev is not None:                           # do camera and Vector agree which way is left?
+                dc = math.atan2(math.sin(cam - prev[0]), math.cos(cam - prev[0]))
+                do = math.atan2(math.sin(odo - prev[1]), math.cos(odo - prev[1]))
+                if abs(do) > 0.03 and abs(dc) < 1.0:
+                    self._yaw_corr = max(-5.0, min(5.0, self._yaw_corr + dc * do))
+            self._yaw_prev = (cam, odo)
+            sg = self.yaw_sign
+            d = math.atan2(math.sin(cam - sg * odo - self._yaw_off), math.cos(cam - sg * odo - self._yaw_off))
             self._yaw_off += d if self._yaw_fresh else 0.3 * d
             self._yaw_fresh = False
+
+    _yaw_prev: tuple[float, float] | None = None
+    _yaw_corr = 0.0
+
+    @property
+    def yaw_sign(self) -> int:
+        """+1 normally; -1 if the desk view is mirrored (corners clicked the other way round)."""
+        return -1 if self._yaw_corr < -0.05 else 1
+
+    def imu(self) -> dict[str, Any]:
+        """For the page: the fused heading (Vector's gyro-based heading, kept true by the camera) and
+        the gyro's turn rate right now, so the arrow turns with Vector instead of a camera-lag later."""
+        w = getattr(self.brain, "world", None)
+        gz = float((getattr(w, "gyro", None) or (0, 0, 0))[2]) if w is not None else 0.0
+        return {"yaw": self.heading() if not self._yaw_fresh else None, "om": self.yaw_sign * gz}
 
     _yaw_off, _yaw_fresh = 0.0, True
 
@@ -89,7 +113,8 @@ class Arena:
     def heading(self) -> float | None:
         odo = self._odo_yaw()
         if odo is not None and not self._yaw_fresh:
-            return math.atan2(math.sin(odo + self._yaw_off), math.cos(odo + self._yaw_off))
+            y = self.yaw_sign * odo + self._yaw_off
+            return math.atan2(math.sin(y), math.cos(y))
         return float(self.pose["yaw"]) if self.pose and self.pose.get("ok") else None
 
     # ── the page: the right mode while you're in the Arena ──────

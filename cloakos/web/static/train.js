@@ -1,4 +1,7 @@
-/* Training page: start/stop RL runs, chart progress, pick the policy that drives. */
+/* Training page. The top is the guided path: 3 steps, one "how long" choice, one Start button
+   (the server picks what's next). Everything specific lives under Advanced. Words used here:
+   driver = a trained policy; Simulator driver = the desk teacher (sees exact edges, sim only);
+   Camera driver = the desk student (camera only, runs on the real Vector); test = the exam. */
 (() => {
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -9,8 +12,8 @@
   const DESC = {
     goto: 'Learns to drive to a point by trial and error (PPO) in the simulator, many rooms at once.',
     wander: 'Learns to roam without bumping into things, by trial and error (PPO) in the simulator.',
-    desk: 'The desk teacher: learns to roam a random desk without falling off. It cheats (sees the exact desk edges), so it only runs in the sim. Train this first.',
-    'desk-pixels': 'The desk student: copies the teacher using only the camera (with the real camera lag), so it can run on the real Vector.',
+    desk: 'Simulator driver: learns to roam a random desk without falling off. It sees the exact desk edges, so it only runs in the Simulator. Step 1.',
+    'desk-pixels': 'Camera driver: copies the Simulator driver using only the camera (with its real lag), so it runs on your real Vector. Step 2.',
     recover: 'Learns to get back on its treads after a fall. Experimental: needs a long run.',
   };
   const LINES = { goto: ['reward', 'reaches goal'], wander: ['reward', 'no falls'], desk: ['reward', 'stays on desk'],
@@ -18,7 +21,32 @@
   const num = n => n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : `${n}`;
   const dur = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
     return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
-  let pending = null, follow = true, chartRows = '';
+  let pending = null, follow = true, chartRows = '', trHours = '8', showAll = false;
+  const NAME = { desk: 'Simulator driver', 'desk-pixels': 'Camera driver', goto: 'Go-to driver', wander: 'Roaming driver', recover: 'Get-up driver' };
+  const STEPS = [['Simulator', 'Learns to drive a desk without falling'], ['Camera', 'Learns to do it from the camera only'], ['Your desk', 'Your real drives make it better']];
+
+  function paintPath() {
+    const pl = st.plan; if (!pl) return;
+    const done = [!!(pl.sim && pl.sim.passed), !!(pl.cam && pl.cam.passed), false];
+    $('#tr-path').innerHTML = STEPS.map(([t, d], i) => {
+      const cls = i + 1 === pl.stage ? 'now' : done[i] ? 'done' : '';
+      return `<div class="tr-step ${cls}"><span class="n">${done[i] ? '✓ ' : ''}Step ${i + 1}</span><b>${t}</b><span>${d}</span></div>`;
+    }).join('');
+    const from = pl.continues_from ? `It continues from your best one so far, <i>${esc(pl.continues_from)}</i>.` : 'It starts fresh.';
+    const drives = pl.stage >= 2 ? (pl.new_drives ? ` It also learns from ${pl.new_drives} new recorded drive${pl.new_drives > 1 ? 's' : ''}.`
+      : pl.stage === 3 ? ' Tip: record a few drives on your desk first (Teleop, then "Record a drive" in the sidebar), they help the most now.' : '') : '';
+    const now = st.running || (st.auto && st.auto.on);
+    $('#tr-next').innerHTML = `<b>${now ? 'Now' : 'Next'}: ${esc(pl.title)}</b>${esc(pl.why)} ${now ? '' : from}${now ? '' : drives}`;
+  }
+  window.trLen = h => { trHours = h; document.querySelectorAll('.tr-opt').forEach(b => b.classList.toggle('on', b.dataset.h === h)); };
+  window.trStart = async () => {
+    pending = 'start'; follow = true; paintRun(null); $('#tr-start').disabled = true; $('#tr-start').textContent = 'Starting…';
+    const r = trHours === 'keep' ? await post('/api/rl/keep', { on: true }) : await post('/api/rl/next', { hours: +trHours });
+    if (!r.ok || r.error) { pending = null; alert(r.error || 'Could not start'); }
+    $('#tr-start').disabled = false; $('#tr-start').textContent = 'Start training';
+    fast();
+  };
+  window.rlMore = () => { showAll = !showAll; refresh(); };
 
   async function refresh() {
     try { st = await (await fetch('/api/rl')).json(); } catch { return; }
@@ -43,9 +71,12 @@
     $('#rl-stop').disabled = !!(run && run.stopping) || pending === 'stop';
     $('#rl-stop').textContent = run && run.stopping || pending === 'stop' ? 'Saving…' : 'Stop and save';
     paintRun(run);
+    paintPath();
+    $('#tr-go').hidden = !!run || pending === 'start' || !!(st.auto && st.auto.on);
+    $('#tr-start').disabled = !!st.available;
 
     const a = st.active;
-    const kv = [['Policy', a.name || 'none'], ['Skill', a.task || '—'], ['Mode', a.on ? 'Learned (driving)' : 'not selected'],
+    const kv = [['Driver', a.name || 'none'], ['Kind', NAME[a.task] || a.task || '—'], ['Driving', a.on ? 'yes' : 'no'],
       ['Status', a.blocked || a.status]];
     if (a.task === 'goto') kv.push(['Goal', a.goal ? `${a.goal[0].toFixed(2)}, ${a.goal[1].toFixed(2)} m` : 'none (double-click the sim floor)']);
     $('#kv-rl-active').innerHTML = kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
@@ -53,7 +84,10 @@
 
     if (run && follow) chartName = run.name;
     if (!list.some(p => p.name === chartName)) chartName = list.length ? list[0].name : null;
-    $('#rl-policies').innerHTML = list.map(card).join('') || '<p class="tele-note">None yet. Pick a skill above and hit Start; a quick run takes a few minutes.</p>';
+    const shown = showAll ? list : list.slice(0, 5);
+    $('#rl-policies').innerHTML = shown.map(card).join('') || '<p class="tele-note">None yet. Hit Start training above.</p>';
+    $('#rl-more').hidden = list.length <= 5;
+    $('#rl-more').textContent = showAll ? 'Show fewer' : `Show all ${list.length}`;
     if (chartName) {
       const rows = await (await fetch(`/api/rl/progress/${encodeURIComponent(chartName)}`)).json();
       const key = chartName + JSON.stringify(rows.slice(-1)) + rows.length;
@@ -62,55 +96,70 @@
   }
 
   function paintRun(p) {
-    const box = $('#rl-run');
-    if (!p && pending !== 'start') { box.hidden = true; return; }
+    const box = $('#rl-run'), auto = st && st.auto && st.auto.on;
+    if (!p && pending !== 'start' && !auto) { box.hidden = true; return; }
     box.hidden = false;
-    const l = (p && p.last) || {}, goal = (p && p.steps) || 0, done = l.steps || 0;
-    const startup = !p || !p.last, exam = p && !p.stopping && goal && done >= goal;
+    const l = (p && p.last) || {}, timed = p && p.hours, goal = (p && p.steps) || 0, done = l.steps || 0;
+    const frac = timed ? (l.done || 0) : goal ? Math.min(1, done / goal) : 0;
+    const startup = !p || !p.last, exam = p && !p.stopping && frac >= 1;
     box.classList.toggle('stopping', !!(p && p.stopping));
-    $('#rl-run-name').textContent = p ? `${p.task} · ${p.name}` : 'Starting…';
-    $('#rl-run-tag').textContent = !p ? 'Starting' : p.stopping ? 'Saving' : startup ? 'Warming up' : exam ? 'Exam' : 'Training';
+    const step = p ? ({ desk: 'Step 1 · Simulator', 'desk-pixels': (st.plan && st.plan.stage === 3 ? 'Step 3 · Your desk' : 'Step 2 · Camera') }[p.task] || NAME[p.task] || p.task) : '';
+    $('#rl-run-name').textContent = !p ? (auto ? 'Keep training: starting the next session…' : 'Starting…')
+      : `${auto ? 'Keep training · ' : ''}${step}`;
+    $('#rl-run-tag').textContent = !p ? 'Starting' : p.stopping ? 'Saving' : startup ? 'Warming up' : exam ? 'Testing' : 'Training';
     const bar = $('#rl-bar-fill').parentElement;
-    bar.classList.toggle('wait', startup || exam || !!(p && p.stopping));
-    $('#rl-bar-fill').style.width = goal ? `${Math.min(100, done / goal * 100).toFixed(1)}%` : '0';
+    bar.classList.toggle('wait', !p || startup || exam || !!p.stopping);
+    $('#rl-bar-fill').style.width = `${(frac * 100).toFixed(1)}%`;
     const el = p && p.since ? Date.now() / 1000 - p.since : 0;
-    const left = l.fps && goal > done ? (goal - done) / l.fps : null;
+    const left = timed ? p.hours * 3600 * (1 - frac) : l.fps && goal > done ? (goal - done) / l.fps : null;
+    const best = l.success != null ? `stays on the desk ${(l.success * 100).toFixed(0)}% of the time` : null;
     const stats = [
-      goal && ['Progress', `${num(done)} / ${num(goal)} steps (${Math.min(100, done / goal * 100).toFixed(0)}%)`],
+      p && [timed ? 'Done' : 'Progress', `${(frac * 100).toFixed(0)}%`],
       el && ['Running', dur(el)],
-      left && !exam && ['Time left', `about ${dur(left)}`],
-      l.fps && ['Speed', `${num(l.fps)} steps/s`],
-      l.round && ['Round', `${l.round}`],
+      left && !exam && [auto ? 'Left in this session' : 'Left', `about ${dur(left)}`],
+      best && ['Right now', best],
+      auto && ['Sessions', `${st.auto.sessions || 0} · ${dur((st.auto.trained_s || 0) + el)} in total`],
     ].filter(Boolean);
     $('#rl-run-stats').innerHTML = stats.map(([k, v]) => `<span>${k} <b>${esc(v)}</b></span>`).join('');
-    const tail = ((p && p.log_tail) || '').trim().split('\n').pop() || '';
-    $('#rl-run-phase').textContent = !p ? 'Launching the trainer…'
-      : p.stopping ? 'Finishing the current step and saving. You can Continue it later.'
-      : exam ? 'Done training. Taking the exam on rooms it has never seen…'
-      : startup ? (tail && !tail.startsWith('{') ? `${tail[0].toUpperCase()}${tail.slice(1)}…` : 'Loading the simulator. The first point on the chart shows up after the first batch.')
-      : tail.startsWith('round') ? `${tail[0].toUpperCase()}${tail.slice(1)}…` : '';
+    $('#rl-run-phase').textContent = !p ? (auto ? 'Each session is 2 hours and ends with a test; the better driver is always kept.' : 'Launching…')
+      : p.stopping ? 'Saving where it got to. You can continue it later.'
+      : exam ? 'Done: testing it on desks it has never seen…'
+      : startup ? 'Setting up the simulator…' : (auto ? 'It keeps going, session after session, until you press Stop.' : '');
+    $('#tr-stop').textContent = p && p.stopping ? 'Saving…' : 'Stop';
+    $('#tr-stop').disabled = !!(p && p.stopping);
   }
 
+  function testLine(ex) {
+    if (!ex || !ex.checks) return '';
+    const c = ex.checks, v = k => c[k] && c[k].value;
+    if (c.falls) {
+      const parts = [`stays on the desk in ${Math.round((1 - (v('falls') || 0)) * 100)}% of tests`];
+      if (v('cells_per_min') != null) parts.push(`explores ${v('cells_per_min')} cells a minute`);
+      if (v('bumps_per_min') != null) parts.push(`${v('bumps_per_min')} bumps a minute`);
+      if (v('success') != null) parts.unshift(`reaches the goal ${Math.round(v('success') * 100)}% of the time`);
+      return parts.join(' · ');
+    }
+    return Object.entries(c).map(([k, x]) => `${k.replace(/_/g, ' ')} ${x.value}`).join(' · ');
+  }
   function card(p) {
-    const l = p.last || {}, lines = LINES[p.task] || ['reward', 'success'];
-    const stats = [l.steps != null && `${num(l.steps)}${p.steps ? ` / ${num(p.steps)}` : ''} steps`,
-      l.reward != null && `${lines[0]} ${l.reward}`, l.success != null && `${lines[1]} ${(l.success * 100).toFixed(0)}%`,
-      l.round && `round ${l.round}`].filter(Boolean).join(' · ');
-    const ex = p.exam, tag = p.training ? (p.stopping ? 'Saving' : 'Training') : p.can_continue ? 'Paused'
-      : ex && ex.passed != null ? (ex.passed ? 'Passed' : 'Failed exam') : p.ready ? 'Ready' : 'Empty';
-    const cls = ex && !p.training && !p.can_continue && ex.passed != null ? (ex.passed ? 'res pass' : 'res fail') : '';
-    const checks = ex && ex.checks ? [Object.entries(ex.checks).map(([k, c]) => `${c.ok ? '✓' : '✗'} ${k.replace(/_/g, ' ')} ${c.value ?? '—'} (want ${c.want})`).join(' · '),
-      ex.picked === 'best' && `kept its best moment (${num(ex.picked_steps || 0)} steps), it drove better than the end`,
-      ex.parent && `${ex.beats_parent ? '▲ beats' : '▼ worse than'} ${ex.parent.name} (score ${ex.score != null ? Math.round(ex.score) : '—'} vs ${Math.round(ex.parent.score)})`].filter(Boolean).join('\n') : '';
-    return `<div class="sc-card ${cls} ${p.name === chartName ? 'sel' : ''}">
-      <div class="sc-head"><b>${esc(p.task)}</b><span class="res-tag">${tag}</span>
-        <span class="sc-meta">${p.task.startsWith('desk') || p.task === 'recover' ? '' : `${esc(p.sensors)} sensors · `}${p.built_on || p.resumed_from ? `built on ${esc(p.built_on || p.resumed_from)} · ` : ''}${p.teacher ? `teacher ${esc(p.teacher)} · ` : ''}${new Date((p.created || 0) * 1000).toLocaleString()}</span></div>
-      <p>${esc(stats || (p.training ? 'warming up…' : 'stopped before the first checkpoint'))}${checks ? `<br>${esc(checks).replace(/\n/g, '<br>')}` : ''}</p>
-      <div class="sc-foot"><span class="sc-checks">${esc(p.name)}</span>
-        <button class="chip" onclick="rlChart('${p.name}')">Chart</button>
+    const ex = p.exam, passed = ex && ex.passed;
+    const tag = p.training ? (p.stopping ? 'Saving' : 'Training') : p.can_continue ? 'Paused'
+      : ex && ex.passed != null ? (passed ? 'Passed test' : 'Not passed yet') : p.ready ? 'Not tested' : 'Empty';
+    const cls = !p.training && !p.can_continue && ex && ex.passed != null ? (passed ? 'res pass' : 'res fail') : '';
+    const extra = ex ? [ex.parent && (ex.beats_parent ? '▲ better than the one before' : '▼ not better than the one before'),
+      ex.picked === 'best' && 'kept its best moment, it drove better than the end'].filter(Boolean).join(' · ') : '';
+    const when = new Date((p.created || 0) * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const hrs = p.trained_s ? ` · trained ${dur(p.trained_s)}` : '';
+    const useLabel = p.task === 'desk' ? 'Try in the Simulator' : 'Drive with this';
+    return `<div class="sc-card tr-drv ${cls} ${p.name === chartName ? 'sel' : ''}">
+      <div class="sc-head"><b>${esc(NAME[p.task] || p.task)}</b><span class="res-tag">${tag}</span>
+        <span class="sc-meta">${esc(when)}${hrs}</span></div>
+      <p>${esc(testLine(ex) || (p.training ? 'Training now…' : p.ready ? 'Not tested yet' : 'Stopped before it saved anything'))}${extra ? `<br>${esc(extra)}` : ''}</p>
+      <div class="sc-foot"><span class="sc-checks" title="${esc(p.name)}">${esc(p.name)}</span>
         ${p.can_continue && !st.running ? `<button class="chip" onclick="rlContinue('${p.name}')">Continue</button>` : ''}
-        ${p.ready ? `<button class="chip" onclick="rlUse('${p.name}')">Use</button>` : ''}
-        ${p.training ? '' : `<button class="chip" onclick="rlDelete('${p.name}')">Delete</button>`}</div>
+        ${p.ready && !p.training ? `<button class="chip" onclick="rlUse('${p.name}')">${useLabel}</button>` : ''}
+        <button class="chip" onclick="rlChart('${p.name}')" title="Show its learning curve under Advanced">Chart</button>
+        ${p.training ? '' : `<button class="chip" onclick="rlDelete('${p.name}')" title="Delete">Delete</button>`}</div>
     </div>`;
   }
 
@@ -149,7 +198,7 @@
     if (!st) return;
     const t = $('#rl-task').value, ready = (st.policies || []).filter(p => p.ready && !p.training);
     $('#rl-sensors-row').hidden = ['balance', 'desk', 'desk-pixels', 'recover'].includes(t);
-    $('#rl-desc').textContent = (DESC[t] || '') + ' It runs in the background; the brain keeps working.';
+    $('#rl-desc').textContent = (DESC[t] || '') + ' The big Start button above already picks the right thing for you.';
     keep($('#rl-resume'), '<option value="">Start fresh</option>' + ready.filter(p => p.task === t && (t.startsWith('desk') || p.sensors === $('#rl-sensors').value))
       .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join(''));
     const px = t === 'desk-pixels';
@@ -182,14 +231,14 @@
     pending = 'stop'; $('#rl-stop').disabled = true; $('#rl-stop').textContent = 'Saving…';
     await post('/api/rl/stop'); fast();
   };
-  window.rlChart = name => { chartName = name; chartRows = ''; follow = !!(st && st.running === name); refresh(); };
+  window.rlChart = name => { chartName = name; chartRows = ''; follow = !!(st && st.running === name); document.querySelector('.tr-adv').open = true; refresh(); };
   window.rlUse = async name => {
     const r = await post('/api/rl/use', { name });
-    if (!r.ok) alert(r.error); else if (r.blocked) alert(`Selected. Note: ${r.blocked}`);
+    if (!r.ok) alert(r.error); else if (r.blocked) alert(`It's driving now, but: ${r.blocked}`);
     refresh();
   };
   window.rlDelete = async name => {
-    if (!confirm(`Delete policy ${name}?`)) return;
+    if (!confirm(`Delete this driver (${name})?`)) return;
     await fetch(`/api/rl/${encodeURIComponent(name)}`, { method: 'DELETE' });
     if (chartName === name) chartName = null;
     refresh();

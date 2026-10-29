@@ -146,5 +146,5 @@ class Recorder:
         for d in sorted(self.root.iterdir(), reverse=True)[:limit]:
             steps = d / "steps.jsonl"
             n = sum(1 for _ in open(steps)) if steps.exists() else 0
-            out.append({"name": d.name, "steps": n, "frames": len(list((d / "frames").glob("*.jpg")))})
+            out.append({"name": d.name, "steps": n, "frames": len(list((d / "frames").glob("*.jpg"))), "created": d.stat().st_mtime})
         return out
