@@ -130,7 +130,7 @@ class Arena:
         face = c["yaw"] + math.pi                                    # looking at the charger
         self.dock_state = "driving to the charger"
         end, phase = time.time() + timeout, "drive"
-        best_d, best_t = math.inf, time.time()            # stalled (no headway in 8 s): let Vector's own docking finish
+        best_d, best_t = math.inf, time.time()            # stalled (no headway in 12 s): let Vector's own docking finish
         self.route = {"target": [tx, ty], "charger": [c["x"], c["y"]], "phase": phase}
         try:
             while time.time() < end:
@@ -146,25 +146,28 @@ class Arena:
                     d = math.hypot(tx - x, ty - y)
                     if d < best_d - 0.02:
                         best_d, best_t = d, time.time()
-                    elif time.time() - best_t > 8:
+                    elif time.time() - best_t > 12:
                         self.dock_state = "no headway: Vector's own docking takes it from here"
                         return False
                     if d < 0.04:
                         phase = self.route["phase"] = "face"
                         continue
                     err = math.atan2(math.sin(math.atan2(ty - y, tx - x) - yaw), math.cos(math.atan2(ty - y, tx - x) - yaw))
-                    if abs(err) > 0.6:                               # turn toward it first
-                        s = 55.0 if err > 0 else -55.0
+                    # curve toward it, slower the more it's off; only spin in place when it's well off.
+                    # Gentle gains: commands land ~0.4 s late over Wi-Fi, sharper ones overshoot and zigzag
+                    if abs(err) > 1.2:
+                        s = 45.0 if err > 0 else -45.0
                         await b.body.drive(-s, s, "arena")
                     else:
-                        v, w = min(110.0, 30 + 400 * d), 150 * err
+                        v = min(110.0, 30 + 350 * d) * max(0.25, math.cos(err))
+                        w = max(-45.0, min(45.0, 70 * err))
                         await b.body.drive(v - w, v + w, "arena")
                 else:
                     err = math.atan2(math.sin(face - yaw), math.cos(face - yaw))
                     if abs(err) < 0.15:
                         await b.body.drive(0, 0, "arena")
                         return True
-                    s = 45.0 if err > 0 else -45.0
+                    s = (35.0 if abs(err) > 0.5 else 22.0) * (1 if err > 0 else -1)   # ease in: no overshoot
                     await b.body.drive(-s, s, "arena")
             return False
         finally:
