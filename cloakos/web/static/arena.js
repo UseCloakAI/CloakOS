@@ -110,6 +110,24 @@
       const dh = Math.abs(h - c[0]); return Math.min(dh, 360 - dh) < ht;
     };
   }
+  /* A marker's true colour: at full camera resolution, the most vivid pixels right where you
+     clicked (a ~1 cm sticker is a few pixels in the small view, so averaging there mixes in
+     the black body around it and lands on tan, which matches Vector's own plates). */
+  function sampleVivid(n) {
+    const vw = video.videoWidth, vh = video.videoHeight, R = Math.max(8, Math.round(vw * 0.006));
+    const c = document.createElement('canvas'); c.width = c.height = 2 * R;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(video, Math.round(n[0] * vw) - R, Math.round(n[1] * vh) - R, 2 * R, 2 * R, 0, 0, 2 * R, 2 * R);
+    const d = g.getImageData(0, 0, 2 * R, 2 * R).data, px = [];
+    for (let i = 0; i < d.length; i += 4) { const h = hsv(d[i], d[i + 1], d[i + 2]); if (h[2] > 0.25) px.push(h); }
+    if (px.length < 4) return sample(n);
+    px.sort((a, b) => b[1] * b[2] - a[1] * a[2]);
+    const top = px.slice(0, Math.max(4, Math.round(px.length * 0.25)));
+    const med = k => top.map(p => p[k]).sort((a, b) => a - b)[top.length >> 1];
+    // hue: circular mean of the vivid ones
+    let sx = 0, sy = 0; for (const p of top) { sx += Math.cos(p[0] / 57.3); sy += Math.sin(p[0] / 57.3); }
+    return [(Math.atan2(sy, sx) * 57.3 + 360) % 360, med(1), med(2)];
+  }
   function sample(n) {                              // average colour around a clicked point (5x5 in processing pixels)
     const W = work.width, Hh = work.height, img = wctx.getImageData(0, 0, W, Hh).data;
     const cx = Math.round(n[0] * W), cy = Math.round(n[1] * Hh);
@@ -179,7 +197,8 @@
     let best = null;
     for (const f of F) for (const b of B) {
       const gap = Math.hypot(f.d[0] - b.d[0], f.d[1] - b.d[1]);
-      if (gap < 0.015 || gap > 0.12) continue;               // both on Vector: a few cm apart
+      const want = gapEst();
+      if (gap < 0.015 || gap > 0.12 || (want && Math.abs(gap - want) > 0.015)) continue;   // both on Vector, always the same spacing
       const mid = [(f.d[0] + b.d[0]) / 2, (f.d[1] + b.d[1]) / 2];
       const prev = last && last.desk ? Math.hypot(mid[0] - last.desk[0], mid[1] - last.desk[1]) * 100 : 0;
       const score = -prev + 0.2 * Math.min(f.n, b.n);
@@ -195,6 +214,9 @@
      read a crop of the camera at full resolution, where they're ~10 px and survive blur and JPEG. */
   const roiC = document.createElement('canvas'), roiX = roiC.getContext('2d', { willReadFrequently: true }), RS = 200;
   roiC.width = roiC.height = RS;
+  const gaps = [];                                   // recent marker spacings: their median is the real one
+  const gapEst = () => gaps.length >= 15 ? [...gaps].sort((a, b) => a - b)[gaps.length >> 1] : null;
+  const learnGap = g => { gaps.push(g); if (gaps.length > 60) gaps.shift(); };
   function roiMarkers(centre) {
     if (!centre || !cfg.mfront || !cfg.mback || !video.videoWidth) return null;
     const vw = video.videoWidth, vh = video.videoHeight, side = Math.round(vw * 0.12);
@@ -221,16 +243,17 @@
       }
       return out.sort((p, q) => q.n - p.n).slice(0, 5);
     };
-    const F = blobs(mf), B = blobs(mb);
+    const F = blobs(mf), B = blobs(mb), want = gapEst();
     let best = null;
     for (const f of F) for (const b of B) {
       const gap = Math.hypot(f.d[0] - b.d[0], f.d[1] - b.d[1]);
-      if (gap < 0.015 || gap > 0.12) continue;
-      const score = Math.min(f.n, b.n) - Math.abs(gap - 0.05) * 200;
+      if (gap < 0.015 || gap > 0.12 || (want && Math.abs(gap - want) > 0.015)) continue;   // the markers never move apart
+      const score = Math.min(f.n, b.n) - Math.abs(gap - (want || 0.05)) * 200;
       if (!best || score > best.score) best = { f, b, score };
     }
     if (!best) return null;
     const { f, b } = best, mid = [(f.d[0] + b.d[0]) / 2, (f.d[1] + b.d[1]) / 2], px = [(f.nn[0] + b.nn[0]) / 2, (f.nn[1] + b.nn[1]) / 2];
+    learnGap(Math.hypot(f.d[0] - b.d[0], f.d[1] - b.d[1]));
     return { mid, yaw: Math.atan2(f.d[1] - b.d[1], f.d[0] - b.d[0]), px, dotPx: f.nn, pxc: null };
   }
 
@@ -430,7 +453,7 @@
       if (cornerPts.length < 4) return step(`Now the ${CORNER[cornerPts.length]} corner`);
       picking = null; step(null); save({ corners: cornerPts, size: [+$('#ar-w').value, +$('#ar-d').value] });
     } else {
-      const c = sample(n); const what = picking; picking = null; step(null);
+      const what = picking, c = (what === 'mfront' || what === 'mback' || what === 'dot') ? sampleVivid(n) : sample(n); picking = null; step(null);
       if (what === 'gold' && H) { const d = apply(H, n); last = { ok: false, desk: d, px: n }; relearn = true; path = []; T.pos = null; }   // "that one is Vector"
       if (c) save({ [what]: c });
     }
@@ -442,6 +465,7 @@
   window.arTol = v => { cfg.tol = +v; clearTimeout(window._arTolT); window._arTolT = setTimeout(() => save({ tol: +v }), 400); };
   window.arFlip = () => save({ flip: !cfg.flip });
   async function save(patch) {
+    if (patch.mfront || patch.mback) gaps.length = 0;
     cfg = { ...cfg, ...patch }; rebuild();
     const r = await post('/api/arena/config', patch);
     if (r.config) { cfg = r.config; rebuild(); }
@@ -521,7 +545,7 @@
       else {                                          // a jump: believe it only if it keeps saying the same place
         T.far = T.farPos && Math.hypot(m.x - T.farPos[0], m.y - T.farPos[1]) < 0.03 ? T.far + 1 : 1;
         T.farPos = [m.x, m.y];
-        if (T.far >= 4) { T.pos = [m.x, m.y]; T.vel = [0, 0]; T.yaw = m.yaw; T.far = 0; take = true; }
+        if (T.far >= 6) { T.pos = [m.x, m.y]; T.vel = [0, 0]; T.yaw = m.yaw; T.far = 0; take = true; }
       }
     }
     if (take) {
