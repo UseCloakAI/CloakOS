@@ -130,6 +130,7 @@ class Arena:
         face = c["yaw"] + math.pi                                    # looking at the charger
         self.dock_state = "driving to the charger"
         end, phase = time.time() + timeout, "drive"
+        best_d, best_t = math.inf, time.time()            # stalled (no headway in 8 s): let Vector's own docking finish
         self.route = {"target": [tx, ty], "charger": [c["x"], c["y"]], "phase": phase}
         try:
             while time.time() < end:
@@ -143,6 +144,11 @@ class Arena:
                 x, y = float(p["x"]), float(p["y"])
                 if phase == "drive":
                     d = math.hypot(tx - x, ty - y)
+                    if d < best_d - 0.02:
+                        best_d, best_t = d, time.time()
+                    elif time.time() - best_t > 8:
+                        self.dock_state = "no headway: Vector's own docking takes it from here"
+                        return False
                     if d < 0.04:
                         phase = self.route["phase"] = "face"
                         continue

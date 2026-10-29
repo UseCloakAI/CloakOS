@@ -191,6 +191,49 @@
              px: [(f.cx + b.cx) / 2 / W, (f.cy + b.cy) / 2 / Hh], dotPx: [f.cx / W, f.cy / Hh], pxc: [(f.cx + b.cx) / 2, (f.cy + b.cy) / 2] };
   }
 
+  /* Look closer: the markers are ~1 cm, a few pixels in the whole-desk view. Around where Vector is,
+     read a crop of the camera at full resolution, where they're ~10 px and survive blur and JPEG. */
+  const roiC = document.createElement('canvas'), roiX = roiC.getContext('2d', { willReadFrequently: true }), RS = 200;
+  roiC.width = roiC.height = RS;
+  function roiMarkers(centre) {
+    if (!centre || !cfg.mfront || !cfg.mback || !video.videoWidth) return null;
+    const vw = video.videoWidth, vh = video.videoHeight, side = Math.round(vw * 0.12);
+    const sx = Math.max(0, Math.min(vw - side, Math.round(centre[0] * vw - side / 2)));
+    const sy = Math.max(0, Math.min(vh - side, Math.round(centre[1] * vh - side / 2)));
+    roiX.drawImage(video, sx, sy, side, side, 0, 0, RS, RS);
+    const img = roiX.getImageData(0, 0, RS, RS).data, isF = matcher(cfg.mfront), isB = matcher(cfg.mback);
+    const mf = new Uint8Array(RS * RS), mb = new Uint8Array(RS * RS);
+    for (let k = 0; k < RS * RS; k++) {
+      const c = hsv(img[k * 4], img[k * 4 + 1], img[k * 4 + 2]);
+      if (isF(...c)) mf[k] = 1; else if (isB(...c)) mb[k] = 1;
+    }
+    const toNormR = (x, y) => [(sx + x / RS * side) / vw, (sy + y / RS * side) / vh];
+    const blobs = m => {
+      const out = [];
+      for (let s0 = 0; s0 < m.length; s0++) {
+        if (m[s0] !== 1) continue;
+        const q = [s0]; m[s0] = 2; let n = 0, ax = 0, ay = 0;
+        while (q.length) {
+          const p = q.pop(), px = p % RS, py = (p - px) / RS; n++; ax += px; ay += py;
+          for (const o of [p - 1, p + 1, p - RS, p + RS]) if (o >= 0 && o < m.length && m[o] === 1) { m[o] = 2; q.push(o); }
+        }
+        if (n >= 6) { const nn = toNormR(ax / n, ay / n); out.push({ n, nn, d: apply(H, nn) }); }
+      }
+      return out.sort((p, q) => q.n - p.n).slice(0, 5);
+    };
+    const F = blobs(mf), B = blobs(mb);
+    let best = null;
+    for (const f of F) for (const b of B) {
+      const gap = Math.hypot(f.d[0] - b.d[0], f.d[1] - b.d[1]);
+      if (gap < 0.015 || gap > 0.12) continue;
+      const score = Math.min(f.n, b.n) - Math.abs(gap - 0.05) * 200;
+      if (!best || score > best.score) best = { f, b, score };
+    }
+    if (!best) return null;
+    const { f, b } = best, mid = [(f.d[0] + b.d[0]) / 2, (f.d[1] + b.d[1]) / 2], px = [(f.nn[0] + b.nn[0]) / 2, (f.nn[1] + b.nn[1]) / 2];
+    return { mid, yaw: Math.atan2(f.d[1] - b.d[1], f.d[0] - b.d[0]), px, dotPx: f.nn, pxc: null };
+  }
+
   function track() {
     if (!video.videoWidth) return null;
     const W = PW, Hh = Math.round(PW * video.videoHeight / video.videoWidth);
@@ -222,7 +265,9 @@
       if (Math.abs(img[i] - bg[k * 3]) + Math.abs(img[i + 1] - bg[k * 3 + 1]) + Math.abs(img[i + 2] - bg[k * 3 + 2]) > thr) mask[k] = 1;
       if (cfg.dot && isDot(HS[k * 3], HS[k * 3 + 1], HS[k * 3 + 2])) lit[k] = 1;
     }
-    const mk = markerPair(img, W, Hh, poly, x0, x1, y0, y1);
+    let mk = markerPair(img, W, Hh, poly, x0, x1, y0, y1);
+    const close = roiMarkers((T && T.px) || (mk && mk.px) || (last && last.px));   // the close look wins when it finds them
+    if (close) { close.pxc = [close.px[0] * W, close.px[1] * Hh]; mk = close; }
     const cm2 = (cx, cy) => {                       // real desk area of one image pixel here
       const p = apply(H, [cx / W, cy / Hh]), a = apply(H, [(cx + 1) / W, cy / Hh]), b = apply(H, [cx / W, (cy + 1) / Hh]);
       return Math.abs((a[0] - p[0]) * (b[1] - p[1]) - (a[1] - p[1]) * (b[0] - p[0])) * 1e4;
@@ -276,7 +321,7 @@
       }
     }
     if (yaw === null && last && last.desk && Math.hypot(pos[0] - last.desk[0], pos[1] - last.desk[1]) > 0.015)
-      { yaw = Math.atan2(pos[1] - last.desk[1], pos[0] - last.desk[0]); src = 'motion'; }   // which way it's been going
+      { yaw = Math.atan2(pos[1] - last.desk[1], pos[0] - last.desk[0]); src = cfg.mfront && cfg.mback ? 'hold' : 'motion'; }   // which way it's been going
     if (yaw === null) yaw = last && last.ok ? last.yaw - (cfg.flip ? Math.PI : 0) : 0;
     if (cfg.flip) yaw += Math.PI;
     if (last && last.ok) {                          // a little smoothing: one noisy frame doesn't spin the arrow
