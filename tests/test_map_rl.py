@@ -248,6 +248,9 @@ def test_guided_plan_and_keep_training(tmp_path):
     (d / "meta.json").write_text(json.dumps({"task": "desk", "sensors": "map", "created": 1}))
     (d / "policy.npz").write_bytes(b"x")
     (d / "exam.json").write_text(json.dumps({"passed": True, "score": 1050}))
+    old = t.plan()                                      # passed, but under the old desk rules: retrain it first
+    assert old["stage"] == 1 and old["start"]["resume"] is None and "before the desk practice got harder" in old["why"]
+    (d / "meta.json").write_text(json.dumps({"task": "desk", "sensors": "map", "created": 1, "reward_v": 2}))
     p = t.plan([{"name": "ep1", "frames": 50, "created": time.time()}])
     assert p["stage"] == 2 and p["start"]["teacher"] == "desk-map-1" and p["start"]["real"] == ["ep1"]
     t.set_auto(True)
@@ -264,3 +267,24 @@ def test_guided_plan_and_keep_training(tmp_path):
     assert t2.auto["on"] and t2.auto_tick([]) == "run1" and resumed == ["run1"]
     t2.set_auto(False)
     assert t2.auto_tick([]) is None and not json.loads((tmp_path / "keep_training.json").read_text())["on"]
+
+
+def test_train_more_continues_from_that_driver(tmp_path):
+    import json
+
+    from cloakos.rl.manager import Trainer
+
+    t = Trainer(tmp_path)
+    calls = []
+    t.start = lambda *a, **kw: calls.append((a, kw)) or "run-more"
+    d = t.root / "desk-map-old"
+    d.mkdir(parents=True)
+    (d / "meta.json").write_text(json.dumps({"task": "desk", "sensors": "map", "created": 1}))
+    (d / "model.zip").write_bytes(b"x")
+    (d / "policy.npz").write_bytes(b"x")
+    (d / "exam.json").write_text(json.dumps({"passed": True, "score": 1000}))
+    assert t.train_more("desk-map-old", 8) == "run-more"
+    (a, kw) = calls[-1]
+    assert a[0] == "desk" and kw["resume"] == "desk-map-old" and kw["hours"] == 8
+    t.train_more("desk-map-old", 2, keep=True)          # Keep going picked: a session from it, then carry on
+    assert t.auto["on"] and t.auto["last"]["session"] == "run-more"

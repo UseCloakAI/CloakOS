@@ -238,7 +238,7 @@ def build(world: str = "room", seed: int | None = None, assets: "Assets | None" 
         desk_taken: list[tuple[float, float, float]] = []
         plain = list(OBJECTS)
         rng.shuffle(plain)
-        picks = [(n, None) for n in plain[: int(rng.integers(0, 5))]]       # a few small things, never a cluttered desk
+        picks = [(n, None) for n in plain[: int(rng.integers(1, 7))]]       # always something to steer around, up to all six
         if layout and layout.get("objects") is not None:                     # placed by hand in the Simulator
             picks = [(o["name"], (o.get("x"), o.get("y"))) for o in layout["objects"] if o.get("name") in OBJECTS]
         for i, (name, at) in enumerate(picks):

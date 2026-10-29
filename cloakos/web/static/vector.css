@@ -369,3 +369,7 @@ body.is-frozen .live-dot{background:#3B82F6!important}
 .tr-adv>summary{cursor:pointer;font-family:var(--fd);font-weight:800;font-size:12px;letter-spacing:.1em;text-transform:uppercase;opacity:.7}
 .tr-drv .sc-head b{font-size:14px}
 @media (max-width:640px){.tr-path,.tr-len{grid-template-columns:1fr}}
+.tr-log{border:var(--bd);background:var(--surf);padding:8px 12px;margin:12px 0;font-size:12px}
+.tr-log b{display:block;font-family:var(--fd);font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;margin-bottom:4px}
+.tr-log div{padding:2px 0}
+.tr-log .bad{color:var(--acc)}
