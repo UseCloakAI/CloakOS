@@ -6,7 +6,7 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const post = (url, body = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
   const video = $('#ar-video'), over = $('#ar-overlay'), map = $('#ar-map');
-  const PW = 320;                                  // processing width (pixels); plenty for a 10 cm robot on a desk
+  const PW = 480;                                  // processing width (pixels): enough that ~1 cm markers are a few pixels
   const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
   let shown = false, stream = null, cfg = {}, st = null, H = null, loop = null, poll = null;
   let picking = null, cornerPts = [], last = null, path = [];
@@ -136,6 +136,45 @@
      real cm² wins, nearest last time. Works on any desk colour, light or dark. Its green backpack
      light (behind its middle) says which way it faces; without it, the way it's been moving. */
   let bg = null, bgKey = '', relearn = false, missing = 0;
+
+  /* Two coloured markers on Vector (say red at the front, yellow at the back): back -> front is
+     exactly which way it faces, the midpoint is where it is. The surest fix there is; the
+     "what isn't desk" method only fills in when they're not both visible. */
+  function blobsOf(colour, img, W, Hh, poly, x0, x1, y0, y1) {
+    const isM = matcher(colour), m = new Uint8Array(W * Hh), out = [];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const i = (y * W + x) * 4;
+      if (isM(...hsv(img[i], img[i + 1], img[i + 2])) && inside([x, y], poly)) m[y * W + x] = 1;
+    }
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const s0 = y * W + x; if (m[s0] !== 1) continue;
+      const q = [s0]; m[s0] = 2; let n = 0, sx = 0, sy = 0;
+      while (q.length) {
+        const p = q.pop(), px = p % W, py = (p - px) / W; n++; sx += px; sy += py;
+        for (const o of [p - 1, p + 1, p - W, p + W]) if (o >= 0 && o < m.length && m[o] === 1) { m[o] = 2; q.push(o); }
+      }
+      if (n >= 2) out.push({ cx: sx / n, cy: sy / n, n, d: apply(H, [sx / n / W, sy / n / Hh]) });
+    }
+    return out.sort((p, q) => q.n - p.n).slice(0, 6);
+  }
+  function markerPair(img, W, Hh, poly, x0, x1, y0, y1) {
+    if (!cfg.mfront || !cfg.mback) return null;
+    const F = blobsOf(cfg.mfront, img, W, Hh, poly, x0, x1, y0, y1), B = blobsOf(cfg.mback, img, W, Hh, poly, x0, x1, y0, y1);
+    let best = null;
+    for (const f of F) for (const b of B) {
+      const gap = Math.hypot(f.d[0] - b.d[0], f.d[1] - b.d[1]);
+      if (gap < 0.015 || gap > 0.12) continue;               // both on Vector: a few cm apart
+      const mid = [(f.d[0] + b.d[0]) / 2, (f.d[1] + b.d[1]) / 2];
+      const prev = last && last.desk ? Math.hypot(mid[0] - last.desk[0], mid[1] - last.desk[1]) * 100 : 0;
+      const score = -prev + 0.2 * Math.min(f.n, b.n);
+      if (!best || score > best.score) best = { f, b, mid, score };
+    }
+    if (!best) return null;
+    const { f, b } = best;
+    return { mid: best.mid, yaw: Math.atan2(f.d[1] - b.d[1], f.d[0] - b.d[0]),
+             px: [(f.cx + b.cx) / 2 / W, (f.cy + b.cy) / 2 / Hh], dotPx: [f.cx / W, f.cy / Hh], pxc: [(f.cx + b.cx) / 2, (f.cy + b.cy) / 2] };
+  }
+
   function track() {
     if (!video.videoWidth) return null;
     const W = PW, Hh = Math.round(PW * video.videoHeight / video.videoWidth);
@@ -165,6 +204,7 @@
       if (Math.abs(img[i] - bg[k * 3]) + Math.abs(img[i + 1] - bg[k * 3 + 1]) + Math.abs(img[i + 2] - bg[k * 3 + 2]) > thr) mask[k] = 1;
       if (cfg.dot && isDot(...hsv(img[i], img[i + 1], img[i + 2]))) lit[k] = 1;
     }
+    const mk = markerPair(img, W, Hh, poly, x0, x1, y0, y1);
     const cm2 = (cx, cy) => {                       // real desk area of one image pixel here
       const p = apply(H, [cx / W, cy / Hh]), a = apply(H, [(cx + 1) / W, cy / Hh]), b = apply(H, [cx / W, (cy + 1) / Hh]);
       return Math.abs((a[0] - p[0]) * (b[1] - p[1]) - (a[1] - p[1]) * (b[0] - p[0])) * 1e4;
@@ -190,12 +230,19 @@
     }
     // learn the desk: everything except where Vector is now fades into the background
     const keep = new Uint8Array(W * Hh);
-    if (best) { const R = 2 * Math.sqrt(best.n); for (let y = Math.max(0, best.cy - R | 0); y <= Math.min(Hh - 1, best.cy + R); y++) for (let x = Math.max(0, best.cx - R | 0); x <= Math.min(W - 1, best.cx + R); x++) keep[y * W + x] = 1; }
+    if (mk) { const R = 14; for (let y = Math.max(0, mk.pxc[1] - R | 0); y <= Math.min(Hh - 1, mk.pxc[1] + R); y++) for (let x = Math.max(0, mk.pxc[0] - R | 0); x <= Math.min(W - 1, mk.pxc[0] + R); x++) keep[y * W + x] = 1; }
+    else if (best) { const R = 2 * Math.sqrt(best.n); for (let y = Math.max(0, best.cy - R | 0); y <= Math.min(Hh - 1, best.cy + R); y++) for (let x = Math.max(0, best.cx - R | 0); x <= Math.min(W - 1, best.cx + R); x++) keep[y * W + x] = 1; }
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const k = y * W + x; if (keep[k]) continue;
       const i = k * 4; bg[k * 3] += 0.03 * (img[i] - bg[k * 3]); bg[k * 3 + 1] += 0.03 * (img[i + 1] - bg[k * 3 + 1]); bg[k * 3 + 2] += 0.03 * (img[i + 2] - bg[k * 3 + 2]);
     }
-    missing = best ? 0 : missing + 1;
+    missing = best || mk ? 0 : missing + 1;
+    if (mk) {                                        // both markers seen: position and heading straight from them
+      let yaw = mk.yaw + (cfg.flip ? Math.PI : 0);
+      if (last && last.ok) { const d = Math.atan2(Math.sin(yaw - last.yaw), Math.cos(yaw - last.yaw)); yaw = last.yaw + 0.6 * d; }
+      yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+      return { ok: true, x: mk.mid[0], y: mk.mid[1], yaw, src: 'light', px: mk.px, dotPx: mk.dotPx, area: 60, cm2: 'markers', desk: mk.mid };
+    }
     if (missing > 30) { relearn = true; missing = 0; }   // lost for 3 s: maybe it faded in while sitting still, look again
     if (!best || (last && last.desk && last.ok && Math.hypot(best.here[0] - last.desk[0], best.here[1] - last.desk[1]) > 0.25)) return { ok: false };
     const c = [best.cx / W, best.cy / Hh], pos = best.here;
@@ -301,7 +348,7 @@
   function step(msg) { $('#ar-step').hidden = !msg; $('#ar-step').textContent = msg || ''; $('.ar-stage').classList.toggle('picking', !!msg); }
   const CORNER = ['front-left (your side, left)', 'front-right', 'back-right', 'back-left'];
   window.arCorners = () => { picking = 'corners'; cornerPts = []; step(`Click the desk's ${CORNER[0]} corner`); };
-  window.arPick = what => { picking = what; step(what === 'gold' ? 'Click on Vector' : "Click Vector's green backpack light"); };
+  window.arPick = what => { picking = what; step({ gold: 'Click on Vector', mfront: 'Click the marker on the FRONT of Vector (its face end)', mback: 'Click the marker on the BACK of Vector', dot: "Click Vector's green backpack light" }[what]); };
   over.addEventListener('click', e => {
     if (!picking || !video.videoWidth) return;
     const n = toNorm(e);
@@ -374,8 +421,8 @@
 
   function info(f) {
     const parts = [!cfg.corners ? '✗ desk corners not set' : `✓ desk ${cfg.size ? cfg.size.join(' × ') + ' cm' : ''}`,
-      !cfg.dot ? '– light not picked (heading comes from which way it moves)' : '✓ backpack light'];
-    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}° (${f.cm2} cm²)`
+      cfg.mfront && cfg.mback ? '✓ front + back markers' : `– markers: ${cfg.mfront ? '' : 'front '}${cfg.mback ? '' : 'back '}not picked`, !cfg.dot ? '– light not picked (heading comes from which way it moves)' : '✓ backpack light'];
+    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}° (${f.cm2 === 'markers' ? 'from the markers' : f.cm2 + ' cm²'})`
       : H ? "Can't see Vector. Click on Vector to point it out, or move Match up." : '';
     $('#ar-track').innerHTML = `<p class="tele-note">${parts.map(esc).join('<br>')}</p>${where ? `<b>${esc(where)}</b>` : ''}`;
   }
