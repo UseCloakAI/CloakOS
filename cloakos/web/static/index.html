@@ -40,9 +40,9 @@
           <span class="sbl">Teleop</span>
         </button>
       </nav>
-      <button class="sb-btn sb-new" id="sb-rec" onclick="toggleRecord()" title="Record episode">
+      <button class="sb-btn sb-new" id="sb-rec" onclick="toggleRecord()" title="Record a drive (for training)">
         <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
-        <span class="sbl" id="sb-rec-label">Record episode</span>
+        <span class="sbl" id="sb-rec-label">Record a drive</span>
       </button>
       <a class="sb-btn sb-new" href="/pair" title="Pair Vector">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>
@@ -128,7 +128,7 @@
             <button class="icon-btn freeze-btn" type="button" onclick="toggleFreeze()" title="Freeze (or triple-tap Vector's button)" aria-label="Freeze">
               <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M4.5 6.5l15 11M19.5 6.5l-15 11M9 4l3 2.5L15 4M9 20l3-2.5 3 2.5"/></svg>
             </button>
-            <button class="icon-btn rec-btn" type="button" onclick="toggleRecord()" title="Record episode" aria-label="Record episode">
+            <button class="icon-btn rec-btn" type="button" onclick="toggleRecord()" title="Record a drive (for training)" aria-label="Record a drive">
               <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="var(--acc)"/></svg>
             </button>
             <button class="icon-btn" type="button" onclick="toggleDark()" title="Toggle theme" aria-label="Toggle theme">
@@ -225,7 +225,7 @@
             <div class="status-pill"><span class="live-dot off"></span><span class="conn-label">Offline</span></div>
           </div>
           <div class="topbar-right">
-            <button class="icon-btn rec-btn" type="button" onclick="toggleRecord()" title="Record episode" aria-label="Record episode">
+            <button class="icon-btn rec-btn" type="button" onclick="toggleRecord()" title="Record a drive (for training)" aria-label="Record a drive">
               <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="var(--acc)"/></svg>
             </button>
           </div>
@@ -472,51 +472,76 @@
           </div>
         </div>
         <div class="vs-scroll"><div class="vs">
-          <h2>Train a skill</h2>
-          <p class="tele-note" id="rl-desc">Trains in the simulator, many rooms at once, much faster than real time. It runs in the background; the brain keeps working.</p>
-          <div class="rl-form">
-            <label>Skill <select id="rl-task" class="sim-select"></select></label>
-            <label id="rl-sensors-row">Sensors <select id="rl-sensors" class="sim-select"></select></label>
-            <label>Build on <select id="rl-resume" class="sim-select"><option value="">Start fresh</option></select></label>
-            <label id="rl-teacher-row" hidden>Teacher <select id="rl-teacher" class="sim-select"></select></label>
-            <label id="rl-real-row" hidden>Real desk drives <select id="rl-real" class="sim-select" multiple size="3"></select></label>
-            <label>Length <select id="rl-steps" class="sim-select">
-              <option value="100000">Quick · 100k steps</option>
-              <option value="300000" selected>Normal · 300k steps</option>
-              <option value="1000000">Long · 1M steps</option>
-              <option value="3000000">Overnight · 3M steps</option>
-              <option value="10000000">Weekend · 10M steps</option>
-              <option value="30000000">Marathon · 30M steps</option>
-            </select></label>
-            <button class="chip" id="rl-start" onclick="rlStart()">Start training</button>
-            <button class="chip" id="rl-stop" onclick="rlStop()" hidden>Stop and save</button>
-          </div>
           <p class="tele-note err" id="rl-missing" hidden></p>
+
+          <!-- the path: three steps from nothing to driving your real desk -->
+          <div class="tr-path" id="tr-path"></div>
+          <div class="tr-next" id="tr-next"></div>
+
+          <!-- one choice, one button -->
+          <div class="tr-go" id="tr-go">
+            <div class="tr-len" role="radiogroup" aria-label="How long">
+              <button type="button" class="tr-opt" data-h="1" onclick="trLen('1')"><b>1 hour</b><span>a quick improvement</span></button>
+              <button type="button" class="tr-opt on" data-h="8" onclick="trLen('8')"><b>Overnight</b><span>8 hours, then it stops</span></button>
+              <button type="button" class="tr-opt" data-h="keep" onclick="trLen('keep')"><b>Keep going</b><span>until you press Stop</span></button>
+            </div>
+            <button type="button" class="tr-start" id="tr-start" onclick="trStart()">Start training</button>
+            <p class="tele-note">It runs in the background and tests itself at the end, keeping whichever version drives better. Keep the Mac plugged in with the lid open.</p>
+          </div>
+
+          <!-- while it runs -->
           <div class="rl-run" id="rl-run" hidden>
             <div class="rl-run-head"><b id="rl-run-name"></b><span class="res-tag" id="rl-run-tag"></span></div>
             <div class="rl-bar"><i id="rl-bar-fill"></i></div>
             <div class="rl-run-stats" id="rl-run-stats"></div>
             <p class="tele-note" id="rl-run-phase"></p>
+            <button type="button" class="chip" id="tr-stop" onclick="rlStop()">Stop</button>
           </div>
-          <div class="rl-chart-wrap"><canvas id="rl-chart" height="220"></canvas><div class="rl-chart-legend" id="rl-legend"></div></div>
-          <h2>Driving now</h2>
-          <dl class="kv" id="kv-rl-active"></dl>
-          <p class="tele-note" id="rl-goal-note" hidden>Goto policies drive to a goal: double-click the floor in the Simulator to set one.</p>
-          <h2>Calibrate to the real thing</h2>
-          <p class="tele-note">Measures how the real pipeline differs from the training sim, so training can match it. Takes a few minutes. Then copy the numbers and paste them to Claude.</p>
-          <div class="chip-row">
-            <button class="chip" onclick="calRun('map')">Camera AI vs truth (simulator, 3 min)</button>
-            <button class="chip" onclick="calRun('robot')">Robot lag and sensors (about 20 s)</button>
-            <button class="chip" onclick="calRun('camera')">Camera lag (head nods, about 25 s)</button>
-            <button class="chip" onclick="calStop()">Stop</button>
-            <button class="chip" onclick="calCopy()">Copy results</button>
-            <button class="chip" onclick="calSend()">Send to Claude</button>
-          </div>
-          <p class="tele-note" data-cal-status></p>
-          <pre class="tele-note" data-cal-out style="white-space:pre-wrap"></pre>
-          <h2>Trained policies</h2>
+
+          <h2>Your drivers</h2>
           <div id="rl-policies"><p class="tele-note">None yet.</p></div>
-          <button class="chip" onclick="rlWipe()">Delete all training data</button>
+          <button type="button" class="chip" id="rl-more" onclick="rlMore()" hidden>Show all</button>
+
+          <details class="tr-adv">
+            <summary>Advanced</summary>
+            <h2>How it's learning</h2>
+            <div class="rl-chart-wrap"><canvas id="rl-chart" height="220"></canvas><div class="rl-chart-legend" id="rl-legend"></div></div>
+            <h2>Train something specific</h2>
+            <p class="tele-note" id="rl-desc">Pick exactly what to train. The big button above already picks the right thing for you.</p>
+            <div class="rl-form">
+              <label>Skill <select id="rl-task" class="sim-select"></select></label>
+              <label id="rl-sensors-row">Sensors <select id="rl-sensors" class="sim-select"></select></label>
+              <label>Continue from <select id="rl-resume" class="sim-select"><option value="">Start fresh</option></select></label>
+              <label id="rl-teacher-row" hidden>Simulator driver <select id="rl-teacher" class="sim-select"></select></label>
+              <label id="rl-real-row" hidden>Your recorded drives <select id="rl-real" class="sim-select" multiple size="3"></select></label>
+              <label>Length <select id="rl-steps" class="sim-select">
+                <option value="100000">Quick · 100k steps</option>
+                <option value="300000" selected>Normal · 300k steps</option>
+                <option value="1000000">Long · 1M steps</option>
+                <option value="3000000">Overnight · 3M steps</option>
+                <option value="10000000">Weekend · 10M steps</option>
+              </select></label>
+              <button class="chip" id="rl-start" onclick="rlStart()">Start</button>
+              <button class="chip" id="rl-stop" onclick="rlStop()" hidden>Stop and save</button>
+            </div>
+            <h2>Driving now</h2>
+            <dl class="kv" id="kv-rl-active"></dl>
+            <p class="tele-note" id="rl-goal-note" hidden>Go-to drivers drive to a goal: double-click the floor in the Simulator to set one.</p>
+            <h2>Measure the real robot</h2>
+            <p class="tele-note">Measures how the real Vector differs from the simulator (lag, camera), so training matches it. Takes a few minutes.</p>
+            <div class="chip-row">
+              <button class="chip" onclick="calRun('map')">Camera vs truth (simulator, 3 min)</button>
+              <button class="chip" onclick="calRun('robot')">Robot lag and sensors (20 s)</button>
+              <button class="chip" onclick="calRun('camera')">Camera lag (25 s)</button>
+              <button class="chip" onclick="calStop()">Stop</button>
+              <button class="chip" onclick="calCopy()">Copy results</button>
+              <button class="chip" onclick="calSend()">Send to Claude</button>
+            </div>
+            <p class="tele-note" data-cal-status></p>
+            <pre class="tele-note" data-cal-out style="white-space:pre-wrap"></pre>
+            <h2>Start over</h2>
+            <button class="chip" onclick="rlWipe()">Delete all training data</button>
+          </details>
         </div></div>
       </section>
 

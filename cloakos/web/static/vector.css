@@ -344,3 +344,28 @@ body.is-frozen .live-dot{background:#3B82F6!important}
 .ar-stage.picking #ar-overlay{cursor:crosshair}
 .ar-step{position:absolute;left:12px;top:12px;max-width:min(420px,calc(100% - 24px));background:var(--acc);color:#fff;border:var(--bd);box-shadow:var(--shlg);padding:8px 12px;font-size:13px;font-weight:700}
 .ar-map{position:absolute;right:12px;bottom:12px;border:var(--bd);background:var(--surf);box-shadow:var(--shsm);width:240px;height:160px}
+
+/* Training: the path, one choice, one button */
+.tr-path{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0 12px}
+.tr-step{border:var(--bd);background:var(--surf);padding:10px 12px;position:relative}
+.tr-step .n{font-family:var(--fd);font-weight:800;font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.6}
+.tr-step b{display:block;font-size:14px;margin:4px 0 2px}
+.tr-step span{font-size:11px;opacity:.7}
+.tr-step.done{border-color:var(--grn)}
+.tr-step.done .n{color:var(--grn);opacity:1}
+.tr-step.now{background:var(--ink);color:var(--paper);box-shadow:var(--shsm)}
+.tr-step.now .n{opacity:.8}
+.tr-next{border-left:3px solid var(--acc);padding:6px 12px;margin:0 0 14px;font-size:13px;line-height:1.5}
+.tr-next b{display:block;font-size:15px;margin-bottom:2px}
+.tr-len{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tr-opt{border:var(--bd);background:var(--surf);color:var(--ink);padding:10px;text-align:left;cursor:pointer;font:inherit}
+.tr-opt b{display:block;font-size:14px}
+.tr-opt span{font-size:11px;opacity:.7}
+.tr-opt.on{background:var(--ink);color:var(--paper);box-shadow:var(--shsm)}
+.tr-start{width:100%;margin:10px 0 4px;padding:14px;border:var(--bd);background:var(--acc);color:#fff;font-family:var(--fd);font-weight:800;font-size:15px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;box-shadow:var(--shlg)}
+.tr-start:disabled{opacity:.5;cursor:wait}
+.rl-run #tr-stop{margin-top:8px}
+.tr-adv{margin:24px 0 0;border-top:var(--bd);padding-top:10px}
+.tr-adv>summary{cursor:pointer;font-family:var(--fd);font-weight:800;font-size:12px;letter-spacing:.1em;text-transform:uppercase;opacity:.7}
+.tr-drv .sc-head b{font-size:14px}
+@media (max-width:640px){.tr-path,.tr-len{grid-template-columns:1fr}}
