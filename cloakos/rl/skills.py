@@ -76,11 +76,11 @@ class Skills:
         """The sensor dict the skills were trained on, from the sim or the real robot."""
         return robot_snapshot(self.link, self.world)
 
-    def act(self, task: str, goal: tuple[float, float] | None = None) -> tuple[float, float, dict]:
+    def act(self, task: str, goal: tuple[float, float] | None = None, s: dict | None = None) -> tuple[float, float, dict]:
         """One 10 Hz decision: wheel speeds (mm/s) plus a little info for the UI. Exactly the
         training loop's path (the edge reflex runs robot-side, in RobotLink, like in training)."""
         sk = self.skills[task]
-        s = self.snapshot()
+        s = s or self.snapshot()
         r = ranges(self.link, self.mapper, s, sk.spec.n_rays, self.arena_src() if self.arena_src else None) if sk.spec.sensors == "map" else None
         if r is None and sk.spec.sensors == "map":     # no ranges: stopping beats driving on a guess
             return 0.0, 0.0, {"waiting": "no ranges"}
