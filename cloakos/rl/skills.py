@@ -44,6 +44,7 @@ class Skill:
 class Skills:
     def __init__(self, link: "RobotLink", world: "World", mapper: "Mapper | None" = None) -> None:
         self.link, self.world, self.mapper = link, world, mapper
+        self.arena_src: Any = None                 # () -> the Arena or None, set by the brain
         self.skills: dict[str, Skill] = {}
         self.reload()
 
@@ -80,7 +81,9 @@ class Skills:
         training loop's path (the edge reflex runs robot-side, in RobotLink, like in training)."""
         sk = self.skills[task]
         s = self.snapshot()
-        r = ranges(self.link, self.mapper, s, sk.spec.n_rays) if sk.spec.sensors == "map" else None
+        r = ranges(self.link, self.mapper, s, sk.spec.n_rays, self.arena_src() if self.arena_src else None) if sk.spec.sensors == "map" else None
+        if r is None and sk.spec.sensors == "map":     # no ranges: stopping beats driving on a guess
+            return 0.0, 0.0, {"waiting": "no ranges"}
         a, _ = sk.model.predict(observe(sk.spec, s, goal, r, sk.last_action))
         a = np.clip(np.asarray(a, np.float32), -1, 1)
         sk.last_action = a[:2]

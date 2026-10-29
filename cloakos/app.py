@@ -73,6 +73,7 @@ class Brain:
         from .rl.skills import Skills
         self.skills = Skills(self.link, self.world, self.mapper)
         self.body.skills = self.skills
+        self.skills.arena_src = self.policies["learned"].arena_src = lambda: self.arena
         self.policies["goto"] = GoToPolicy(self.body, self.skills, self.bus)
         self._goto_return = "auto"
         self.stuck = False                       # froze itself because it was stuck
@@ -598,10 +599,22 @@ class Brain:
                 "action": self.body.cmd.to_dict(),
                 "action_source": self.body.source,
                 "events": events + discrete,
+                **self._teacher_signals(),
             },
             frame=self.world.frame,
             frame_id=self.world.frame_id,
         )
+
+    def _teacher_signals(self) -> dict[str, Any]:
+        """Under the Arena: the overhead pose and ranges, and the action if a teacher (a driver that
+        doesn't use the camera) is driving. student.py --real learns from these."""
+        out: dict[str, Any] = {}
+        if self.arena is not None and self.link.target != "sim":
+            out["arena"] = self.arena.teacher_view()
+        lp = self.policies.get("learned")
+        if self.mode == "learned" and self.body.source == "learned" and lp is not None and lp.spec is not None and lp.pixels is None:
+            out["teacher"] = {"policy": lp.policy_name, "task": lp.spec.task, "action": [float(v) for v in lp.last_action]}
+        return out
 
     def state(self) -> dict[str, Any]:
         p = self.policy

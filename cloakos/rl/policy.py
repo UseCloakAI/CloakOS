@@ -42,14 +42,32 @@ def robot_snapshot(link: "RobotLink", world: "World") -> dict:
             "pitch": math.asin(max(-1, min(1, ax / g))) if g > 1 else 0.0, "gyro": list(w.gyro or (0.0, 0.0, 0.0))}
 
 
-def ranges(link: "RobotLink", mapper: "Mapper | None", s: dict, n: int) -> np.ndarray | None:
-    """Ranges around the robot for "map" policies: from the live 3D map (the real robot's only
-    source), else straight from the sim. None (= all clear) only when there's neither."""
+RANGES_STATE: dict[str, Any] = {"source": None, "why": None}     # what the last ranges() call used, for the UI
+_warned: set[str] = set()
+
+
+def ranges(link: "RobotLink", mapper: "Mapper | None", s: dict, n: int, arena: Any = None) -> np.ndarray | None:
+    """Ranges around the robot for "map" policies: the 3D map (parked, so normally off), else the sim,
+    else the overhead Arena camera on the real robot. None (= all clear) when there's none of them,
+    which is logged once and shown in the Arena status, not silently ignored."""
     if mapper is not None and mapper.map is not None:
+        RANGES_STATE.update(source="map", why=None)
         return mapper.rays(s["pos"], s["yaw"], n, RAY_FOV, RAY_MAX)
     sim = link.sim
     if link.target == "sim" and sim is not None:
+        RANGES_STATE.update(source="sim", why=None)
         return sim.rays(n, RAY_FOV, RAY_MAX)
+    why = "open the Arena page so the desk camera can see Vector" if arena is None else arena.ranges_status()
+    if why is None:
+        r = arena.ranges(n, RAY_FOV, RAY_MAX)
+        if r is not None:
+            RANGES_STATE.update(source="arena", why=None)
+            return r
+        why = "Arena gave no ranges"
+    RANGES_STATE.update(source=None, why=why)
+    if why not in _warned:
+        _warned.add(why)
+        log.warning("no ranges for a map driver on the real robot (it sees all clear): %s", why)
     return None
 
 
@@ -76,6 +94,7 @@ class LearnedPolicy(Policy):
     def __init__(self, body: "Body", link: "RobotLink") -> None:
         self.body, self.link = body, link
         self.mapper: "Mapper | None" = None                # set by the brain once the mapper exists
+        self.arena_src: Any = None                         # () -> the Arena or None, set by the brain
         self.model: Any = None
         self.spec: Spec | None = None
         self.policy_name: str | None = None
@@ -109,7 +128,10 @@ class LearnedPolicy(Policy):
         if self.spec is None:
             return "no policy loaded"
         if self.spec.task == "desk" and self.pixels is None and self.link.target != "sim":
-            return "the desk teacher only runs in the sim (it sees exact edges); train a desk-pixels student from it"
+            a = self.arena_src() if self.arena_src else None    # the overhead camera can stand in for exact edges
+            why = "open the Arena" if a is None else a.ranges_status()
+            if why:
+                return f"the desk teacher needs exact edges: the sim, or the Arena on the real desk ({why})"
         if self.spec.task == "goto" and self.goal is None:
             return "set a goal first"
         return None
@@ -141,11 +163,15 @@ class LearnedPolicy(Policy):
                 return
         else:
             rays = None
-            if self.spec.task == "desk" and self.link.sim and self.link.sim.scene_info:     # teacher: exact sim ranges
+            if self.spec.task == "desk" and self.link.target == "sim" and self.link.sim and self.link.sim.scene_info:     # teacher: exact sim ranges
                 sim = self.link.sim
                 rays = np.minimum(sim.rays(self.spec.n_rays, RAY_FOV, RAY_MAX), edge_rays(s, sim.scene_info.room, self.spec.n_rays))
             elif self.spec.sensors == "map":
-                rays = ranges(self.link, self.mapper, s, self.spec.n_rays)
+                rays = ranges(self.link, self.mapper, s, self.spec.n_rays, self.arena_src() if self.arena_src else None)
+                if rays is None:            # all clear would be a guess: hold still until the ranges are back
+                    self.status = f"waiting for ranges ({RANGES_STATE['why']})"
+                    await self.body.drive(0, 0, "learned")
+                    return
             a, _ = self.model.predict(observe(self.spec, s, self.goal, rays, self.last_action), deterministic=True)
         a = np.clip(np.asarray(a, np.float32), -1, 1)
         self.last_action = a

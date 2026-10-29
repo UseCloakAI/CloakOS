@@ -4,7 +4,7 @@ PRODUCT = "CloakOS"                      # the brand, wherever people see it
 EDITION = "Vector Edition"
 FULL_NAME = f"{PRODUCT} {EDITION}"        # the technical name
 
-__version__ = "0.9.5"
+__version__ = "0.9.6"
 
 NOUS = "Nous v0.0.0"                  # the mind: Kinesis (movement skills) + Opsis (vision) + Cloak language models
 NOUS_VERSION = "0.0.0"

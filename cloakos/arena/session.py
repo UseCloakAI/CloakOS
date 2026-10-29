@@ -69,6 +69,47 @@ class Arena:
         s = self.config.get("size")
         return (float(s[0]) / 100, float(s[1]) / 100) if s else None
 
+    # ── ranges for "map" drivers on the real robot ─────────────
+
+    RANGES_FRESH_S = 0.5   # older than this and Vector may have moved: no ranges (accuracy over coverage)
+    CHARGER_R = 0.06       # m: the charger as a round obstacle on the desk
+
+    def ranges_status(self) -> str | None:
+        """None when the Arena can give ranges right now, otherwise why not."""
+        if not self.size_m or not self.config.get("corners"):
+            return "Arena desk isn't set up (corners and size)"
+        p = self.pose
+        if not p or not p.get("ok") or time.time() - p["t"] > self.RANGES_FRESH_S:
+            return "Arena isn't tracking Vector"
+        if self.heading() is None:
+            return "Arena doesn't know which way Vector faces yet"
+        return None
+
+    def obstacles(self) -> list[tuple[float, float, float]]:
+        """Things on the desk the Arena knows about. Only the charger today: there's no object detector yet."""
+        c = self.config.get("charger")
+        return [(float(c["x"]), float(c["y"]), self.CHARGER_R)] if c else []
+
+    def ranges(self, n: int, fov: float, max_range: float):
+        """Ray ranges in Vector's frame from the overhead view, like the sim's rays(); None if not live."""
+        if self.ranges_status() is not None:
+            return None
+        from .ranges import desk_rays
+        p = self.pose
+        return desk_rays(float(p["x"]), float(p["y"]), float(self.heading()), self.size_m, n, fov, max_range, self.obstacles())
+
+    def teacher_view(self, n: int = 9) -> dict[str, Any] | None:
+        """What a recording keeps from the overhead camera each tick (the teacher's signals)."""
+        p = self.pose
+        if not p:
+            return None
+        from ..rl.envs import RAY_FOV, RAY_MAX
+        r = self.ranges(n, RAY_FOV, RAY_MAX)
+        h = self.heading()
+        return {"ok": bool(p.get("ok")), "age": round(time.time() - p["t"], 2),
+                "x": p.get("x"), "y": p.get("y"), "yaw": h, "yaw_src": p.get("yaw_src"),
+                "ranges": None if r is None else [round(float(v), 3) for v in r], "status": self.ranges_status()}
+
     def update_pose(self, p: dict[str, Any]) -> None:
         self.pose = {**p, "t": time.time()}
         # the camera's heading is only sure when it saw the light or watched it move; Vector's own
