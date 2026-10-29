@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cloakos: control the installed CloakOS (Vector Edition).
-#   open | start | stop | restart | status | logs | update | auto-update | uninstall
+#   open | start | stop | restart | status | logs | awake [hours|off] | update | auto-update | uninstall
 set -euo pipefail
 
 # resolve the install dir from this script's real location (it's symlinked into ~/.local/bin)
@@ -61,6 +61,42 @@ stop() {
     kill -9 "$pid" 2>/dev/null || true
   fi
   rm -f "$PIDF"
+}
+
+# cloakos awake [hours|off]: keep the Mac awake (and training) with the screen off.
+# No hours: until training is done (a run, or Keep going, is on). The screen goes dark right away;
+# touch the trackpad to see it. Plugged in is best: on battery a closed lid still sleeps.
+AWAKEF="$HOME_DIR/awake.pid"
+awake_running() { [[ -f "$AWAKEF" ]] && kill -0 "$(cat "$AWAKEF")" 2>/dev/null; }
+awake() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then echo "cloakos awake is for macOS."; return 1; fi
+  if awake_running; then pkill -P "$(cat "$AWAKEF")" 2>/dev/null || true; kill "$(cat "$AWAKEF")" 2>/dev/null || true; fi
+  rm -f "$AWAKEF"
+  if [[ "${1:-}" == "off" ]]; then echo "Normal sleep is back."; return 0; fi
+  if [[ -n "${1:-}" ]]; then
+    local secs; secs="$(awk -v h="$1" 'BEGIN { if (h+0 <= 0) exit 1; printf "%d", h * 3600 }')" \
+      || { echo "usage: cloakos awake [hours|off]"; return 2; }
+    nohup caffeinate -ims -t "$secs" >/dev/null 2>&1 </dev/null &
+    echo $! >"$AWAKEF"
+    echo "Staying awake for $1 h (screen off). Undo with: cloakos awake off"
+  else
+    # a watcher that lives while there's training to do; caffeinate lives as long as the watcher
+    nohup "$SELF" _awake-watch >/dev/null 2>&1 </dev/null &
+    echo $! >"$AWAKEF"
+    echo "Staying awake until training is done (screen off). Undo with: cloakos awake off"
+  fi
+  sleep 1
+  pmset displaysleepnow 2>/dev/null || true       # dimmest there is: the screen off, the Mac still running
+}
+
+training_busy() {   # a training run going, or Keep going switched on
+  curl -fsS -m 5 "$URL/api/rl/running" 2>/dev/null | grep -Eq '"running": *"' && return 0
+  grep -Eq '"on": *true' "$HOME_DIR/data/keep_training.json" 2>/dev/null
+}
+awake_watch() {
+  caffeinate -ims -w $$ &
+  sleep 120                                       # give a just-started run time to show up
+  while training_busy; do sleep 60; done
 }
 
 browse() {
@@ -138,12 +174,15 @@ main() {
     start)       wp_up; start && echo "Cloak is running at $URL" ;;
     stop)        stop; wp_down; echo "Stopped (CloakOS and wire-pod)." ;;
     restart)     stop; wp_down; wp_up; start && echo "Restarted at $URL" ;;
-    status)      if running && up; then echo "Running at $URL (pid $(cat "$PIDF"))"; else echo "Not running."; fi ;;
+    status)      if running && up; then echo "Running at $URL (pid $(cat "$PIDF"))"; else echo "Not running."; fi
+                 awake_running && echo "Keeping the Mac awake (cloakos awake off to stop)." || true ;;
     logs)        tail -n 100 -f "$LOGF" ;;
+    awake)       awake "${2:-}" ;;
+    _awake-watch) awake_watch ;;
     update)      auto_update --now ;;
     auto-update) auto_update "${2:-}" ;;
     uninstall)   shift; uninstall "$@" ;;
-    *) echo "usage: cloakos [open|start|stop|restart|status|logs|update|uninstall]"; exit 2 ;;
+    *) echo "usage: cloakos [open|start|stop|restart|status|logs|awake [hours|off]|update|uninstall]"; exit 2 ;;
   esac
 }
 
