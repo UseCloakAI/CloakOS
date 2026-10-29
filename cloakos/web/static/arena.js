@@ -324,8 +324,7 @@
     }
     missing = best || mk ? 0 : missing + 1;
     if (mk) {                                        // both markers seen: position and heading straight from them
-      let yaw = mk.yaw + (cfg.flip ? Math.PI : 0);
-      if (last && last.ok) { const d = Math.atan2(Math.sin(yaw - last.yaw), Math.cos(yaw - last.yaw)); yaw = last.yaw + 0.6 * d; }
+      let yaw = mk.yaw + (cfg.flip ? Math.PI : 0);         // raw: the motion filter does the (one) smoothing
       yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
       return { ok: true, x: mk.mid[0], y: mk.mid[1], yaw, src: 'light', px: mk.px, dotPx: mk.dotPx, area: 60, cm2: 'markers', desk: mk.mid };
     }
@@ -523,7 +522,7 @@
      should be by now. Plausible ones are blended in; a sudden jump is ignored unless it holds for
      several frames (then it really moved, e.g. picked up). Short dropouts coast on its last motion.
      While the markers were seen in the last second, the shape guess isn't allowed to take over. */
-  const T = { pos: null, vel: [0, 0], yaw: 0, t: 0, seen: 0, markerT: 0, far: 0, farPos: null, yawFar: 0, px: null, src: 'hold' };
+  const T = { pos: null, vel: [0, 0], yaw: 0, om: 0, t: 0, seen: 0, markerT: 0, far: 0, farPos: null, yawFar: 0, px: null, src: 'hold' };
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
   function smooth(raw) {
     if (!raw) return raw;
@@ -545,7 +544,7 @@
       else {                                          // a jump: believe it only if it keeps saying the same place
         T.far = T.farPos && Math.hypot(m.x - T.farPos[0], m.y - T.farPos[1]) < 0.03 ? T.far + 1 : 1;
         T.farPos = [m.x, m.y];
-        if (T.far >= 6) { T.pos = [m.x, m.y]; T.vel = [0, 0]; T.yaw = m.yaw; T.far = 0; take = true; }
+        if (T.far >= 6) { T.pos = [m.x, m.y]; T.vel = [0, 0]; T.yaw = m.yaw; T.om = 0; T.far = 0; take = true; }
       }
     }
     if (take) {
@@ -553,14 +552,19 @@
       const v = [(np[0] - T.pos[0]) / dt, (np[1] - T.pos[1]) / dt], sp = Math.hypot(...v), cap = 0.3;
       T.vel = [0.6 * T.vel[0] + 0.4 * v[0] * Math.min(1, cap / (sp || 1)), 0.6 * T.vel[1] + 0.4 * v[1] * Math.min(1, cap / (sp || 1))];
       T.pos = np;
-      const dy = wrap(m.yaw - T.yaw);
-      if (Math.abs(dy) > 1.2 && m.src !== 'light') { T.yawFar++; if (T.yawFar >= 3) { T.yaw = m.yaw; T.yawFar = 0; } }
-      else { T.yaw = wrap(T.yaw + (m.src === 'light' ? 0.6 : 0.3) * dy); T.yawFar = 0; }
+      // heading: predicted from how fast it's turning, then pulled toward the reading (markers: mostly trusted)
+      const py = wrap(T.yaw + T.om * dt), dy = wrap(m.yaw - py);
+      if (Math.abs(dy) > 1.2 && m.src !== 'light') { T.yawFar++; if (T.yawFar >= 3) { T.yaw = m.yaw; T.om = 0; T.yawFar = 0; } }
+      else {
+        const ny = wrap(py + (m.src === 'light' ? 0.75 : 0.3) * dy);
+        T.om = Math.max(-4, Math.min(4, 0.5 * T.om + 0.5 * wrap(ny - T.yaw) / dt));
+        T.yaw = ny; T.yawFar = 0;
+      }
       T.seen = now; T.px = m.px; T.src = m.src;
       return { ...m, x: T.pos[0], y: T.pos[1], yaw: T.yaw, desk: T.pos.slice() };
     }
     if (now - T.seen < 0.7) {                         // short dropout: coast
-      T.vel = [T.vel[0] * 0.8, T.vel[1] * 0.8]; T.pos = pred;
+      T.vel = [T.vel[0] * 0.8, T.vel[1] * 0.8]; T.pos = pred; T.yaw = wrap(T.yaw + T.om * dt); T.om *= 0.7;
       return { ok: true, x: T.pos[0], y: T.pos[1], yaw: T.yaw, src: 'hold', px: T.px, area: 60, cm2: 'held', desk: T.pos.slice() };
     }
     return { ok: false };
