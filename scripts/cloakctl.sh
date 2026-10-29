@@ -19,6 +19,21 @@ LOGF="$HOME_DIR/logs/cloak.log"
 STATUSF="$HOME_DIR/update-status.json"
 
 running() { [[ -f "$PIDF" ]] && kill -0 "$(cat "$PIDF")" 2>/dev/null; }
+
+# wire-pod goes up and down with CloakOS (macOS WirePod app). CLOAK_MANAGE_WIREPOD=0 in .env turns this off.
+wp_ok() {
+  [[ "$(uname -s)" == "Darwin" && -f "$HOME_DIR/bin/wirepod.sh" && "$(envval CLOAK_MANAGE_WIREPOD)" != "0" ]] || return 1
+  # shellcheck source=wirepod.sh
+  source "$HOME_DIR/bin/wirepod.sh"
+  [[ -d "$WP_APP" ]]
+}
+wp_up() {
+  wp_ok || return 0
+  wp_running || open -g -a "$WP_APP" 2>/dev/null || return 0
+  for _ in $(seq 1 60); do wp_reachable >/dev/null && return 0; sleep 0.5; done     # up to ~30 s
+  echo "wire-pod is taking a while to start; CloakOS will connect once it's up."
+}
+wp_down() { wp_ok || return 0; wp_quit; }
 up() { curl -fsS -o /dev/null "$URL/api/setup/status" 2>/dev/null; }
 envval() { grep -E "^$1=" "$HOME_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"' || true; }
 
@@ -119,10 +134,10 @@ uninstall() {        # the standalone uninstaller does the work; run a copy, sin
 
 main() {
   case "${1:-open}" in
-    open)        start && browse ;;
-    start)       start && echo "Cloak is running at $URL" ;;
-    stop)        stop && echo "Stopped." ;;
-    restart)     stop; start && echo "Restarted at $URL" ;;
+    open)        wp_up; start && browse ;;
+    start)       wp_up; start && echo "Cloak is running at $URL" ;;
+    stop)        stop; wp_down; echo "Stopped (CloakOS and wire-pod)." ;;
+    restart)     stop; wp_down; wp_up; start && echo "Restarted at $URL" ;;
     status)      if running && up; then echo "Running at $URL (pid $(cat "$PIDF"))"; else echo "Not running."; fi ;;
     logs)        tail -n 100 -f "$LOGF" ;;
     update)      auto_update --now ;;
