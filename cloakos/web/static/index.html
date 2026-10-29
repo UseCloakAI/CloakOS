@@ -549,8 +549,8 @@
             <div class="sim-row"><button class="chip" onclick="arCorners()">Click corners</button><button class="chip" onclick="arSaveSize()">Save size</button></div>
             <p class="tele-note">Training uses this size too: half the sim desks become your desk's size.</p>
             <h2>2 · Vector</h2>
-            <p class="tele-note">Click Vector's gold top, then the dot, so it can tell where it is and which way it faces.</p>
-            <div class="sim-row"><button class="chip" onclick="arPick('gold')">Click gold top</button><button class="chip" onclick="arPick('dot')">Click the dot</button></div>
+            <p class="tele-note">It finds Vector by itself: the Vector-sized thing on the desk that isn't desk (any desk colour). If it picks the wrong thing, click on Vector. Click its green backpack light so it knows which way it faces.</p>
+            <div class="sim-row"><button class="chip" onclick="arPick('gold')">Click on Vector</button><button class="chip" onclick="arPick('dot')">Click its light</button></div>
             <div class="sim-row">
               <label class="sim-num">Match <input id="ar-tol" type="range" min="5" max="60" value="22" oninput="arTol(this.value)"></label>
               <button class="chip" onclick="arFlip()" title="If the arrow points backwards">Flip heading</button>
