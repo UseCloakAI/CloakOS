@@ -50,7 +50,7 @@ class Arena:
     def save_config(self, cfg: dict[str, Any]) -> dict[str, Any]:
         """Corners (image points), colours and the desk size in cm. The size also goes to training:
         half the sim desks are then your desk's size (CLOAK_DESK)."""
-        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock")})
+        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock", "mfront", "mback")})
         self.file.parent.mkdir(parents=True, exist_ok=True)
         self.file.write_text(json.dumps(self.config, indent=1))
         size = self.config.get("size")
