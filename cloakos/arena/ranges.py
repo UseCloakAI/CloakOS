@@ -48,3 +48,33 @@ def desk_rays(x: float, y: float, yaw: float, size: tuple[float, float], n: int,
             t = min(t, _hit_circle(x0, y0, dx, dy, cx, cy, r))
         out[i] = max(0.0, t)
     return out
+
+
+# Measured on the user's robot (data/calibration.json, Oct 28): Wi-Fi control is always late.
+COMMAND_TO_MOTION_S = 0.41
+STOP_S = 0.446
+WHEEL_GAIN = 0.86
+WHEEL_BASE = 0.048     # m between Vector's treads
+STOP_MARGIN = 0.02     # m on top of the stopping distance
+
+
+def predict_pose(x: float, y: float, yaw: float, left_mps: float, right_mps: float, dt: float) -> tuple[float, float, float]:
+    """Where Vector will be dt seconds from now at these wheel speeds (differential drive, exact arc)."""
+    v, w = (left_mps + right_mps) / 2, (right_mps - left_mps) / WHEEL_BASE
+    if abs(w) < 1e-6:
+        return x + v * dt * math.cos(yaw), y + v * dt * math.sin(yaw), yaw
+    y2 = yaw + w * dt
+    return x + v / w * (math.sin(y2) - math.sin(yaw)), y - v / w * (math.cos(y2) - math.cos(yaw)), math.atan2(math.sin(y2), math.cos(y2))
+
+
+def stop_buffer(speed_mps: float) -> float:
+    """How far Vector goes before a stop takes hold: speed x (command lag + stopping time) + a margin."""
+    return abs(speed_mps) * (COMMAND_TO_MOTION_S + STOP_S) + STOP_MARGIN
+
+
+def buffered(rays: np.ndarray, fov: float, speed_mps: float) -> np.ndarray:
+    """Rays shortened by the stopping distance in the direction of travel (full ahead, none sideways)."""
+    n = len(rays)
+    ang = np.linspace(-fov / 2, fov / 2, n)
+    along = np.maximum(0.0, np.cos(ang)) if speed_mps >= 0 else np.zeros(n)
+    return np.maximum(0.0, rays - stop_buffer(speed_mps) * along).astype(np.float32)

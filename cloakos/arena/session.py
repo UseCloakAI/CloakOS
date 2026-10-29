@@ -94,9 +94,22 @@ class Arena:
         """Ray ranges in Vector's frame from the overhead view, like the sim's rays(); None if not live."""
         if self.ranges_status() is not None:
             return None
-        from .ranges import desk_rays
+        from .ranges import COMMAND_TO_MOTION_S, WHEEL_GAIN, buffered, desk_rays, predict_pose
         p = self.pose
-        return desk_rays(float(p["x"]), float(p["y"]), float(self.heading()), self.size_m, n, fov, max_range, self.obstacles())
+        x, y, yaw = float(p["x"]), float(p["y"]), float(self.heading())
+        # The pose is already old, and whatever the driver sends now lands ~0.4 s later: answer for
+        # where Vector will be then. Wheel speeds: Vector's own, else what was asked times the gain.
+        w = getattr(self.brain, "world", None)
+        cmd = getattr(getattr(self.brain, "body", None), "cmd", None)
+        lw, rw = getattr(w, "left_mmps", None), getattr(w, "right_mmps", None)
+        if lw is None or rw is None:
+            lw = (getattr(cmd, "left_mmps", 0.0) or 0.0) * WHEEL_GAIN
+            rw = (getattr(cmd, "right_mmps", 0.0) or 0.0) * WHEEL_GAIN
+        lw, rw = float(lw) / 1000, float(rw) / 1000
+        dt = (time.time() - p["t"]) + COMMAND_TO_MOTION_S
+        x, y, yaw = predict_pose(x, y, yaw, lw, rw, dt)
+        r = desk_rays(x, y, yaw, self.size_m, n, fov, max_range, self.obstacles())
+        return buffered(r, fov, (lw + rw) / 2)
 
     def teacher_view(self, n: int = 9) -> dict[str, Any] | None:
         """What a recording keeps from the overhead camera each tick (the teacher's signals)."""

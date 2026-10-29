@@ -45,9 +45,20 @@ def test_arena_session_ranges_and_status(tmp_path):
     assert a.ranges_status() == "Arena isn't tracking Vector" and a.ranges(9, RAY_FOV, RAY_MAX) is None
     a = _arena(tmp_path, {"x": 0.5, "y": 0.3, "yaw": 0.0})
     assert a.ranges_status() is None
-    assert np.allclose(a.ranges(3, RAY_FOV, RAY_MAX), [0.3 - M, 0.5 - NOSE - M, 0.3 - M], atol=1e-5)
+    assert np.allclose(a.ranges(3, RAY_FOV, RAY_MAX), [0.3 - M, 0.5 - NOSE - M - 0.02, 0.3 - M], atol=1e-5)
     a.pose["t"] = time.time() - 10                                # lost
     assert a.ranges(3, RAY_FOV, RAY_MAX) is None
+
+
+def test_predict_pose_and_stop_buffer():
+    from cloakos.arena.ranges import COMMAND_TO_MOTION_S, STOP_MARGIN, STOP_S, buffered, predict_pose, stop_buffer
+    x, y, yaw = predict_pose(0.0, 0.0, 0.0, 0.1, 0.1, 0.5)
+    assert math.isclose(x, 0.05, abs_tol=1e-9) and y == 0 and yaw == 0
+    x, y, yaw = predict_pose(0.0, 0.0, 0.0, -0.024, 0.024, 1.0)        # spin in place: 1 rad/s
+    assert math.isclose(yaw, 1.0, abs_tol=1e-9) and abs(x) < 1e-9 and abs(y) < 1e-9
+    assert math.isclose(stop_buffer(0.1), 0.1 * (COMMAND_TO_MOTION_S + STOP_S) + STOP_MARGIN)
+    b = buffered(np.full(3, 0.5, np.float32), RAY_FOV, 0.1)
+    assert math.isclose(b[1], 0.5 - stop_buffer(0.1), abs_tol=1e-6) and math.isclose(b[0], 0.5, abs_tol=1e-6)
 
 
 def test_ranges_priority_and_explicit_none(tmp_path):
