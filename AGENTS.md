@@ -99,6 +99,15 @@ teacher-driven steps.
 6. Camera-student distillation for each skill, so it works without the overhead camera.
 7. A natural-language command layer on top (voice/LLM picks the skill and target).
 
+**Latency (always there over Wi-Fi):** measured Oct 28: command to motion 0.41 s, stop 0.446 s,
+wheel speed ratio 0.86, camera 5 fps, command to picture 0.522 s, command to head sensor 0.268 s,
+picture 0.29 s behind the sensors. The robot acts on information about 0.5–0.9 s old. So Arena ranges
+(v0.9.7) predict the pose forward by the pose's age + 0.41 s, and shorten the rays ahead by a
+stopping buffer (speed × (0.41 + 0.446) s + 2 cm). Training must inject these delays too, with domain
+randomization around the measured values (envs.py already does 3–5 steps of action lag, wheel gain
+0.82–0.92 and the camera lag in `LaggyCamera`; keep it that way and add Arena pose lag when teacher
+drivers are trained on Arena-style ranges), so students learn with the real delay.
+
 The 3D map stays parked (see above).
 
 ## Architecture map (`cloakos/`)
