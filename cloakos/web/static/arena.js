@@ -365,7 +365,7 @@
       picking = null; step(null); save({ corners: cornerPts, size: [+$('#ar-w').value, +$('#ar-d').value] });
     } else {
       const c = sample(n); const what = picking; picking = null; step(null);
-      if (what === 'gold' && H) { const d = apply(H, n); last = { ok: false, desk: d, px: n }; relearn = true; path = []; }   // "that one is Vector"
+      if (what === 'gold' && H) { const d = apply(H, n); last = { ok: false, desk: d, px: n }; relearn = true; path = []; T.pos = null; }   // "that one is Vector"
       if (c) save({ [what]: c });
     }
   });
@@ -422,15 +422,62 @@
   function info(f) {
     const parts = [!cfg.corners ? '✗ desk corners not set' : `✓ desk ${cfg.size ? cfg.size.join(' × ') + ' cm' : ''}`,
       cfg.mfront && cfg.mback ? '✓ front + back markers' : `– markers: ${cfg.mfront ? '' : 'front '}${cfg.mback ? '' : 'back '}not picked`, !cfg.dot ? '– light not picked (heading comes from which way it moves)' : '✓ backpack light'];
-    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}° (${f.cm2 === 'markers' ? 'from the markers' : f.cm2 + ' cm²'})`
+    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}° (${f.cm2 === 'markers' ? 'from the markers' : f.cm2 === 'held' ? 'coasting' : f.cm2 + ' cm²'})`
       : H ? "Can't see Vector. Click on Vector to point it out, or move Match up." : '';
     $('#ar-track').innerHTML = `<p class="tele-note">${parts.map(esc).join('<br>')}</p>${where ? `<b>${esc(where)}</b>` : ''}`;
   }
 
   /* ── the 10 Hz loop ─────────────────────────────────────── */
   let tick = 0;
+  /* Motion filter: Vector can only move so fast, so each new reading is checked against where it
+     should be by now. Plausible ones are blended in; a sudden jump is ignored unless it holds for
+     several frames (then it really moved, e.g. picked up). Short dropouts coast on its last motion.
+     While the markers were seen in the last second, the shape guess isn't allowed to take over. */
+  const T = { pos: null, vel: [0, 0], yaw: 0, t: 0, seen: 0, markerT: 0, far: 0, farPos: null, yawFar: 0, px: null, src: 'hold' };
+  const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+  function smooth(raw) {
+    if (!raw) return raw;
+    const now = performance.now() / 1000;
+    let m = raw.ok ? raw : null;
+    if (m && m.cm2 === 'markers') T.markerT = now;
+    else if (m && cfg.mfront && cfg.mback && now - T.markerT < 1.0) m = null;      // markers just now: don't trust the shape guess
+    if (!T.pos) {
+      if (!m) return raw;
+      Object.assign(T, { pos: [m.x, m.y], vel: [0, 0], yaw: m.yaw, t: now, seen: now, px: m.px, src: m.src });
+      return { ...m, desk: [m.x, m.y] };
+    }
+    const dt = Math.min(0.5, Math.max(0.02, now - T.t)); T.t = now;
+    const pred = [T.pos[0] + T.vel[0] * dt, T.pos[1] + T.vel[1] * dt];
+    let take = false;
+    if (m) {
+      const d = Math.hypot(m.x - pred[0], m.y - pred[1]);
+      if (d < 0.05 + 0.3 * dt) { take = true; T.far = 0; }
+      else {                                          // a jump: believe it only if it keeps saying the same place
+        T.far = T.farPos && Math.hypot(m.x - T.farPos[0], m.y - T.farPos[1]) < 0.03 ? T.far + 1 : 1;
+        T.farPos = [m.x, m.y];
+        if (T.far >= 4) { T.pos = [m.x, m.y]; T.vel = [0, 0]; T.yaw = m.yaw; T.far = 0; take = true; }
+      }
+    }
+    if (take) {
+      const np = [pred[0] + 0.6 * (m.x - pred[0]), pred[1] + 0.6 * (m.y - pred[1])];
+      const v = [(np[0] - T.pos[0]) / dt, (np[1] - T.pos[1]) / dt], sp = Math.hypot(...v), cap = 0.3;
+      T.vel = [0.6 * T.vel[0] + 0.4 * v[0] * Math.min(1, cap / (sp || 1)), 0.6 * T.vel[1] + 0.4 * v[1] * Math.min(1, cap / (sp || 1))];
+      T.pos = np;
+      const dy = wrap(m.yaw - T.yaw);
+      if (Math.abs(dy) > 1.2 && m.src !== 'light') { T.yawFar++; if (T.yawFar >= 3) { T.yaw = m.yaw; T.yawFar = 0; } }
+      else { T.yaw = wrap(T.yaw + (m.src === 'light' ? 0.6 : 0.3) * dy); T.yawFar = 0; }
+      T.seen = now; T.px = m.px; T.src = m.src;
+      return { ...m, x: T.pos[0], y: T.pos[1], yaw: T.yaw, desk: T.pos.slice() };
+    }
+    if (now - T.seen < 0.7) {                         // short dropout: coast
+      T.vel = [T.vel[0] * 0.8, T.vel[1] * 0.8]; T.pos = pred;
+      return { ok: true, x: T.pos[0], y: T.pos[1], yaw: T.yaw, src: 'hold', px: T.px, area: 60, cm2: 'held', desk: T.pos.slice() };
+    }
+    return { ok: false };
+  }
+
   function frame() {
-    const f = track();
+    const f = smooth(track());
     if (f && f.ok) { last = f; if (!path.length || Math.hypot(path[path.length - 1][0] - f.x, path[path.length - 1][1] - f.y) > 0.01) { path.push([f.x, f.y]); path = path.slice(-2000); } }
     else if (f) last = { ...(last || {}), ok: false };
     draw(f);
