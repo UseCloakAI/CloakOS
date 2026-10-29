@@ -2,9 +2,14 @@
 as analog axes in -1..1; this turns them into the same Action the logger records.
 
 Dead-man: if no input arrives for `deadman_s`, the bot stops.
+
+Home pose: a second after you stop moving the head or lift, they go back to one fixed pose (head
+a little down, lift down), so the camera always sees the desk the same way. That keeps teleop
+recordings consistent for training, and the view predictable. teleop.head_home_deg (None = off).
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 from ..connection import Action, Body
@@ -26,6 +31,10 @@ class TeleopPolicy(Policy):
         self.body = body
         self.axes = {"throttle": 0.0, "steer": 0.0, "head": 0.0, "lift": 0.0, "boost": 0.0}
         self._last_input = 0.0
+        home = c.get("head_home_deg", -5.0)               # the middle of the head angles desk training covers
+        self.head_home = None if home is None else float(home)
+        self.home_after_s = float(c.get("home_after_s", 1.0))
+        self._posed = 0.0                                 # when head/lift were last moved by hand (0 = at home)
 
     def input(self, **axes: float) -> None:
         for k, v in axes.items():
@@ -42,7 +51,26 @@ class TeleopPolicy(Policy):
         return Action(v + w, v - w, a["head"] * self.head_speed, a["lift"] * self.lift_speed)
 
     async def step(self, obs: Obs) -> None:
-        await self.body.apply(self.action(), source="teleop")
+        act = self.action()
+        if act.head_rate or act.lift_rate:
+            self._posed = time.time()
+        elif self._posed and time.time() - self._posed > self.home_after_s:
+            self._posed = 0.0
+            self._go_home_pose()
+        await self.body.apply(act, source="teleop")
+
+    async def start(self) -> None:
+        self._go_home_pose()
+
+    def _go_home_pose(self) -> None:
+        if self.head_home is None:
+            return
+        async def pose() -> None:
+            try:
+                await asyncio.gather(self.body.head_angle(self.head_home), self.body.lift_height(0.0))
+            except Exception:
+                pass                                       # not connected, or halted: nothing to straighten
+        asyncio.ensure_future(pose())
 
     async def stop(self) -> None:
         self.axes = dict.fromkeys(self.axes, 0.0)

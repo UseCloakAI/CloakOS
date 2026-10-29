@@ -155,3 +155,33 @@ async def test_volume_follows_wirepod_and_mutes_everything(tmp_path, monkeypatch
     await link.set_volume(0)                          # slider to 0 -> a real mute on the robot and in wire-pod
     assert ("robot", 0) in calls and ("/api-sdk/volume", {"volume": 0}) in calls
     assert link._level(100) == 5 and link._level(10) == 1
+
+
+async def test_teleop_camera_returns_to_the_same_angle():
+    import asyncio
+    import time
+
+    from cloakos.teleop.policy import TeleopPolicy
+
+    calls = []
+
+    class Body:
+        async def apply(self, a, source=None): pass
+        async def head_angle(self, deg, speed=10.0): calls.append(("head", deg))
+        async def lift_height(self, h, speed=10.0): calls.append(("lift", h))
+
+    t = TeleopPolicy({"teleop": {"home_after_s": 0.3}}, Body())
+    await t.start()
+    await asyncio.sleep(0.05)
+    assert ("head", -5.0) in calls and ("lift", 0.0) in calls
+    calls.clear()
+    t.input(head=1.0)
+    await t.step(None)                                 # moving the head by hand
+    t.input(head=0.0)
+    await t.step(None)
+    assert not calls                                   # not straight away
+    time.sleep(0.35)
+    t.input(throttle=0.5)
+    await t.step(None)
+    await asyncio.sleep(0.05)
+    assert calls == [("head", -5.0), ("lift", 0.0)]    # back to the same view a moment later
