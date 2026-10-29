@@ -92,6 +92,28 @@ class Arena:
             return math.atan2(math.sin(odo + self._yaw_off), math.cos(odo + self._yaw_off))
         return float(self.pose["yaw"]) if self.pose and self.pose.get("ok") else None
 
+    # ── the page: the right mode while you're in the Arena ──────
+
+    _prev_mode: str | None = None
+
+    async def enter(self) -> str:
+        """Opening the Arena: Teleop, so Vector holds still for setup and you can drive it. Left alone
+        if it's charging, running something of its own here, or the emergency stop is on."""
+        b = self.brain
+        if b.mode in ("auto", "idle", "goto") and not b.estop and not self.running and not (self.dock_task and not self.dock_task.done()):
+            self._prev_mode = b.mode
+            await b.set_mode("teleop")
+        return b.mode
+
+    async def leave(self) -> str:
+        """Leaving the Arena: back to the mode it was in, unless a run or a trip home is still going
+        (those carry on) or you've switched mode yourself."""
+        b = self.brain
+        if self._prev_mode and b.mode == "teleop" and not self.running and not (self.dock_task and not self.dock_task.done()):
+            await b.set_mode(self._prev_mode)
+        self._prev_mode = None
+        return b.mode
+
     # ── going home ─────────────────────────────────────────────
 
     APPROACH = 0.18        # m in front of the charger: Vector's docking takes over from there
@@ -199,6 +221,17 @@ class Arena:
         b = self.brain
         if not self.size_m or not self.config.get("corners"):
             return "Set up the desk first (corners and size)."
+        if b.estop:
+            return "Release the emergency stop first."
+        w = getattr(b, "world", None)
+        if w is not None and w.on_charger:                   # starting from the charger: drive off it first
+            if b.mode == "home":
+                await b.set_mode("teleop")
+            await b.body.leave_home()
+            for _ in range(30):                              # until the camera sees it out on the desk
+                await asyncio.sleep(0.2)
+                if self.pose and self.pose.get("ok") and time.time() - self.pose["t"] < 1.0 and not w.on_charger:
+                    break
         if not self.pose or time.time() - self.pose["t"] > LOST_S:
             return "The camera can't see Vector right now."
         if b.estop:
@@ -217,7 +250,7 @@ class Arena:
                 await b.set_mode("idle")
             await b.set_mode("learned")
         self.run = {"policy": policy or None, "driver": policy or f"you ({b.mode})", "target": b.link.target,
-                    "start": time.time(), "seconds": float(seconds), "cells": [], "falls": 0, "edge_saves": 0,
+                    "start": time.time(), "seconds": float(seconds), "cells": 0, "falls": 0, "edge_saves": 0,
                     "lost_s": 0.0, "status": "running", "path": []}
         self.task = asyncio.create_task(self._watch(policy))
         return None
