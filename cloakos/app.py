@@ -393,6 +393,11 @@ class Brain:
                     self.sfx.play("estop", 2.5, force=True)
             else:
                 self._charging_rules(w)
+            if time.time() - getattr(self, "_auto_train_t", 0.0) > 30:       # Keep training: next session when one ends
+                self._auto_train_t = time.time()
+                if self.trainer.auto.get("on"):
+                    asyncio.ensure_future(asyncio.to_thread(
+                        lambda: self.trainer.auto_tick([e for e in self.recorder.list_episodes() if e["frames"]])))
             obs = Obs(time.time(), self.drives.values, w)
             if self.policy is not None and self.link.has_control:
                 try:

@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--resume", default=None, help="model.zip to continue from")
+    ap.add_argument("--hours", type=float, default=None, help="train for this long instead of a step count (then test)")
     ap.add_argument("--lr", type=float, default=None, help="starting learning rate (default 3e-4, 1.5e-4 when building on)")
     a = ap.parse_args(argv)
 
@@ -109,15 +110,19 @@ def main(argv: list[str] | None = None) -> None:
                                      "bumps": info.get("bumps", 0)})
             if (out / "STOP").exists():
                 return False
+            if deadline and time.time() >= deadline:          # time's up: that counts as done
+                hit["deadline"] = True
+                return False
             return True
 
         def _on_training_start(self) -> None:
             self.start_steps = int(self.num_timesteps)
 
         def _on_rollout_end(self) -> None:
-            clock["done"] = (self.num_timesteps - meta["base_steps"]) / max(1, int(meta["steps"]))
+            clock["done"] = ((trained_s + time.time() - t_run) / budget if budget
+                             else (self.num_timesteps - meta["base_steps"]) / max(1, int(meta["steps"])))
             recent = self.eps[-100:]
-            row = {"t": round(time.time() - self.t0, 1), "steps": int(self.num_timesteps),
+            row = {"t": round(time.time() - self.t0, 1), "steps": int(self.num_timesteps), "done": round(min(1.0, clock["done"]), 4),
                    "fps": int((self.num_timesteps - (self.start_steps or 0)) / max(1e-6, time.time() - self.t0)),
                    "episodes": len(self.eps), "lr": float(f"{self.model.lr_schedule(self.model._current_progress_remaining):.3g}")}
             if recent:
@@ -155,15 +160,23 @@ def main(argv: list[str] | None = None) -> None:
         model = PPO("MlpPolicy", vec, device="cpu", seed=a.seed, verbose=0, n_steps=1024, batch_size=256, gamma=0.99,
                     learning_rate=lr, ent_coef=0.005, target_kl=0.03, policy_kwargs={"net_arch": [128, 128]})
     meta.setdefault("base_steps", int(model.num_timesteps))      # where this run's own steps start counting
-    clock["done"] = (model.num_timesteps - meta["base_steps"]) / max(1, int(meta["steps"]))
+    if a.hours and not prev_meta:
+        meta.update(hours=a.hours, steps=10**10)                  # a time budget, not a step count
+    budget = float(meta.get("hours") or 0) * 3600
+    t_run, trained_s = time.time(), float(meta.get("trained_s", 0.0))
+    deadline = t_run + budget - trained_s if budget else None
+    clock["done"] = trained_s / budget if budget else (model.num_timesteps - meta["base_steps"]) / max(1, int(meta["steps"]))
     (out / "meta.json").write_text(json.dumps(meta, indent=1))
+    hit = {"deadline": False}
     try:
         start = int(model.num_timesteps)
-        todo = max(0, int(meta["steps"]) - start) if prev_meta else a.steps
+        todo = max(0, int(meta["base_steps"]) + int(meta["steps"]) - start)
         model.learn(total_timesteps=todo, callback=Report(), reset_num_timesteps=not a.resume)
     finally:
         save_model(model, out)
-        done = int(model.num_timesteps) - start >= todo        # stopped early or killed: left open to Continue
+        if budget:
+            meta["trained_s"] = trained_s + time.time() - t_run
+        done = hit["deadline"] or int(model.num_timesteps) - start >= todo   # stopped early or killed: left open to Continue
         if done:
             meta["finished"] = time.time()
         (out / "STOP").unlink(missing_ok=True)
