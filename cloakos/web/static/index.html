@@ -58,6 +58,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18M5 16l4-5 4 3 6-8"/><circle cx="19" cy="6" r="1.5"/></svg>
           <span class="sbl">Training</span>
         </button>
+        <button class="sb-btn" type="button" data-nav="arena" onclick="goPage('arena')" title="Arena (real desk camera)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="3"/></svg>
+          <span class="sbl">Arena</span>
+        </button>
       </nav>
       <div class="sb-label">Recordings</div>
       <div class="conv-list" id="conv-list"></div>
@@ -516,6 +520,57 @@
         </div></div>
       </section>
 
+
+      <section class="page" id="page-arena" data-page="arena" aria-label="Arena" tabindex="-1" hidden>
+        <div class="topbar">
+          <div class="topbar-left">
+            <button class="icon-btn sb-toggle" type="button" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-controls="sidebar">
+              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            </button>
+            <h1 class="page-title">Arena</h1>
+          </div>
+          <div class="topbar-right"><select id="ar-cam" class="sim-select" aria-label="Camera"></select></div>
+        </div>
+        <div class="sim-wrap">
+          <div class="sim-stage ar-stage">
+            <video id="ar-video" playsinline muted></video>
+            <canvas id="ar-overlay" aria-label="Camera view of the desk"></canvas>
+            <div class="sim-empty" id="ar-empty">Pick your camera above (your iPhone shows up once Continuity Camera is on).</div>
+            <div class="ar-step" id="ar-step" hidden></div>
+            <canvas id="ar-map" class="ar-map" width="240" height="160" aria-label="Top-down desk map"></canvas>
+          </div>
+          <aside class="sim-side">
+            <h2>1 · Desk</h2>
+            <p class="tele-note">Click the desk's 4 corners in the camera view: front-left, front-right, back-right, back-left (front = your side). Then its real size.</p>
+            <div class="sim-row">
+              <label class="sim-num">Width <input id="ar-w" type="number" min="20" max="300" step="1" value="80"> cm</label>
+              <label class="sim-num">Depth <input id="ar-d" type="number" min="20" max="300" step="1" value="50"> cm</label>
+            </div>
+            <div class="sim-row"><button class="chip" onclick="arCorners()">Click corners</button><button class="chip" onclick="arSaveSize()">Save size</button></div>
+            <p class="tele-note">Training uses this size too: half the sim desks become your desk's size.</p>
+            <h2>2 · Vector</h2>
+            <p class="tele-note">Click Vector's gold top, then the dot, so it can tell where it is and which way it faces.</p>
+            <div class="sim-row"><button class="chip" onclick="arPick('gold')">Click gold top</button><button class="chip" onclick="arPick('dot')">Click the dot</button></div>
+            <div class="sim-row">
+              <label class="sim-num">Match <input id="ar-tol" type="range" min="5" max="60" value="22" oninput="arTol(this.value)"></label>
+              <button class="chip" onclick="arFlip()" title="If the arrow points backwards">Flip heading</button>
+            </div>
+            <div id="ar-track" class="desk-score"></div>
+            <h2>3 · Real run</h2>
+            <p class="tele-note">Scores a real drive on your desk like the sim exam: desk covered, edge saves (the reflex had to step in), falls. Pick a camera-trained desk policy, or score yourself driving in Teleop.</p>
+            <div class="sim-row"><select id="ar-policy" class="sim-select" aria-label="Who drives"></select></div>
+            <div class="sim-row">
+              <select id="ar-secs" class="sim-select" aria-label="Length"><option value="60">1 min</option><option value="120" selected>2 min</option><option value="300">5 min</option></select>
+              <button class="chip" id="ar-go" onclick="arRun()">Start run</button>
+              <button class="chip" id="ar-stop" onclick="arStop()" hidden>Stop</button>
+            </div>
+            <div id="ar-run"></div>
+            <h2>Recent runs</h2>
+            <div id="ar-recent"><p class="tele-note">None yet.</p></div>
+          </aside>
+        </div>
+      </section>
+
       <section class="page settings-page" id="page-lab" data-page="lab" aria-label="Drive lab" tabindex="-1" hidden>
         <div class="topbar">
           <div class="topbar-left">
@@ -547,6 +602,7 @@
 <script type="importmap">{"imports": {"three": "/static/vendor/three.module.min.js"}}</script>
 <script type="module" src="/static/sim.js"></script>
 <script src="/static/train.js"></script>
+<script src="/static/arena.js"></script>
 <script type="module" src="/static/map.js"></script>
 <div id="estop-banner" class="estop-note" role="alert" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5" stroke-linecap="round"/></svg><span>Emergency stop: everything is halted.<br>Release with <b>Shift+Space</b></span><button type="button" onclick="toggleEstop()">Release</button></div>
 <div id="estop-clear" class="estop-note" role="status" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12.5 5 5L20 6.5"/></svg><span>Emergency stop released. All clear.</span></div>

@@ -97,6 +97,7 @@ class Brain:
         self.calibrator = Calibrator(self)
         self.tester = None                       # sim.tester.Tester, made on first use
         self.deskrun = None                      # sim.deskrun.DeskRun (Simulator desk), made on first use
+        self.arena = None                        # arena.session.Arena (real desk + camera), made on first use
         fz = cfg.get("freeze", {}) or {}
         self.freeze_taps = int(fz.get("taps", 3))
         self.freeze_window = float(fz.get("window_s", 1.5))
@@ -155,6 +156,8 @@ class Brain:
                 self.tester.stop()
             if self.deskrun is not None and self.deskrun.running:
                 self.deskrun.stop_task()
+            if self.arena is not None and self.arena.running:
+                asyncio.ensure_future(self.arena.stop("emergency stop"))
             self.policy, self.mode = self.policies.get("teleop"), "teleop"     # nothing autonomous comes back
             self.bus.emit("mode.changed", mode="teleop")
             self._estop_ping = 0.0
