@@ -30,6 +30,7 @@
     } catch (e) { $('#ar-empty').textContent = `Couldn't open that camera: ${e.message}`; $('#ar-empty').hidden = false; return; }
     const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
     if (caps.zoom) await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] }).catch(() => {});   // ultra-wide if offered
+    track.onended = () => lost();                  // the iPhone dropped (moved, unlocked, Wi-Fi blip)
     video.srcObject = stream;
     await video.play().catch(() => {});
     $('#ar-empty').hidden = true;
@@ -37,6 +38,22 @@
     if (label !== cfg.camera) save({ camera: label });
   }
   $('#ar-cam').addEventListener('change', e => open(e.target.value));
+
+  /* Continuity Camera drops now and then: keep trying the same camera until it's back */
+  let retry = null;
+  function lost() {
+    stream = null;
+    $('#ar-empty').textContent = 'The camera disconnected. Reconnecting… (keep the iPhone locked, still, and near the Mac)';
+    $('#ar-empty').hidden = false;
+    clearInterval(retry);
+    retry = setInterval(async () => {
+      if (stream) return clearInterval(retry);
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      const d = devs.find(x => x.label && x.label === cfg.camera) || devs.find(x => /iphone/i.test(x.label));
+      if (d) { $('#ar-cam').value = d.deviceId; await open(d.deviceId); if (stream) clearInterval(retry); }
+    }, 3000);
+  }
+  navigator.mediaDevices && navigator.mediaDevices.addEventListener('devicechange', () => { if (!stream && cfg.camera) lost(); });
 
   /* ── geometry: image (0..1) <-> desk (metres) ───────────── */
   function solve(A, b) {                           // small Gaussian elimination
