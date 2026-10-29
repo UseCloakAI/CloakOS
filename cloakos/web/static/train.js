@@ -38,12 +38,30 @@
     const now = st.running || (st.auto && st.auto.on);
     $('#tr-next').innerHTML = `<b>${now ? 'Now' : 'Next'}: ${esc(pl.title)}</b>${esc(pl.why)} ${now ? '' : from}${now ? '' : drives}`;
   }
+  function paintLog() {                             // what Keep going did, so a stop is never a mystery
+    const h = ((st.auto && st.auto.history) || []).slice(-6).reverse(), el = $('#tr-log');
+    el.hidden = !h.length;
+    const when = t => new Date(t * 1000).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    const say = e => ({ started: `Started ${e.detail}`, finished: 'Session finished and tested',
+      crashed: `Session stopped early${e.detail ? `: ${e.detail.split('\n').pop()}` : ''}`, error: `Couldn't start the next session: ${e.detail}` }[e.outcome] || e.outcome);
+    el.innerHTML = `<b>Keep going: what happened</b>` + h.map(e =>
+      `<div class="${e.outcome === 'error' || e.outcome === 'crashed' ? 'bad' : ''}">${esc(when(e.t))} · ${esc(say(e))}</div>`).join('')
+      + (st.auto && !st.auto.on && h.length ? '<div>Keep going is off.</div>' : '');
+  }
   window.trLen = h => { trHours = h; document.querySelectorAll('.tr-opt').forEach(b => b.classList.toggle('on', b.dataset.h === h)); };
   window.trStart = async () => {
     pending = 'start'; follow = true; paintRun(null); $('#tr-start').disabled = true; $('#tr-start').textContent = 'Starting…';
     const r = trHours === 'keep' ? await post('/api/rl/keep', { on: true }) : await post('/api/rl/next', { hours: +trHours });
     if (!r.ok || r.error) { pending = null; alert(r.error || 'Could not start'); }
     $('#tr-start').disabled = false; $('#tr-start').textContent = 'Start training';
+    fast();
+  };
+  window.trMore = async name => {
+    const how = { 1: '1 hour', 8: 'overnight (8 hours)', keep: 'a 2-hour session, then Keep going carries on' }[trHours];
+    if (!confirm(`Train this driver more: ${how}?`)) return;
+    pending = 'start'; follow = true; paintRun(null);
+    const r = await post('/api/rl/more', { name, hours: trHours === 'keep' ? 'keep' : +trHours });
+    if (!r.ok) { pending = null; alert(r.error); } else chartName = r.name;
     fast();
   };
   window.rlMore = () => { showAll = !showAll; refresh(); };
@@ -72,6 +90,7 @@
     $('#rl-stop').textContent = run && run.stopping || pending === 'stop' ? 'Saving…' : 'Stop and save';
     paintRun(run);
     paintPath();
+    paintLog();
     $('#tr-go').hidden = !!run || pending === 'start' || !!(st.auto && st.auto.on);
     $('#tr-start').disabled = !!st.available;
 
@@ -157,6 +176,7 @@
       <p>${esc(testLine(ex) || (p.training ? 'Training now…' : p.ready ? 'Not tested yet' : 'Stopped before it saved anything'))}${extra ? `<br>${esc(extra)}` : ''}</p>
       <div class="sc-foot"><span class="sc-checks" title="${esc(p.name)}">${esc(p.name)}</span>
         ${p.can_continue && !st.running ? `<button class="chip" onclick="rlContinue('${p.name}')">Continue</button>` : ''}
+        ${p.ready && !p.training && !p.can_continue && !st.running ? `<button class="chip" onclick="trMore('${p.name}')" title="Keep training this driver, for the length picked above">Train more</button>` : ''}
         ${p.ready && !p.training ? `<button class="chip" onclick="rlUse('${p.name}')">${useLabel}</button>` : ''}
         <button class="chip" onclick="rlChart('${p.name}')" title="Show its learning curve under Advanced">Chart</button>
         ${p.training ? '' : `<button class="chip" onclick="rlDelete('${p.name}')" title="Delete">Delete</button>`}</div>

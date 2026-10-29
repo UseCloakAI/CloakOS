@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> None:
     from stable_baselines3.common.env_util import make_vec_env
     from stable_baselines3.common.vec_env import SubprocVecEnv
 
-    from .envs import VectorEnv, make_spec
+    from .envs import DESK_REWARD_V, VectorEnv, make_spec
 
     torch.set_num_threads(1)                 # the parallel sims want the cores, not the tiny network
     out = Path(a.out)
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> None:
     prev_meta = json.loads((out / "meta.json").read_text()) if same_run and (out / "meta.json").exists() else None
     meta = {"task": a.task, "sensors": spec.sensors, "obs_size": spec.obs_size, "control_hz": spec.control_hz,
             "max_speed": spec.max_speed, "n_rays": spec.n_rays, "steps": a.steps, "envs": a.envs,
-            "created": time.time(), "algo": "PPO",
+            "created": time.time(), "algo": "PPO", "reward_v": DESK_REWARD_V if a.task == "desk" else None,
             "resumed_from": Path(a.resume).parent.name if a.resume else None}
     if prev_meta:                    # picking a stopped run back up: same folder, same goal
         meta = {**prev_meta, "continued": prev_meta.get("continued", 0) + 1}

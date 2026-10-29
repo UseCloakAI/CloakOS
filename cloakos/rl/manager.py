@@ -104,7 +104,8 @@ class Trainer:
         return not meta.get("finished") and ((self.root / name / "model.zip").exists() or (self.root / name / "student.pt").exists())
 
     def set_auto(self, on: bool) -> None:
-        self.auto = {"on": on, "since": time.time(), "sessions": 0, "trained_s": 0.0} if on else {**self.auto, "on": False}
+        self.auto = ({"on": on, "since": time.time(), "sessions": 0, "trained_s": 0.0, "history": self.auto.get("history", [])}
+                     if on else {**self.auto, "on": False})
         self._save_auto()
 
     def _save_auto(self) -> None:
@@ -115,6 +116,22 @@ class Trainer:
             pass
 
     def auto_tick(self, recordings: list[dict]) -> str | None:
+        try:
+            return self._auto_tick(recordings)
+        except Exception as e:                             # never die silently: say why on the page
+            log.exception("keep training")
+            self._note("error", f"{type(e).__name__}: {e}")
+            return None
+
+    def _note(self, outcome: str, detail: str = "", name: str | None = None) -> None:
+        h = self.auto.setdefault("history", [])
+        h.append({"t": time.time(), "outcome": outcome, "detail": detail[-300:], "name": name})
+        del h[:-20]
+        if outcome == "error":
+            self.auto["error"] = detail[-300:]
+        self._save_auto()
+
+    def _auto_tick(self, recordings: list[dict]) -> str | None:
         """Called every so often: if Keep training is on and nothing's running, start the next session
         (whatever step is next). A session that dies within minutes backs off for 10 minutes."""
         if not self.auto.get("on") or self.running():
@@ -135,7 +152,10 @@ class Trainer:
         if last and last.get("name"):
             ran = now - last["start"]
             self.auto["trained_s"] = self.auto.get("trained_s", 0.0) + ran
+            ended = last["name"]
             last["name"] = None                            # counted
+            tail = self._tail(self.root / ended / "train.log", 4) if ran < 300 else ""
+            self._note("finished" if ran >= 300 else "crashed", tail, ended)
             if ran < 300:                                  # died within minutes: don't hammer it
                 self.auto["wait_until"] = now + 600
                 self._save_auto()
@@ -145,13 +165,38 @@ class Trainer:
             name = self.start(**p["start"], steps=0, hours=self.SESSION_H)
         except (RuntimeError, ValueError) as e:
             log.warning("keep training: %s", e)
-            self.auto["error"] = str(e)
-            self._save_auto()
+            self._note("error", str(e))
             return None
         self.auto.update(sessions=self.auto.get("sessions", 0) + 1, error=None,
                          last={"name": name, "session": name, "start": time.time(), "stage": p["stage"]})
-        self._save_auto()
+        self._note("started", f"Step {p['stage']} · {p['title']}", name)
         return name
+
+    def train_more(self, name: str, hours: float, recordings: list[dict] | None = None, keep: bool = False) -> str:
+        """More training for one particular driver (passed or not), continuing from it. With keep, it
+        then carries on as Keep going."""
+        try:
+            meta = json.loads((self.root / name / "meta.json").read_text())
+        except (OSError, ValueError):
+            raise ValueError(f"no driver {name}")
+        task = meta.get("task")
+        if task == "desk-pixels":
+            pols = [p for p in self.policies() if p["ready"] and not p["training"]]
+            sim = self._best(pols, "desk")
+            if not sim:
+                raise ValueError("a camera driver needs a simulator driver to learn from; train one first")
+            since = meta.get("created") or 0
+            real = [r["name"] for r in recordings or [] if r.get("frames") and (r.get("created") or 0) > since]
+            run = self.start("desk-pixels", "map", 0, resume=name, teacher=sim["name"], real=real, hours=hours)
+        else:
+            if not (self.root / name / "model.zip").exists():
+                raise ValueError("this driver has no training checkpoint to continue from")
+            run = self.start(task, meta.get("sensors") or "map", 0, resume=name, hours=hours)
+        if keep:
+            self.set_auto(True)
+            self.auto.update(sessions=1, last={"name": run, "session": run, "start": time.time(), "stage": None})
+            self._note("started", f"more training from {name}", run)
+        return run
 
     # ── the guided path: what to train next, in plain words ────
 
@@ -175,7 +220,9 @@ class Trainer:
         pols = [p for p in self.policies() if p["ready"] and not p["training"]]
         sim, cam = self._best(pols, "desk"), self._best(pols, "desk-pixels")
         passed = lambda p: bool(p and (p.get("exam") or {}).get("passed"))
-        if not passed(sim):
+        from .envs import DESK_REWARD_V
+        current = bool(sim and (sim.get("reward_v") or 1) >= DESK_REWARD_V)   # trained under today's rules
+        if not passed(sim) or not current:
             stage, kw = 1, {"task": "desk", "sensors": "map",
                             "resume": sim["name"] if sim and (self.root / sim["name"] / "model.zip").exists() else None}
         else:
@@ -184,8 +231,11 @@ class Trainer:
             stage = 3 if passed(cam) else 2
             kw = {"task": "desk-pixels", "sensors": "map", "teacher": sim["name"], "resume": cam["name"] if cam else None, "real": real}
         title, why = self.STAGES[stage]
+        if stage == 1 and passed(sim) and not current:
+            why = ("Your simulator driver passed, but it was trained before the desk practice got harder "
+                   "(more things on the desk, steering clear of them). It continues from that driver and learns to avoid things.")
         return {"stage": stage, "title": title, "why": why, "start": kw,
-                "sim": sim and {"name": sim["name"], "passed": passed(sim)},
+                "sim": sim and {"name": sim["name"], "passed": passed(sim) and current},
                 "cam": cam and {"name": cam["name"], "passed": passed(cam)},
                 "new_drives": len(kw.get("real") or []),
                 "continues_from": kw.get("resume")}
@@ -271,7 +321,7 @@ class Trainer:
                 continue
             last = self.last_row(d.name)
             training = d.name == self.running()
-            out.append({"name": d.name, **{k: meta.get(k) for k in ("task", "sensors", "steps", "trained_steps", "created", "finished", "hours", "trained_s",
+            out.append({"name": d.name, **{k: meta.get(k) for k in ("task", "sensors", "steps", "trained_steps", "created", "finished", "hours", "trained_s", "reward_v",
                                                                     "teacher", "built_on", "resumed_from")},
                         "ready": (d / "policy.npz").exists(), "training": training,
                         "stopping": training and self.stopping,

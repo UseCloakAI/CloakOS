@@ -72,6 +72,17 @@ def make_rl_router(brain: "Brain") -> APIRouter:
             await asyncio.to_thread(t.stop)
         return JSONResponse({"ok": True, "auto": t.auto, "error": t.auto.get("error")})
 
+    @r.post("/more")
+    async def more(body: dict = Body(...)) -> JSONResponse:
+        """Train more: continue from one particular driver."""
+        recs = [e for e in await asyncio.to_thread(brain.recorder.list_episodes) if e["frames"]]
+        keep = body.get("hours") == "keep"
+        try:
+            name = await asyncio.to_thread(t.train_more, str(body.get("name", "")), 2.0 if keep else float(body.get("hours", 1)), recs, keep)
+        except (RuntimeError, ValueError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return JSONResponse({"ok": True, "name": name})
+
     @r.post("/next")
     async def train_next(body: dict = Body(default={})) -> JSONResponse:
         """The guided button: train whatever's next (see plan) for a number of hours."""

@@ -44,6 +44,7 @@ SENSORS = {"map": "Map ranges + robot sensors (recommended)", "robot": "Robot se
 ALIASES = {"explore": "wander", "rays": "map"}       # names used by older policies
 RAY_FOV = math.radians(180)
 RAY_MAX = 1.0
+DESK_REWARD_V = 2               # bump when the desk reward changes: older desk drivers get retrained (v2: steer clear of things)
 REAL_LAG_STEPS = (3, 5)          # command -> motion, in 0.1 s steps (calibration: 0.41 s)
 REAL_WHEEL_GAIN = (0.82, 0.92)   # wheels deliver this share of the asked speed (calibration: 0.86)
 
@@ -342,9 +343,12 @@ if gym is not None:
                 fwd = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
                 reward += 0.02 * max(0.0, fwd)
                 if s["bump"]:
-                    reward -= 2.0
+                    reward -= 3.0
                     info["bump"] = True
                     self.bumps += 1
+                near = float(sim.rays(5, math.radians(90), 0.3).min())     # things on the desk (rays pass over the drop)
+                if near < 0.08:
+                    reward -= 0.08 * (1 - near / 0.08)          # steer clear early, don't learn "bump, then turn"
                 ahead = edge_rays(s, sc.room, 5)[1:4].min()
                 if ahead < 0.05:
                     reward -= 0.1 * (1 - ahead / 0.05)         # keep well back from the drop
