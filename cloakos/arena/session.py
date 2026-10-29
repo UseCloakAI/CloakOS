@@ -108,6 +108,7 @@ class Arena:
         face = c["yaw"] + math.pi                                    # looking at the charger
         self.dock_state = "driving to the charger"
         end, phase = time.time() + timeout, "drive"
+        self.route = {"target": [tx, ty], "charger": [c["x"], c["y"]], "phase": phase}
         try:
             while time.time() < end:
                 await asyncio.sleep(0.1)
@@ -121,7 +122,7 @@ class Arena:
                 if phase == "drive":
                     d = math.hypot(tx - x, ty - y)
                     if d < 0.04:
-                        phase = "face"
+                        phase = self.route["phase"] = "face"
                         continue
                     err = math.atan2(math.sin(math.atan2(ty - y, tx - x) - yaw), math.cos(math.atan2(ty - y, tx - x) - yaw))
                     if abs(err) > 0.6:                               # turn toward it first
@@ -139,8 +140,10 @@ class Arena:
                     await b.body.drive(-s, s, "arena")
             return False
         finally:
+            self.route = None
             await b.body.drive(0, 0, "arena")
 
+    route: dict | None = None          # while driving home: where it's headed (for the page to draw)
     dock_state: str | None = None
     dock_task: asyncio.Task | None = None
 
