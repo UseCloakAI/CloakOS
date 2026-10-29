@@ -143,6 +143,11 @@ def main(argv: list[str] | None = None) -> None:
             if time.time() - self.last_save > 60:          # a checkpoint a minute: a dead Mac loses at most that
                 save_model(self.model, out)
                 self.last_save = time.time()
+                if budget:                                 # and how long it has trained, so Continue keeps the clock
+                    meta["trained_s"] = trained_s + time.time() - t_run
+                    tmp = out / "meta.tmp.json"
+                    tmp.write_text(json.dumps(meta, indent=1))
+                    tmp.replace(out / "meta.json")
 
     # learning rate falls linearly to a tenth over the run (counted over the whole run, across
     # Continues), and a KL guard stops an update that moves the policy too far: steadier late training
