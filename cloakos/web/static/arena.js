@@ -130,16 +130,12 @@
     }
     return c;
   }
-  function grow(poly, k) {                          // the desk outline pushed out a little (Vector hangs over edges)
-    const cx = poly.reduce((a, p) => a + p[0], 0) / 4, cy = poly.reduce((a, p) => a + p[1], 0) / 4;
-    return poly.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
-  }
   /* Vector is "the one Vector-sized thing that isn't desk": each pixel is compared with what that
      spot of the desk normally looks like (learned over a few seconds, so glare, papers and other
      still things fade into the desk), then the change that is the size of Vector on the desk in
      real cm² wins, nearest last time. Works on any desk colour, light or dark. Its green backpack
      light (behind its middle) says which way it faces; without it, the way it's been moving. */
-  let bg = null, bgKey = '';
+  let bg = null, bgKey = '', relearn = false, missing = 0;
   function track() {
     if (!video.videoWidth) return null;
     const W = PW, Hh = Math.round(PW * video.videoHeight / video.videoWidth);
@@ -147,12 +143,14 @@
     wctx.drawImage(video, 0, 0, W, Hh);
     if (!H) return null;
     const img = wctx.getImageData(0, 0, W, Hh).data;
-    const poly = grow(cfg.corners.map(([x, y]) => [x * W, y * Hh]), 1.08);
+    // only the desk itself: Vector is always on it, and off the edge there's cables, floor, people
+    const poly = cfg.corners.map(([x, y]) => [x * W, y * Hh]);
     const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
     const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(W - 1, Math.ceil(Math.max(...xs)));
     const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(Hh - 1, Math.ceil(Math.max(...ys)));
     const key = `${W}x${Hh}:${JSON.stringify(cfg.corners)}`;
-    if (!bg || bgKey !== key) {                     // start from the desk's typical colour everywhere
+    if (!bg || bgKey !== key || relearn) {          // (re)start from the desk's typical colour: anything on it shows up again
+      relearn = false;
       const rs = [], gs = [], bs = [];
       for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) if (inside([x, y], poly)) { const i = (y * W + x) * 4; rs.push(img[i]); gs.push(img[i + 1]); bs.push(img[i + 2]); }
       const med = a => a.sort((p, q) => p - q)[a.length >> 1] || 0, m = [med(rs), med(gs), med(bs)];
@@ -185,7 +183,9 @@
       if (area < 15 || area > 250) continue;        // Vector from above is ~60 cm²: not specks, not a shadow sweep
       const here = apply(H, [cx / W, cy / Hh]);
       const prev = last && last.desk ? Math.hypot(here[0] - last.desk[0], here[1] - last.desk[1]) * 100 : 0;
-      const rank = -Math.abs(area - 60) / 10 - (last && last.desk ? prev : 0);
+      let rank = -Math.abs(area - 60) / 10 - (last && last.desk ? prev : 0);
+      const ch = cfg.charger;                        // the charger is about Vector's size: not Vector unless Vector was there
+      if (ch && Math.hypot(here[0] - ch.x, here[1] - ch.y) < 0.08 && !(last && last.desk && Math.hypot(last.desk[0] - ch.x, last.desk[1] - ch.y) < 0.15)) rank -= 30;
       if (!best || rank > best.rank) best = { n, cx, cy, cxx: sxx / n - cx * cx, cyy: syy / n - cy * cy, cxy: sxy / n - cx * cy, area, rank, pix, here };
     }
     // learn the desk: everything except where Vector is now fades into the background
@@ -193,8 +193,10 @@
     if (best) { const R = 2 * Math.sqrt(best.n); for (let y = Math.max(0, best.cy - R | 0); y <= Math.min(Hh - 1, best.cy + R); y++) for (let x = Math.max(0, best.cx - R | 0); x <= Math.min(W - 1, best.cx + R); x++) keep[y * W + x] = 1; }
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const k = y * W + x; if (keep[k]) continue;
-      const i = k * 4; bg[k * 3] += 0.05 * (img[i] - bg[k * 3]); bg[k * 3 + 1] += 0.05 * (img[i + 1] - bg[k * 3 + 1]); bg[k * 3 + 2] += 0.05 * (img[i + 2] - bg[k * 3 + 2]);
+      const i = k * 4; bg[k * 3] += 0.03 * (img[i] - bg[k * 3]); bg[k * 3 + 1] += 0.03 * (img[i + 1] - bg[k * 3 + 1]); bg[k * 3 + 2] += 0.03 * (img[i + 2] - bg[k * 3 + 2]);
     }
+    missing = best ? 0 : missing + 1;
+    if (missing > 30) { relearn = true; missing = 0; }   // lost for 3 s: maybe it faded in while sitting still, look again
     if (!best || (last && last.desk && last.ok && Math.hypot(best.here[0] - last.desk[0], best.here[1] - last.desk[1]) > 0.25)) return { ok: false };
     const c = [best.cx / W, best.cy / Hh], pos = best.here;
     let yaw = null, dotPx = null, src = 'hold';
@@ -316,7 +318,7 @@
       picking = null; step(null); save({ corners: cornerPts, size: [+$('#ar-w').value, +$('#ar-d').value] });
     } else {
       const c = sample(n); const what = picking; picking = null; step(null);
-      if (what === 'gold' && H) { const d = apply(H, n); last = { ok: false, desk: d, px: n }; }   // "that one is Vector"
+      if (what === 'gold' && H) { const d = apply(H, n); last = { ok: false, desk: d, px: n }; relearn = true; path = []; }   // "that one is Vector"
       if (c) save({ [what]: c });
     }
   });
