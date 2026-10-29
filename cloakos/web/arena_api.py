@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body
 
+from ..rl.policy import RANGES_STATE
+
 if TYPE_CHECKING:
     from ..app import Brain
 
@@ -27,7 +29,8 @@ def make_arena_router(brain: "Brain") -> APIRouter:
         return {"config": a.config, "pose": a.pose, "run": a.summary(), "running": a.running, "dock": a.dock_state, "route": a.route,
                 "battery": brain.world.battery_level, "on_charger": brain.world.on_charger,
                 "recent": await asyncio.to_thread(a.recent), "policies": pols,
-                "target": brain.link.target, "mode": brain.mode}
+                "target": brain.link.target, "mode": brain.mode,
+                "ranges": {"ready": a.ranges_status() is None, "why": a.ranges_status(), **{"last_" + k: v for k, v in RANGES_STATE.items()}}}
 
     @r.post("/config")
     async def config(body: dict = Body(...)) -> dict[str, Any]:

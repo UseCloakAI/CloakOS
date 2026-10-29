@@ -71,6 +71,36 @@ start it, the map router isn't registered, the dashboard has no Map page, voice 
 and map calibration is refused. The code stays so it can be wired back in later. Don't reconnect it
 unless the user asks.
 
+## Autonomy roadmap
+
+**Goal:** tell Vector "go to that point", "find the mug", "go to the mug you saw earlier", and have it
+drive itself, as close to FSD-style autonomy as a desk robot gets.
+
+**Principle: accuracy over speed.** Slower driving and slower inference are fine when they're more
+accurate. When data is stale or missing, stop and wait rather than guess (e.g. no ranges = hold still,
+not "all clear"). Pick the safer, more accurate side of every tradeoff, including recording quality.
+
+**Teacher / student plan:** the overhead iPhone camera (Arena) is the **teacher**: it sees the robot's
+pose, the desk edges and (later) objects, so a driver steering from it acts on near-true ranges.
+Vector's own camera **student** (pixels to actions, `rl/student.py`) learns to copy it: wander, avoid
+edges, point-to-point. Recordings under the Arena store the teacher signals next to the camera frames
+(`arena` and `teacher` in `steps.jsonl`); `student.py --real` learns from teleop steps and from
+teacher-driven steps.
+
+**Milestones:**
+1. **Arena ranges for the real robot (v0.9.6, done):** `arena/ranges.py`, same fan as the sim's rays
+   plus the edge margin. `ranges()` order: 3D map (parked) → sim → Arena → none (logged, shown on the
+   Arena page, and map drivers hold still). Today it knows desk edges, robot pose and the charger only.
+2. An overhead object detector (YOLO) trained on Arena frames, so objects become obstacles in the
+   Arena ranges and get labels.
+3. Go-to-point in Arena desk coordinates (click a spot / say it).
+4. Find an object (search until the detector sees it).
+5. Remembered objects without the 3D map: an Arena/world object memory (label, desk x/y, last seen).
+6. Camera-student distillation for each skill, so it works without the overhead camera.
+7. A natural-language command layer on top (voice/LLM picks the skill and target).
+
+The 3D map stays parked (see above).
+
 ## Architecture map (`cloakos/`)
 
 - **`app.py`:** `Brain`. The 10 Hz tick loop, the modes

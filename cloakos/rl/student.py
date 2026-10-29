@@ -146,7 +146,8 @@ def exam(job: tuple) -> dict:
 # ── real desk recordings ────────────────────────────────────────
 
 def load_real(dirs: list[str]) -> dict | None:
-    """Teleop steps with a camera frame from cloakos recordings: what you did is the label."""
+    """Steps with a camera frame from cloakos recordings: what you did with teleop is the label, or,
+    under the Arena, what a teacher driver (steering from the overhead camera's ranges) did."""
     from PIL import Image
 
     from .pixelnet import prepare
@@ -163,7 +164,10 @@ def load_real(dirs: list[str]) -> dict | None:
             s = json.loads(line)
             act = s.get("action") or {}
             a = np.clip([act.get("left_mmps", 0) / MAX_SPEED, act.get("right_mmps", 0) / MAX_SPEED], -1, 1).astype(np.float32)
-            if s.get("frame") and s.get("action_source") == "teleop":
+            t = s.get("teacher") or {}
+            if t.get("action") is not None and s.get("action_source") == "learned":
+                a = np.clip(np.asarray(t["action"][:2], np.float32), -1, 1)
+            if s.get("frame") and (s.get("action_source") == "teleop" or t.get("action") is not None):
                 try:
                     f = prepare(Image.open(d / s["frame"]))
                 except OSError:

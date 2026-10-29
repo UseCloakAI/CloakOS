@@ -493,6 +493,7 @@
     $('#ar-go').hidden = st.running; $('#ar-stop').hidden = !st.running;
     $('#ar-autodock').checked = cfg.auto_dock !== false;
     $('#ar-dock').disabled = !cfg.charger || !!st.dock;
+    if (st.ranges) $('#ar-ranges').textContent = st.ranges.ready ? 'Desk ranges: live from this camera (drivers see the edges)' : `Desk ranges: off (${st.ranges.why})`;
     const batt = { 1: 'low', 2: 'ok', 3: 'full' }[st.battery] || '?';
     $('#ar-dockstate').textContent = !cfg.charger ? 'Charger not set yet.' :
       `Battery ${batt}${st.on_charger ? ', on the charger' : ''}${st.dock ? ` · ${st.dock}` : ''}`;
