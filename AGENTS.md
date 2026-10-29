@@ -93,7 +93,13 @@ teacher-driven steps.
    Arena page, and map drivers hold still). Today it knows desk edges, robot pose and the charger only.
 2. An overhead object detector (YOLO) trained on Arena frames, so objects become obstacles in the
    Arena ranges and get labels.
-3. Go-to-point in Arena desk coordinates (click a spot / say it).
+3. **Go-to-point in Arena desk coordinates (v0.9.8, done):** Arena page "Go to a spot", `POST /api/arena/goto`
+   (`{x, y}` metres or `{name: "back left corner"}`), or say "go to the back left corner" / "go to 30, 20" (cm).
+   `GoToPolicy` in the "arena" frame: the trained goto skill if one ships, else a slow controller
+   (70 mm/s max, 25 mm/s inside 12 cm, arrives within 2.5 cm); stops for an edge ahead; holds still when
+   the overhead pose is stale. Each tick records `teacher` = goal, `goal_rel` (`envs.goal_features`, the
+   same goal input sim goto training uses) and the action. The camera student doesn't take a goal input
+   yet: a goal-conditioned student is the next step for point-to-point.
 4. Find an object (search until the detector sees it).
 5. Remembered objects without the 3D map: an Arena/world object memory (label, desk x/y, last seen).
 6. Camera-student distillation for each skill, so it works without the overhead camera.

@@ -94,7 +94,14 @@ class Arena:
         """Ray ranges in Vector's frame from the overhead view, like the sim's rays(); None if not live."""
         if self.ranges_status() is not None:
             return None
-        from .ranges import COMMAND_TO_MOTION_S, WHEEL_GAIN, buffered, desk_rays, predict_pose
+        from .ranges import buffered, desk_rays
+        x, y, yaw, lw, rw = self._predicted()
+        r = desk_rays(x, y, yaw, self.size_m, n, fov, max_range, self.obstacles())
+        return buffered(r, fov, (lw + rw) / 2)
+
+    def _predicted(self) -> tuple[float, float, float, float, float]:
+        """x, y, heading where Vector will be when a command sent now lands, plus wheel speeds (m/s)."""
+        from .ranges import COMMAND_TO_MOTION_S, WHEEL_GAIN, predict_pose
         p = self.pose
         x, y, yaw = float(p["x"]), float(p["y"]), float(self.heading())
         # The pose is already old, and whatever the driver sends now lands ~0.4 s later: answer for
@@ -108,8 +115,32 @@ class Arena:
         lw, rw = float(lw) / 1000, float(rw) / 1000
         dt = (time.time() - p["t"]) + COMMAND_TO_MOTION_S
         x, y, yaw = predict_pose(x, y, yaw, lw, rw, dt)
-        r = desk_rays(x, y, yaw, self.size_m, n, fov, max_range, self.obstacles())
-        return buffered(r, fov, (lw + rw) / 2)
+        return x, y, yaw, lw, rw
+
+    def snapshot(self, base: dict) -> dict | None:
+        """The robot snapshot with the Arena's latency-aware desk pose, or None if not live."""
+        if self.ranges_status() is not None:
+            return None
+        x, y, yaw, _, _ = self._predicted()
+        return {**base, "pos": [x, y, 0.0], "yaw": yaw}
+
+    def in_desk(self, x: float, y: float, margin: float = 0.06) -> bool:
+        s = self.size_m
+        return bool(s) and margin <= x <= s[0] - margin and margin <= y <= s[1] - margin
+
+    def named_point(self, name: str) -> tuple[float, float] | None:
+        """'left corner', 'back right corner', 'middle'...: a safe spot 10 cm in from it (desk frame)."""
+        s = self.size_m
+        if not s:
+            return None
+        n, m = name.lower(), 0.10
+        if any(w in n for w in ("middle", "center", "centre")) and "corner" not in n:
+            return s[0] / 2, s[1] / 2
+        if "corner" not in n and not any(w in n for w in ("left", "right")):
+            return None
+        x = m if "left" in n else s[0] - m if "right" in n else s[0] / 2
+        y = s[1] - m if any(w in n for w in ("back", "far", "top")) else m if any(w in n for w in ("front", "near", "bottom")) or "corner" in n else s[1] / 2
+        return x, y
 
     def teacher_view(self, n: int = 9) -> dict[str, Any] | None:
         """What a recording keeps from the overhead camera each tick (the teacher's signals)."""

@@ -76,6 +76,7 @@ class Brain:
         self.skills.arena_src = self.policies["learned"].arena_src = lambda: self.arena
         self.policies["goto"] = GoToPolicy(self.body, self.skills, self.bus)
         self._goto_return = "auto"
+        self.policies["goto"].arena_src = lambda: self.arena
         self.stuck = False                       # froze itself because it was stuck
         self._stuck_s = 0.0
         self._stuck_ping = 0.0
@@ -191,6 +192,9 @@ class Brain:
 
         if self.estop:
             return {"say": "Emergency stop is on. Release it first.", "action": "none"}
+        spoken = await self._spoken_point(text)
+        if spoken is not None:
+            return spoken
         here = tuple(self.policies["goto"].skills.snapshot()["pos"][:2]) if self.link.connected else None
         from .voice.commander import fallback
         if fallback(text, []).action == "none":     # it's going to the LLM: show it's thinking
@@ -295,6 +299,43 @@ class Brain:
         else:
             await gp.start()
         return True
+
+    async def go_to_point(self, x: float, y: float, label: str | None = None) -> str | None:
+        """Drive to a point on the desk (Arena metres). None when it's off, otherwise why not."""
+        a = self.arena
+        if a is None:
+            return "Open the Arena page first (the desk camera finds Vector)."
+        if self.estop:
+            return "Emergency stop is on."
+        if not self.link.connected:
+            return "Vector isn't connected."
+        if not a.in_desk(x, y):
+            return "That point is off the desk (or too close to an edge)."
+        if a.ranges_status():
+            return a.ranges_status()
+        if self.frozen:
+            await self.set_frozen(False, source="go_to")
+        gp = self.policies["goto"]
+        gp.set_point(x, y, label)
+        if self.mode != "goto":
+            self._goto_return = self.mode if self.mode in ("auto", "idle", "teleop") else "idle"
+            await self.set_mode("goto")
+        else:
+            await gp.start()
+        return None
+
+    async def _spoken_point(self, text: str) -> dict | None:
+        """'go to the back left corner', 'go to the middle', 'go to 30, 20' (cm): Arena points, no LLM."""
+        import re
+        t = text.lower().strip()
+        if self.arena is None or not re.match(r"^(please )?(go|drive|move) to\b", t):
+            return None
+        m = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:cm)?\s*[, ]\s*(-?\d+(?:\.\d+)?)", t)
+        pt = (float(m.group(1)) / 100, float(m.group(2)) / 100) if m else self.arena.named_point(t)
+        if pt is None:
+            return None
+        why = await self.go_to_point(*pt, label=t.split(" to ", 1)[1].removeprefix("the "))
+        return {"say": why or "On my way.", "action": "go_to_point" if why is None else "none", "point": list(pt)}
 
     def _on_edge(self, ev: Event) -> None:
         # Vector's own edge reaction runs right now: sending eye frames or sound on top of it crashed
@@ -612,6 +653,9 @@ class Brain:
         if self.arena is not None and self.link.target != "sim":
             out["arena"] = self.arena.teacher_view()
         lp = self.policies.get("learned")
+        gp = self.policies.get("goto")
+        if self.mode == "goto" and gp is not None and gp.frame == "arena" and gp.teacher is not None:
+            out["teacher"] = {"policy": gp.teacher["src"], **gp.teacher}
         if self.mode == "learned" and self.body.source == "learned" and lp is not None and lp.spec is not None and lp.pixels is None:
             out["teacher"] = {"policy": lp.policy_name, "task": lp.spec.task, "action": [float(v) for v in lp.last_action]}
         return out

@@ -30,6 +30,8 @@ def make_arena_router(brain: "Brain") -> APIRouter:
                 "battery": brain.world.battery_level, "on_charger": brain.world.on_charger,
                 "recent": await asyncio.to_thread(a.recent), "policies": pols,
                 "target": brain.link.target, "mode": brain.mode,
+                "goto": {"status": brain.policies["goto"].status, "goal": brain.policies["goto"].goal}
+                if brain.mode == "goto" and brain.policies["goto"].frame == "arena" else None,
                 "ranges": {"ready": a.ranges_status() is None, "why": a.ranges_status(), **{"last_" + k: v for k, v in RANGES_STATE.items()}}}
 
     @r.post("/config")
@@ -46,6 +48,23 @@ def make_arena_router(brain: "Brain") -> APIRouter:
     async def run(body: dict = Body(...)) -> dict[str, Any]:
         why = await arena().start(body.get("policy") or None, float(body.get("seconds", 120)))
         return {"ok": why is None, "error": why}
+
+    @r.post("/goto")
+    async def goto(body: dict = Body(...)) -> dict[str, Any]:
+        """Drive to a desk point: {"x": m, "y": m} from the front-left corner (or {"name": "back left corner"})."""
+        a = arena()
+        pt = a.named_point(str(body["name"])) if body.get("name") else (float(body["x"]), float(body["y"]))
+        if pt is None:
+            return {"ok": False, "error": "I don't know that spot."}
+        why = await brain.go_to_point(*pt, label=body.get("name"))
+        return {"ok": why is None, "error": why, "point": list(pt)}
+
+    @r.post("/goto/stop")
+    async def goto_stop() -> dict[str, Any]:
+        gp = brain.policies["goto"]
+        if brain.mode == "goto" and gp.frame == "arena":
+            await gp._finish("failed")
+        return {"ok": True}
 
     @r.post("/enter")
     async def enter() -> dict[str, Any]:

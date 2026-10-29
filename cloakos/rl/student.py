@@ -165,7 +165,7 @@ def load_real(dirs: list[str]) -> dict | None:
             act = s.get("action") or {}
             a = np.clip([act.get("left_mmps", 0) / MAX_SPEED, act.get("right_mmps", 0) / MAX_SPEED], -1, 1).astype(np.float32)
             t = s.get("teacher") or {}
-            if t.get("action") is not None and s.get("action_source") == "learned":
+            if t.get("action") is not None and s.get("action_source") in ("learned", "goto"):
                 a = np.clip(np.asarray(t["action"][:2], np.float32), -1, 1)
             if s.get("frame") and (s.get("action_source") == "teleop" or t.get("action") is not None):
                 try:

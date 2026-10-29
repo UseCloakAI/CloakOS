@@ -442,6 +442,10 @@
     if (!picking || !video.videoWidth) return;
     const n = toNorm(e);
     if (n[0] < 0 || n[1] < 0 || n[0] > 1 || n[1] > 1) return;
+    if (picking === 'goal') {
+      const d = apply(H, n); picking = null; step(null);
+      return post('/api/arena/goto', { x: d[0], y: d[1] }).then(r => { if (!r.ok) alert(r.error); refresh(); });
+    }
     if (picking === 'charger') {
       cornerPts.push(apply(H, n));
       if (cornerPts.length < 2) return step('Now click just in front of it, where Vector drives up from');
@@ -459,6 +463,8 @@
     }
   });
   window.arCharger = () => { if (!H) return alert('Set the desk corners first.'); picking = 'charger'; cornerPts = []; step('Click the charger'); };
+  window.arGoPick = () => { if (!H) return alert('Set the desk corners first.'); picking = 'goal'; step('Click where Vector should go'); };
+  window.arGoStop = async () => { await post('/api/arena/goto/stop'); refresh(); };
   window.arDock = async () => { const r = await post('/api/arena/dock'); if (!r.ok) alert(r.error); refresh(); };
   window.arAutoDock = on => save({ auto_dock: on });
   window.arSaveSize = () => save({ size: [+$('#ar-w').value, +$('#ar-d').value] });
@@ -493,7 +499,8 @@
     $('#ar-go').hidden = st.running; $('#ar-stop').hidden = !st.running;
     $('#ar-autodock').checked = cfg.auto_dock !== false;
     $('#ar-dock').disabled = !cfg.charger || !!st.dock;
-    if (st.ranges) $('#ar-ranges').textContent = st.ranges.ready ? 'Desk ranges: live from this camera (drivers see the edges)' : `Desk ranges: off (${st.ranges.why})`;
+    if (st.ranges) $('#ar-ranges').textContent = (st.ranges.ready ? 'Desk ranges: live from this camera (drivers see the edges)' : `Desk ranges: off (${st.ranges.why})`)
+      + (st.goto ? ` · Go to spot: ${st.goto.status}` : '');
     const batt = { 1: 'low', 2: 'ok', 3: 'full' }[st.battery] || '?';
     $('#ar-dockstate').textContent = !cfg.charger ? 'Charger not set yet.' :
       `Battery ${batt}${st.on_charger ? ', on the charger' : ''}${st.dock ? ` · ${st.dock}` : ''}`;

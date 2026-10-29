@@ -129,6 +129,14 @@ def edge_rays(sn: dict, room, n: int) -> np.ndarray:
     return out
 
 
+def goal_features(s: dict, goal: tuple[float, float]) -> list[float]:
+    """The goal as every goto driver sees it, sim or real: distance (capped at 3 m, /3) and the
+    sin/cos of its bearing from the robot's heading. Frame-free, so sim, odometry and Arena line up."""
+    dx, dy = goal[0] - s["pos"][0], goal[1] - s["pos"][1]
+    ang = math.atan2(dy, dx) - s["yaw"]
+    return [min(math.hypot(dx, dy), 3.0) / 3.0, math.sin(ang), math.cos(ang)]
+
+
 def observe(spec: Spec, s: dict, goal: tuple[float, float] | None, rays: np.ndarray | None,
             last_action: np.ndarray) -> np.ndarray:
     """Observation vector from a sensor snapshot. Shared by training (sim) and the robot
@@ -138,10 +146,7 @@ def observe(spec: Spec, s: dict, goal: tuple[float, float] | None, rays: np.ndar
     common = [s["left_mmps"] / v, s["right_mmps"] / v, (prox if prox is not None else 0.6) / 0.6,
               1.0 if s.get("cliff") else 0.0]
     if spec.task == "goto":
-        dx, dy = goal[0] - s["pos"][0], goal[1] - s["pos"][1]
-        dist = math.hypot(dx, dy)
-        ang = math.atan2(dy, dx) - s["yaw"]
-        o = [min(dist, 3.0) / 3.0, math.sin(ang), math.cos(ang), *common, *last_action]
+        o = [*goal_features(s, goal), *common, *last_action]
     elif spec.task in ("wander", "desk"):
         o = [*common, s["upright"], *last_action]
     else:   # recover: which way it's lying, how it's moving, where the lift is
