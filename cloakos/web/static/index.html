@@ -31,10 +31,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           <span class="sbl">Live</span>
         </button>
-        <button class="sb-btn" type="button" data-nav="map" onclick="goPage('map')" title="Map">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg>
-          <span class="sbl">Map</span>
-        </button>
         <button class="sb-btn" type="button" data-nav="teleop" onclick="goPage('teleop')" title="Teleop">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="11" rx="0"/><path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 14h.01"/></svg>
           <span class="sbl">Teleop</span>
@@ -303,7 +299,6 @@
           <h2>Calibration</h2>
           <p class="tele-note">Measures how the real pipeline differs from the training sim, so training can match it. Takes a few minutes. Then copy the numbers and paste them to Claude.</p>
           <div class="chip-row">
-            <button class="chip" onclick="calRun('map')">Camera AI vs truth (simulator, 3 min)</button>
             <button class="chip" onclick="calRun('robot')">Robot lag and sensors (about 20 s)</button>
             <button class="chip" onclick="calRun('camera')">Camera lag (head nods, about 25 s)</button>
             <button class="chip" onclick="calStop()">Stop</button>
@@ -419,49 +414,6 @@
         </div>
       </section>
 
-      <section class="page" id="page-map" data-page="map" aria-label="Map" tabindex="-1" hidden>
-        <div class="topbar">
-          <div class="topbar-left">
-            <button class="icon-btn sb-toggle" type="button" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-controls="sidebar">
-              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-            </button>
-            <h1 class="page-title">Map</h1>
-            <span class="sc-meta map-status" id="map-status"></span>
-          </div>
-          <div class="topbar-right sim-world">
-            <input id="map-find" class="sim-seed map-find" type="text" placeholder="find… (mug, shoe)" aria-label="Find a remembered object">
-            <button class="chip" onclick="mapFind()">Go</button>
-            <button class="chip" onclick="mapClear()">Clear map</button>
-          </div>
-        </div>
-        <div class="sim-wrap">
-          <div class="sim-stage">
-            <canvas id="map-canvas" aria-label="3D map Vector has built"></canvas>
-            <div class="sim-empty" id="map-empty">Nothing mapped yet. Drive Vector around (or the sim) and the map fills in.</div>
-            <div class="sim-badges" id="map-badges"></div>
-            <div class="sim-hud map-hud">
-              <div class="cam sim-cam" data-cam>
-                <div class="cam-empty">No camera yet</div>
-                <span class="cam-tag" hidden>What it sees</span>
-                <div class="det-layer" id="det-layer"></div>
-              </div>
-            </div>
-            <div class="sim-tools">
-              <button class="chip on" id="map-chase" onclick="mapChase()">Chase cam</button>
-              <button class="chip on" id="map-look" onclick="mapLook()">FSD look</button>
-              <button class="chip" id="map-cone" onclick="mapCone()">View cone</button>
-            </div>
-          </div>
-          <aside class="sim-side">
-            <h2>Remembered</h2>
-            <p class="tele-note">Things Vector has seen and where. Go sends a goto policy there (pick one in Training).</p>
-            <div id="map-objects"><p class="tele-note">Nothing yet.</p></div>
-            <h2>Map</h2>
-            <dl class="kv" id="kv-map"></dl>
-          </aside>
-        </div>
-      </section>
-
       <section class="page settings-page" id="page-train" data-page="train" aria-label="Training" tabindex="-1" hidden>
         <div class="topbar">
           <div class="topbar-left">
@@ -532,7 +484,6 @@
             <h2>Measure the real robot</h2>
             <p class="tele-note">Measures how the real Vector differs from the simulator (lag, camera), so training matches it. Takes a few minutes.</p>
             <div class="chip-row">
-              <button class="chip" onclick="calRun('map')">Camera vs truth (simulator, 3 min)</button>
               <button class="chip" onclick="calRun('robot')">Robot lag and sensors (20 s)</button>
               <button class="chip" onclick="calRun('camera')">Camera lag (25 s)</button>
               <button class="chip" onclick="calStop()">Stop</button>
@@ -638,7 +589,6 @@
 <script type="module" src="/static/sim.js"></script>
 <script src="/static/train.js"></script>
 <script src="/static/arena.js"></script>
-<script type="module" src="/static/map.js"></script>
 <div id="estop-banner" class="estop-note" role="alert" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18v.5" stroke-linecap="round"/></svg><span>Emergency stop: everything is halted.<br>Release with <b>Shift+Space</b></span><button type="button" onclick="toggleEstop()">Release</button></div>
 <div id="estop-clear" class="estop-note" role="status" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12.5 5 5L20 6.5"/></svg><span>Emergency stop released. All clear.</span></div>
 </body>

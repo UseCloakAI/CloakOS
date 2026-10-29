@@ -46,6 +46,19 @@ async def test_decide_uses_llm_then_rules():
     assert d.target == "shoe-2" and d.source == "rules"
 
 
+async def test_go_to_object_is_parked_with_the_map(tmp_path):
+    from cloakos.app import Brain
+    from cloakos.config import Config, load_config
+
+    cfg = Config(load_config("config.yaml"))
+    cfg["datalog"]["dir"] = str(tmp_path)
+    cfg["voice"]["enabled"] = False
+    cfg["llm"]["enabled"] = False
+    brain = Brain(cfg)
+    assert brain.mapper is None and await brain.go_to("mug-1") is False and brain.mode != "goto"
+
+
+@pytest.mark.skip(reason="the 3D map is parked future work, so go-to-an-object is off")
 async def test_go_to_drives_there_in_the_sim(tmp_path):
     pytest.importorskip("mujoco")
     from cloakos.app import Brain

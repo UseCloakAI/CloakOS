@@ -168,8 +168,8 @@ web:
   host: 127.0.0.1
   port: 8765
 
-map:
-  enabled: true
+map:                    # parked: the 3D map is future work and not wired in
+  enabled: false
   hz: 2.0
   models: true          # camera depth + object detector (the real robot's and the sim's map both use these)
   sim_truth: false      # true = the simulator hands the map exact depth and labels (debug only)
