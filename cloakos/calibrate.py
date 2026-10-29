@@ -48,6 +48,8 @@ class Calibrator:
             return "A calibration is already running."
         if not b.link.connected:
             return "Connect Vector (or start the simulator) first."
+        if kind == "map":
+            return "The 3D map is parked for now, so there's nothing to compare."
         if kind == "map" and b.link.target != "sim":
             return "The map comparison needs the simulator (it has the true answers)."
         if kind not in ("map", "robot", "camera"):

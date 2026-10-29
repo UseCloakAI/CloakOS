@@ -67,13 +67,11 @@ class Brain:
         from .rl.policy import LearnedPolicy
         self.policies["learned"] = LearnedPolicy(self.body, self.link)
         self.trainer = Trainer((cfg.get("datalog", {}) or {}).get("dir", "data"))
-        from .mapping.mapper import Mapper
-        self.mapper = Mapper(cfg, self.link, self.world, self.bus)
-        self.mapper.vision_needed = lambda: self.mode in ("auto", "goto", "learned") or bool(self.tester and self.tester.running)
+        # The 3D map (cloakos/mapping/) is parked future work: it stays in the repo but isn't wired in.
+        self.mapper = None
         from .behaviors.goto import GoToPolicy
         from .rl.skills import Skills
         self.skills = Skills(self.link, self.world, self.mapper)
-        self.policies["learned"].mapper = self.mapper
         self.body.skills = self.skills
         self.policies["goto"] = GoToPolicy(self.body, self.skills, self.bus)
         self._goto_return = "auto"
@@ -194,9 +192,9 @@ class Brain:
             return {"say": "Emergency stop is on. Release it first.", "action": "none"}
         here = tuple(self.policies["goto"].skills.snapshot()["pos"][:2]) if self.link.connected else None
         from .voice.commander import fallback
-        if fallback(text, self.mapper.known()).action == "none":     # it's going to the LLM: show it's thinking
+        if fallback(text, []).action == "none":     # it's going to the LLM: show it's thinking
             self.eyes.flash("Thinking…", 3.0)
-        d = await decide(self.voice.llm, text, self.mapper.known(), here, self.sensor_report())
+        d = await decide(self.voice.llm, text, [], here, self.sensor_report())
         if d.action == "go_to" and d.target:
             ok = await self.go_to(d.target)
             if not ok:
@@ -280,6 +278,9 @@ class Brain:
             await self.set_mode(back_to)
 
     async def go_to(self, object_id: str) -> bool:
+        # Going to a remembered object needs the 3D map, which is parked for now.
+        if self.mapper is None:
+            return False
         obj = next((o for o in self.mapper.objects if o["id"] == object_id), None) or self.mapper.find(object_id)
         if obj is None or not self.link.connected:
             return False
@@ -643,7 +644,6 @@ class Brain:
             asyncio.create_task(self._tick_loop(), name="tick"),
             asyncio.create_task(self._eye_watchdog(), name="eyes"),
             asyncio.create_task(self.voice.start(), name="voice"),
-            asyncio.create_task(self.mapper.run(), name="mapper"),
         ]
         if web:
             from .web.server import serve
@@ -672,7 +672,6 @@ class Brain:
                 pass
         self.recorder.stop()
         self.ears.stop()
-        await asyncio.to_thread(self.mapper.save)
         await self.link.stop()
         link_task = next((t for t in tasks if t.get_name() == "link"), None)
         for t in tasks:

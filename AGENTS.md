@@ -63,6 +63,14 @@ Part of the Cloak platform (usecloak.org). Repo: `UseCloakAI/CloakOS`.
   - Arena tracking can be tested with Chromium's fake camera
     (`--use-file-for-fake-video-capture=x.y4m`) and synthetic videos made with OpenCV.
 
+## The 3D map is parked (on purpose)
+
+The 3D map (`cloakos/mapping/`, `web/map_api.py`, `web/static/map.js`) is future work: pixel-to-map
+AI training that builds a 3D map. It is **disconnected on purpose** since v0.9.5: the brain doesn't
+start it, the map router isn't registered, the dashboard has no Map page, voice "go to the mug" is off,
+and map calibration is refused. The code stays so it can be wired back in later. Don't reconnect it
+unless the user asks.
+
 ## Architecture map (`cloakos/`)
 
 - **`app.py`:** `Brain`. The 10 Hz tick loop, the modes

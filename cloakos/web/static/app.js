@@ -471,22 +471,6 @@ connect();
 if (document.readyState === "complete") startCamera(); else addEventListener("load", startCamera);   // an endless MJPEG would hold the load event open
 loadInfo();
 
-/* live detection boxes on every camera view (the Map page draws its own) */
-(() => {
-  const draw = L => {
-    const [fw, fh] = L.frame_size || [640, 360];
-    const html = (L.dets || []).map(d => {
-      const [x0, y0, x1, y1] = d.box;
-      return `<div class="det-box" style="left:${100 * x0 / fw}%;top:${100 * y0 / fh}%;width:${100 * (x1 - x0) / fw}%;height:${100 * (y1 - y0) / fh}%"><span>${d.label.replace(/[<>&]/g, '')}<i>${Math.round(d.score * 100)}%</i></span></div>`;
-    }).join('');
-    document.querySelectorAll('[data-dets]').forEach(el => { el.innerHTML = html; });
-  };
-  setInterval(async () => {
-    if (document.hidden || !document.querySelector('[data-dets]')) return;
-    try { draw(await (await fetch('/api/map/live')).json()); } catch { /* offline */ }
-  }, 400);
-})();
-
 /* Nous model: shows the loaded version, Update Nous checks and installs the newest shipped one */
 async function loadNous(info) {
   try { info = info || await (await fetch('/api/nous')).json(); } catch { return; }
