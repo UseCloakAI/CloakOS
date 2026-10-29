@@ -336,3 +336,11 @@ body.is-frozen .live-dot{background:#3B82F6!important}
 @keyframes estop-in{0%,100%{transform:translateX(-50%)}14%{transform:translateX(calc(-50% - 8px)) rotate(-.8deg)}29%{transform:translateX(calc(-50% + 7px)) rotate(.5deg)}44%{transform:translateX(calc(-50% - 5px))}59%{transform:translateX(calc(-50% + 3px))}74%{transform:translateX(calc(-50% - 1.5px))}}
 @keyframes estop-throb{50%{box-shadow:var(--shsm)}}
 @keyframes estop-pop{0%{transform:translateX(-50%) scale(.85);opacity:0}100%{transform:translateX(-50%) scale(1);opacity:1}}
+
+/* Arena: the real desk from a camera above it */
+.ar-stage{background:#000}
+.ar-stage video,.ar-stage #ar-overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.ar-stage #ar-overlay{cursor:default}
+.ar-stage.picking #ar-overlay{cursor:crosshair}
+.ar-step{position:absolute;left:12px;top:12px;max-width:min(420px,calc(100% - 24px));background:var(--acc);color:#fff;border:var(--bd);box-shadow:var(--shlg);padding:8px 12px;font-size:13px;font-weight:700}
+.ar-map{position:absolute;right:12px;bottom:12px;border:var(--bd);background:var(--surf);box-shadow:var(--shsm);width:240px;height:160px}
