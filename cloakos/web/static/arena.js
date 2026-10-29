@@ -197,7 +197,7 @@
     }
     if (!best || (last && last.desk && last.ok && Math.hypot(best.here[0] - last.desk[0], best.here[1] - last.desk[1]) > 0.25)) return { ok: false };
     const c = [best.cx / W, best.cy / Hh], pos = best.here;
-    let yaw = null, dotPx = null;
+    let yaw = null, dotPx = null, src = 'hold';
     if (cfg.dot) {                                  // the backpack light sits just behind the middle: middle minus light = forward
       const R = 1.3 * Math.sqrt(best.n); let n = 0, sx = 0, sy = 0;
       for (let y = Math.max(0, Math.floor(best.cy - R)); y <= Math.min(Hh - 1, best.cy + R); y++)
@@ -205,18 +205,18 @@
           if (lit[y * W + x] && Math.hypot(x - best.cx, y - best.cy) <= R) { n++; sx += x; sy += y; }
       if (n >= 1) {
         dotPx = [sx / n / W, sy / n / Hh]; const d = apply(H, dotPx);
-        if (Math.hypot(pos[0] - d[0], pos[1] - d[1]) > 0.005) yaw = Math.atan2(pos[1] - d[1], pos[0] - d[0]);
+        if (Math.hypot(pos[0] - d[0], pos[1] - d[1]) > 0.005) { yaw = Math.atan2(pos[1] - d[1], pos[0] - d[0]); src = 'light'; }
       }
     }
     if (yaw === null && last && last.desk && Math.hypot(pos[0] - last.desk[0], pos[1] - last.desk[1]) > 0.015)
-      yaw = Math.atan2(pos[1] - last.desk[1], pos[0] - last.desk[0]);           // which way it's been going
+      { yaw = Math.atan2(pos[1] - last.desk[1], pos[0] - last.desk[0]); src = 'motion'; }   // which way it's been going
     if (yaw === null) yaw = last && last.ok ? last.yaw - (cfg.flip ? Math.PI : 0) : 0;
     if (cfg.flip) yaw += Math.PI;
     if (last && last.ok) {                          // a little smoothing: one noisy frame doesn't spin the arrow
       const d = Math.atan2(Math.sin(yaw - last.yaw), Math.cos(yaw - last.yaw)); yaw = last.yaw + 0.5 * d;
     }
     yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
-    return { ok: true, x: pos[0], y: pos[1], yaw, px: c, dotPx, area: best.n, cm2: Math.round(best.area), desk: pos };
+    return { ok: true, x: pos[0], y: pos[1], yaw, src, px: c, dotPx, area: best.n, cm2: Math.round(best.area), desk: pos };
   }
 
   /* ── drawing ────────────────────────────────────────────── */
@@ -226,12 +226,21 @@
     const g = over.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, b.r.width, b.r.height);
     const P = ([x, y]) => [b.x + x * b.w, b.y + y * b.h];
     const pts = picking === 'corners' ? cornerPts : cfg.corners || [];
+    let Hinv = null;
+    if (H && cfg.charger) {                          // charger on the camera view: desk -> image
+      const s2 = deskSize(); Hinv = homography([[0, 0], [s2[0], 0], [s2[0], s2[1]], [0, s2[1]]], cfg.corners);
+    }
     const acc = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#e8553d';
     g.lineWidth = 2; g.strokeStyle = acc; g.fillStyle = acc; g.font = '700 12px sans-serif';
     if (pts.length) {
       g.beginPath(); pts.forEach((p, i) => { const [x, y] = P(p); i ? g.lineTo(x, y) : g.moveTo(x, y); });
       if (pts.length === 4) g.closePath(); g.stroke();
       pts.forEach((p, i) => { const [x, y] = P(p); g.fillRect(x - 4, y - 4, 8, 8); g.fillText(['front-left', 'front-right', 'back-right', 'back-left'][i], x + 7, y - 7); });
+    }
+    if (Hinv) {
+      const ch = cfg.charger, [x, y] = P(apply(Hinv, [ch.x, ch.y])), [fx, fy] = P(apply(Hinv, [ch.x + Math.cos(ch.yaw) * 0.18, ch.y + Math.sin(ch.yaw) * 0.18]));
+      g.strokeStyle = '#38bdf8'; g.fillStyle = '#38bdf8'; g.lineWidth = 2;
+      g.strokeRect(x - 9, y - 9, 18, 18); g.beginPath(); g.moveTo(x, y); g.lineTo(fx, fy); g.stroke(); g.fillText('charger', x + 12, y - 10);
     }
     if (f && f.ok) {
       const [x, y] = P(f.px);
@@ -247,6 +256,10 @@
     m.strokeRect(ox, oy, s[0] * k, s[1] * k);
     m.strokeStyle = acc; m.globalAlpha = 0.5; m.lineWidth = 1.5; m.beginPath();
     path.forEach((p, i) => { const [x, y] = M(p); i ? m.lineTo(x, y) : m.moveTo(x, y); }); m.stroke(); m.globalAlpha = 1;
+    if (cfg.charger) {
+      const [x, y] = M([cfg.charger.x, cfg.charger.y]);
+      m.fillStyle = '#38bdf8'; m.fillRect(x - 5, y - 5, 10, 10);
+    }
     if (f && f.ok) {
       const [x, y] = M([f.x, f.y]), r = 0.05 * k;
       m.fillStyle = '#22c55e'; m.beginPath(); m.arc(x, y, Math.max(4, r), 0, Math.PI * 2); m.fill();
@@ -263,6 +276,12 @@
     if (!picking || !video.videoWidth) return;
     const n = toNorm(e);
     if (n[0] < 0 || n[1] < 0 || n[0] > 1 || n[1] > 1) return;
+    if (picking === 'charger') {
+      cornerPts.push(apply(H, n));
+      if (cornerPts.length < 2) return step('Now click just in front of it, where Vector drives up from');
+      const [c, f] = cornerPts; picking = null; step(null); cornerPts = [];
+      return save({ charger: { x: c[0], y: c[1], yaw: Math.atan2(f[1] - c[1], f[0] - c[0]) } });
+    }
     if (picking === 'corners') {
       cornerPts.push(n);
       if (cornerPts.length < 4) return step(`Now the ${CORNER[cornerPts.length]} corner`);
@@ -273,6 +292,9 @@
       if (c) save({ [what]: c });
     }
   });
+  window.arCharger = () => { if (!H) return alert('Set the desk corners first.'); picking = 'charger'; cornerPts = []; step('Click the charger'); };
+  window.arDock = async () => { const r = await post('/api/arena/dock'); if (!r.ok) alert(r.error); refresh(); };
+  window.arAutoDock = on => save({ auto_dock: on });
   window.arSaveSize = () => save({ size: [+$('#ar-w').value, +$('#ar-d').value] });
   window.arTol = v => { cfg.tol = +v; clearTimeout(window._arTolT); window._arTolT = setTimeout(() => save({ tol: +v }), 400); };
   window.arFlip = () => save({ flip: !cfg.flip });
@@ -301,6 +323,11 @@
     sel.innerHTML = `<option value="">Me (Teleop, or whatever is driving)</option>` + st.policies.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
     if ([...sel.options].some(o => o.value === was)) sel.value = was;
     $('#ar-go').hidden = st.running; $('#ar-stop').hidden = !st.running;
+    $('#ar-autodock').checked = cfg.auto_dock !== false;
+    $('#ar-dock').disabled = !cfg.charger || !!st.dock;
+    const batt = { 1: 'low', 2: 'ok', 3: 'full' }[st.battery] || '?';
+    $('#ar-dockstate').textContent = !cfg.charger ? 'Charger not set yet.' :
+      `Battery ${batt}${st.on_charger ? ', on the charger' : ''}${st.dock ? ` · ${st.dock}` : ''}`;
     const run = st.run;
     $('#ar-run').innerHTML = run ? card(run, st.running) : '';
     $('#ar-recent').innerHTML = (st.recent || []).map(r => card(r, false)).join('') || '<p class="tele-note">None yet.</p>';
@@ -330,7 +357,7 @@
     else if (f) last = { ...(last || {}), ok: false };
     draw(f);
     if (++tick % 5 === 0) info(f);
-    if (f && H) post('/api/arena/pose', f.ok ? { ok: true, x: f.x, y: f.y, yaw: f.yaw } : { ok: false }).catch(() => {});
+    if (f && H) post('/api/arena/pose', f.ok ? { ok: true, x: f.x, y: f.y, yaw: f.yaw, yaw_src: f.src } : { ok: false }).catch(() => {});
   }
 
   window.arenaShown = on => {

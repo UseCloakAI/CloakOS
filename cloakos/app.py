@@ -537,6 +537,8 @@ class Brain:
         await self.set_mode("home")
         self._homing = True
         try:
+            if self.arena is not None and self.arena.can_route():     # the desk camera knows where home is:
+                await self.arena.route_to_charger()                  # drive up to it first, then Vector docks
             ok = await self.body.go_home()
         finally:
             self._homing = False
