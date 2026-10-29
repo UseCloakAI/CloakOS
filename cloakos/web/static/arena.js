@@ -140,11 +140,27 @@
   /* Two coloured markers on Vector (say red at the front, yellow at the back): back -> front is
      exactly which way it faces, the midpoint is where it is. The surest fix there is; the
      "what isn't desk" method only fills in when they're not both visible. */
+  // per frame: which pixels are desk (worked out once per setup) and each desk pixel's colour (once per frame)
+  let deskMask = null, deskKey = '', HS = null;
+  function deskPixels(W, Hh, poly, x0, x1, y0, y1, key) {
+    if (deskKey !== key) {
+      deskMask = new Uint8Array(W * Hh);
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (inside([x, y], poly)) deskMask[y * W + x] = 1;
+      deskKey = key; HS = new Float32Array(W * Hh * 3);
+    }
+    return deskMask;
+  }
+  function colours(img, W, x0, x1, y0, y1) {
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const k = y * W + x; if (!deskMask[k]) continue;
+      const i = k * 4, c = hsv(img[i], img[i + 1], img[i + 2]); HS[k * 3] = c[0]; HS[k * 3 + 1] = c[1]; HS[k * 3 + 2] = c[2];
+    }
+  }
   function blobsOf(colour, img, W, Hh, poly, x0, x1, y0, y1) {
     const isM = matcher(colour), m = new Uint8Array(W * Hh), out = [];
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      const i = (y * W + x) * 4;
-      if (isM(...hsv(img[i], img[i + 1], img[i + 2])) && inside([x, y], poly)) m[y * W + x] = 1;
+      const k = y * W + x;
+      if (deskMask[k] && isM(HS[k * 3], HS[k * 3 + 1], HS[k * 3 + 2])) m[k] = 1;
     }
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const s0 = y * W + x; if (m[s0] !== 1) continue;
@@ -188,10 +204,12 @@
     const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(W - 1, Math.ceil(Math.max(...xs)));
     const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(Hh - 1, Math.ceil(Math.max(...ys)));
     const key = `${W}x${Hh}:${JSON.stringify(cfg.corners)}`;
+    const desk = deskPixels(W, Hh, poly, x0, x1, y0, y1, key);
+    if (cfg.dot || (cfg.mfront && cfg.mback)) colours(img, W, x0, x1, y0, y1);
     if (!bg || bgKey !== key || relearn) {          // (re)start from the desk's typical colour: anything on it shows up again
       relearn = false;
       const rs = [], gs = [], bs = [];
-      for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) if (inside([x, y], poly)) { const i = (y * W + x) * 4; rs.push(img[i]); gs.push(img[i + 1]); bs.push(img[i + 2]); }
+      for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) if (desk[y * W + x]) { const i = (y * W + x) * 4; rs.push(img[i]); gs.push(img[i + 1]); bs.push(img[i + 2]); }
       const med = a => a.sort((p, q) => p - q)[a.length >> 1] || 0, m = [med(rs), med(gs), med(bs)];
       bg = new Float32Array(W * Hh * 3); for (let k = 0; k < W * Hh; k++) bg.set(m, k * 3);
       bgKey = key;
@@ -200,9 +218,9 @@
     const mask = new Uint8Array(W * Hh), lit = new Uint8Array(W * Hh);
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const k = y * W + x, i = k * 4;
-      if (!inside([x, y], poly)) continue;
+      if (!desk[k]) continue;
       if (Math.abs(img[i] - bg[k * 3]) + Math.abs(img[i + 1] - bg[k * 3 + 1]) + Math.abs(img[i + 2] - bg[k * 3 + 2]) > thr) mask[k] = 1;
-      if (cfg.dot && isDot(...hsv(img[i], img[i + 1], img[i + 2]))) lit[k] = 1;
+      if (cfg.dot && isDot(HS[k * 3], HS[k * 3 + 1], HS[k * 3 + 2])) lit[k] = 1;
     }
     const mk = markerPair(img, W, Hh, poly, x0, x1, y0, y1);
     const cm2 = (cx, cy) => {                       // real desk area of one image pixel here
@@ -280,11 +298,14 @@
       const s2 = deskSize(); Hinv = homography([[0, 0], [s2[0], 0], [s2[0], s2[1]], [0, s2[1]]], cfg.corners);
     }
     const D = p => P(apply(Hinv, p));
-    if (Hinv && path.length > 1) {                   // where it's been: a fading trail on the desk
-      g.lineWidth = 3; g.lineCap = 'round';
-      for (let i = 1; i < path.length; i++) {
-        g.strokeStyle = `rgba(34,197,94,${(0.1 + 0.8 * i / path.length).toFixed(2)})`;
-        const [ax, ay] = D(path[i - 1]), [bx, by] = D(path[i]); g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+    if (Hinv && path.length > 1) {                   // where it's been: a fading trail, drawn in 10 strokes (not one per point)
+      g.lineWidth = 3; g.lineCap = 'round'; g.lineJoin = 'round';
+      const pts = path.slice(-600).map(D), K = 10, per = Math.ceil(pts.length / K);
+      for (let b = 0; b < K; b++) {
+        const a = b * per, e = Math.min(pts.length - 1, a + per);
+        if (e <= a) break;
+        g.strokeStyle = `rgba(34,197,94,${(0.1 + 0.8 * (b + 1) / K).toFixed(2)})`;
+        g.beginPath(); g.moveTo(...pts[a]); for (let i = a + 1; i <= e; i++) g.lineTo(...pts[i]); g.stroke();
       }
     }
     const rt = st && st.route;
@@ -478,11 +499,23 @@
 
   function frame() {
     const f = smooth(track());
-    if (f && f.ok) { last = f; if (!path.length || Math.hypot(path[path.length - 1][0] - f.x, path[path.length - 1][1] - f.y) > 0.01) { path.push([f.x, f.y]); path = path.slice(-2000); } }
+    if (f && f.ok) { last = f; if (!path.length || Math.hypot(path[path.length - 1][0] - f.x, path[path.length - 1][1] - f.y) > 0.01) { path.push([f.x, f.y]); if (path.length > 1200) path = path.slice(-600); } }
     else if (f) last = { ...(last || {}), ok: false };
     draw(f);
     if (++tick % 5 === 0) info(f);
     if (f && H) post('/api/arena/pose', f.ok ? { ok: true, x: f.x, y: f.y, yaw: f.yaw, yaw_src: f.src } : { ok: false }).catch(() => {});
+  }
+
+  // tracking runs at most 10x a second and never more than about a third of the time, so the page
+  // (and your driving keys) always stay responsive
+  let cost = 0;
+  function schedule() {
+    if (!loop) return;
+    setTimeout(() => {
+      if (!loop) return;
+      const t0 = performance.now(); frame(); cost = 0.8 * cost + 0.2 * (performance.now() - t0);
+      schedule();
+    }, Math.max(100, cost * 2));
   }
 
   window.arenaShown = on => {
@@ -491,10 +524,10 @@
     clearInterval(poll);
     if (on) {
       refresh().then(() => { if (!stream) cameras(); });
-      if (!loop) loop = setInterval(frame, 100);
+      if (!loop) { loop = true; schedule(); }
       poll = setInterval(refresh, 1000);
     } else if (!(st && st.running)) {              // a run keeps tracking while you look at another page
-      clearInterval(loop); loop = null;
+      loop = null;
     }
   };
 })();
