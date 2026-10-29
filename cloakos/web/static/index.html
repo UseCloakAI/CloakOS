@@ -556,6 +556,11 @@
               <button class="chip" onclick="arFlip()" title="If the arrow points backwards">Flip heading</button>
             </div>
             <div id="ar-track" class="desk-score"></div>
+            <h2>Charger</h2>
+            <p class="tele-note">Click the charger, then a spot just in front of it (the side Vector drives up to). Going home then drives straight there and lets Vector dock.</p>
+            <div class="sim-row"><button class="chip" onclick="arCharger()">Click charger</button><button class="chip" id="ar-dock" onclick="arDock()">Dock now, then come back</button></div>
+            <label class="sim-rec"><input type="checkbox" id="ar-autodock" checked onchange="arAutoDock(this.checked)"> When the battery gets low in a run: charge, then do the run again</label>
+            <p class="tele-note" id="ar-dockstate"></p>
             <h2>3 · Real run</h2>
             <p class="tele-note">Scores a real drive on your desk like the sim exam: desk covered, edge saves (the reflex had to step in), falls. Pick a camera-trained desk policy, or score yourself driving in Teleop.</p>
             <div class="sim-row"><select id="ar-policy" class="sim-select" aria-label="Who drives"></select></div>
