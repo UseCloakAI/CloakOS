@@ -227,8 +227,25 @@
     const P = ([x, y]) => [b.x + x * b.w, b.y + y * b.h];
     const pts = picking === 'corners' ? cornerPts : cfg.corners || [];
     let Hinv = null;
-    if (H && cfg.charger) {                          // charger on the camera view: desk -> image
+    if (H) {                                         // desk -> image, to draw desk things on the camera view
       const s2 = deskSize(); Hinv = homography([[0, 0], [s2[0], 0], [s2[0], s2[1]], [0, s2[1]]], cfg.corners);
+    }
+    const D = p => P(apply(Hinv, p));
+    if (Hinv && path.length > 1) {                   // where it's been: a fading trail on the desk
+      g.lineWidth = 3; g.lineCap = 'round';
+      for (let i = 1; i < path.length; i++) {
+        g.strokeStyle = `rgba(34,197,94,${(0.1 + 0.8 * i / path.length).toFixed(2)})`;
+        const [ax, ay] = D(path[i - 1]), [bx, by] = D(path[i]); g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+      }
+    }
+    const rt = st && st.route;
+    if (Hinv && rt && f && f.ok) {                   // where it's going: dashed line to the spot in front of the charger
+      g.setLineDash([8, 6]); g.lineWidth = 3; g.strokeStyle = '#38bdf8';
+      const [a1, a2] = D([f.x, f.y]), [b1, b2] = D(rt.target), [c1, c2] = D(rt.charger);
+      g.beginPath(); g.moveTo(a1, a2); g.lineTo(b1, b2); g.stroke();
+      g.setLineDash([2, 6]); g.beginPath(); g.moveTo(b1, b2); g.lineTo(c1, c2); g.stroke(); g.setLineDash([]);
+      g.fillStyle = '#38bdf8'; g.beginPath(); g.arc(b1, b2, 6, 0, Math.PI * 2); g.fill();
+      g.fillText(rt.phase === 'face' ? 'turning to face the charger' : 'heading home', b1 - 30, b2 + 22);
     }
     const acc = getComputedStyle(document.documentElement).getPropertyValue('--acc').trim() || '#e8553d';
     g.lineWidth = 2; g.strokeStyle = acc; g.fillStyle = acc; g.font = '700 12px sans-serif';
@@ -237,7 +254,7 @@
       if (pts.length === 4) g.closePath(); g.stroke();
       pts.forEach((p, i) => { const [x, y] = P(p); g.fillRect(x - 4, y - 4, 8, 8); g.fillText(['front-left', 'front-right', 'back-right', 'back-left'][i], x + 7, y - 7); });
     }
-    if (Hinv) {
+    if (Hinv && cfg.charger) {
       const ch = cfg.charger, [x, y] = P(apply(Hinv, [ch.x, ch.y])), [fx, fy] = P(apply(Hinv, [ch.x + Math.cos(ch.yaw) * 0.18, ch.y + Math.sin(ch.yaw) * 0.18]));
       g.strokeStyle = '#38bdf8'; g.fillStyle = '#38bdf8'; g.lineWidth = 2;
       g.strokeRect(x - 9, y - 9, 18, 18); g.beginPath(); g.moveTo(x, y); g.lineTo(fx, fy); g.stroke(); g.fillText('charger', x + 12, y - 10);
@@ -246,6 +263,13 @@
       const [x, y] = P(f.px);
       g.strokeStyle = '#22c55e'; g.lineWidth = 3; g.beginPath(); g.arc(x, y, Math.max(8, Math.sqrt(f.area) * b.w / PW), 0, Math.PI * 2); g.stroke();
       if (f.dotPx) { const [dx, dy] = P(f.dotPx); g.fillStyle = '#22c55e'; g.fillRect(dx - 3, dy - 3, 6, 6); }
+      if (Hinv) {                                    // which way it faces: an arrow 10 cm long on the desk
+        const [hx, hy] = D([f.x + Math.cos(f.yaw) * 0.1, f.y + Math.sin(f.yaw) * 0.1]);
+        g.strokeStyle = '#22c55e'; g.lineWidth = 3; g.beginPath(); g.moveTo(x, y); g.lineTo(hx, hy); g.stroke();
+        const ang = Math.atan2(hy - y, hx - x);
+        g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx - 9 * Math.cos(ang - 0.5), hy - 9 * Math.sin(ang - 0.5));
+        g.moveTo(hx, hy); g.lineTo(hx - 9 * Math.cos(ang + 0.5), hy - 9 * Math.sin(ang + 0.5)); g.stroke();
+      }
     }
     // top-down map: desk, path, Vector with its heading
     const m = map.getContext('2d'), s = deskSize(); m.clearRect(0, 0, map.width, map.height);
@@ -256,6 +280,10 @@
     m.strokeRect(ox, oy, s[0] * k, s[1] * k);
     m.strokeStyle = acc; m.globalAlpha = 0.5; m.lineWidth = 1.5; m.beginPath();
     path.forEach((p, i) => { const [x, y] = M(p); i ? m.lineTo(x, y) : m.moveTo(x, y); }); m.stroke(); m.globalAlpha = 1;
+    if (st && st.route && f && f.ok) {
+      const [a1, a2] = M([f.x, f.y]), [b1, b2] = M(st.route.target);
+      m.setLineDash([5, 4]); m.strokeStyle = '#38bdf8'; m.lineWidth = 2; m.beginPath(); m.moveTo(a1, a2); m.lineTo(b1, b2); m.stroke(); m.setLineDash([]);
+    }
     if (cfg.charger) {
       const [x, y] = M([cfg.charger.x, cfg.charger.y]);
       m.fillStyle = '#38bdf8'; m.fillRect(x - 5, y - 5, 10, 10);
@@ -310,6 +338,7 @@
     if (!r.ok) alert(r.error); else path = [];
     refresh();
   };
+  window.arClearTrail = () => { path = []; };
   window.arStop = () => post('/api/arena/run/stop').then(refresh);
 
   async function refresh() {
