@@ -203,8 +203,9 @@ class Trainer:
     STAGES = {
         1: ("Practice in the simulator", "Learns to drive around a desk without falling off, in thousands of "
                                          "simulated desks. It can see the exact desk edges here, so this driver only runs in the simulator."),
-        2: ("Learn to see", "Learns to do the same using only Vector's camera (with its real lag), by copying the "
-                            "simulator driver. This is the driver that runs on your real Vector."),
+        2: ("Learn to see", "Learns to do the same from camera images only, rendered in the simulator with your "
+                            "camera's real lag (no robot needed), by copying the simulator driver. The result is "
+                            "the driver that can run on your real Vector."),
         3: ("Practice on your desk", "Your own drives on the real desk (recorded in Teleop) teach the camera driver "
                                      "what your desk really looks like. Each session makes it better."),
     }
@@ -233,7 +234,8 @@ class Trainer:
         title, why = self.STAGES[stage]
         if stage == 1 and passed(sim) and not current:
             why = ("Your simulator driver passed, but it was trained before the desk practice got harder "
-                   "(more things on the desk, steering clear of them). It continues from that driver and learns to avoid things.")
+                   "(more things on the desk, steering clear of them, roaming instead of looping). It continues "
+                   "from that driver, keeping what it knows about edges.")
         return {"stage": stage, "title": title, "why": why, "start": kw,
                 "sim": sim and {"name": sim["name"], "passed": passed(sim) and current},
                 "cam": cam and {"name": cam["name"], "passed": passed(cam)},

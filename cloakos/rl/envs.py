@@ -44,7 +44,7 @@ SENSORS = {"map": "Map ranges + robot sensors (recommended)", "robot": "Robot se
 ALIASES = {"explore": "wander", "rays": "map"}       # names used by older policies
 RAY_FOV = math.radians(180)
 RAY_MAX = 1.0
-DESK_REWARD_V = 2               # bump when the desk reward changes: older desk drivers get retrained (v2: steer clear of things)
+DESK_REWARD_V = 2               # bump when the desk reward changes: older desk drivers get retrained (v2: steer clear of things, roam)
 REAL_LAG_STEPS = (3, 5)          # command -> motion, in 0.1 s steps (calibration: 0.41 s)
 REAL_WHEEL_GAIN = (0.82, 0.92)   # wheels deliver this share of the asked speed (calibration: 0.86)
 
@@ -284,6 +284,8 @@ if gym is not None:
             self.t = 0
             self.bumps = 0
             self.visited = set()
+            self.seen_t: dict[tuple[int, int], int] = {}      # desk: when each 5 cm cell was last driven over
+            self.cell, self.recent = None, False
             # latency like the real robot over Wi-Fi: commands land 0-200 ms late, readings 0-100 ms stale
             from collections import deque
             # measured on the real Vector (calibration): ~0.41 s from command to motion, wheels 86% of asked
@@ -336,12 +338,24 @@ if gym is not None:
                     reward += 3.0
                     done, info["success"] = True, True
             elif spec.task == "desk":
+                # roam like a pet, not a patrol loop: somewhere not seen for 30 s pays, going straight
+                # back over the last 15 s costs a little, and driving forward only pays while exploring
                 cell = (int(s["pos"][0] // 0.05), int(s["pos"][1] // 0.05))
-                if cell not in self.visited:
-                    self.visited.add(cell)
-                    reward += 0.1
+                fresh = True
+                if cell != self.cell:
+                    seen = self.seen_t.get(cell)
+                    if seen is None or self.t - seen > 300:
+                        reward += 0.1
+                    elif self.t - seen < 150:
+                        reward -= 0.03
+                    self.recent = seen is not None and self.t - seen < 150
+                    self.cell = cell
+                fresh = not self.recent
+                self.seen_t[cell] = self.t
+                self.visited.add(cell)
                 fwd = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
-                reward += 0.02 * max(0.0, fwd)
+                if fresh:
+                    reward += 0.01 * max(0.0, fwd)
                 if s["bump"]:
                     reward -= 3.0
                     info["bump"] = True
