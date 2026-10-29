@@ -415,13 +415,14 @@ function playAnim() { const k = $('#anim-key').value.trim(); if (k) sendWS({ typ
 
 /* ── teleop input: keyboard + Gamepad API, sent at 20 Hz while active ── */
 const keys = new Set();
+const keyT = {};          // last keydown (held keys repeat): a key that stops repeating counts as let go
 const KEYMAP = { w: 'w', a: 'a', s: 's', d: 'd', arrowup: 'up', arrowdown: 'down', r: 'r', f: 'f', shift: 'shift' };
 const typing = () => { const a = document.activeElement; return a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT'); };
 addEventListener('keydown', e => {
   if (typing() || !S || S.mode !== 'teleop') return;
   const k = KEYMAP[e.key.toLowerCase()];
   if (e.key === ' ') { keys.clear(); e.preventDefault(); }
-  if (k) { keys.add(k); e.preventDefault(); }
+  if (k) { keys.add(k); keyT[k] = performance.now(); e.preventDefault(); }
   paintKeys();
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.key.toLowerCase()]; if (k) keys.delete(k); paintKeys(); });
@@ -451,6 +452,10 @@ function teleopAxes() {
 let wasActive = false;
 setInterval(() => {
   if (!S || S.mode !== 'teleop') { wasActive = false; keys.clear(); return; }
+  // a busy page can lose the key-up: held keys repeat ~30x a second after the first half second,
+  // so one quiet for 2.5 s (longer than any key-repeat delay) has really been let go
+  const now = performance.now();
+  for (const k of [...keys]) if (now - (keyT[k] || 0) > 2500) { keys.delete(k); paintKeys(); }
   const ax = teleopAxes();
   const active = Object.values(ax).some(v => v !== 0);
   if (active || wasActive) sendWS({ type: 'teleop', ...ax });   // keep-alive for the dead-man, plus one zero on release
