@@ -134,62 +134,89 @@
     const cx = poly.reduce((a, p) => a + p[0], 0) / 4, cy = poly.reduce((a, p) => a + p[1], 0) / 4;
     return poly.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
   }
+  /* Vector is "the one Vector-sized thing that isn't desk": each pixel is compared with what that
+     spot of the desk normally looks like (learned over a few seconds, so glare, papers and other
+     still things fade into the desk), then the change that is the size of Vector on the desk in
+     real cm² wins, nearest last time. Works on any desk colour, light or dark. Its green backpack
+     light (behind its middle) says which way it faces; without it, the way it's been moving. */
+  let bg = null, bgKey = '';
   function track() {
     if (!video.videoWidth) return null;
     const W = PW, Hh = Math.round(PW * video.videoHeight / video.videoWidth);
     if (work.width !== W || work.height !== Hh) { work.width = W; work.height = Hh; }
     wctx.drawImage(video, 0, 0, W, Hh);
-    if (!H || !cfg.gold) return null;
+    if (!H) return null;
     const img = wctx.getImageData(0, 0, W, Hh).data;
-    const isGold = matcher(cfg.gold), isDot = matcher(cfg.dot);
-    const poly = grow(cfg.corners.map(([x, y]) => [x * W, y * Hh]), 1.12);
+    const poly = grow(cfg.corners.map(([x, y]) => [x * W, y * Hh]), 1.08);
     const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
     const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(W - 1, Math.ceil(Math.max(...xs)));
     const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(Hh - 1, Math.ceil(Math.max(...ys)));
-    const mask = new Uint8Array(W * Hh);
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      const i = (y * W + x) * 4, c = hsv(img[i], img[i + 1], img[i + 2]);
-      if (isGold(...c) && inside([x, y], poly)) mask[y * W + x] = 1;
-      else if (cfg.dot && isDot(...c)) mask[y * W + x] = 2;
+    const key = `${W}x${Hh}:${JSON.stringify(cfg.corners)}`;
+    if (!bg || bgKey !== key) {                     // start from the desk's typical colour everywhere
+      const rs = [], gs = [], bs = [];
+      for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) if (inside([x, y], poly)) { const i = (y * W + x) * 4; rs.push(img[i]); gs.push(img[i + 1]); bs.push(img[i + 2]); }
+      const med = a => a.sort((p, q) => p - q)[a.length >> 1] || 0, m = [med(rs), med(gs), med(bs)];
+      bg = new Float32Array(W * Hh * 3); for (let k = 0; k < W * Hh; k++) bg.set(m, k * 3);
+      bgKey = key;
     }
-    // connected gold blobs; keep the biggest (near the last fix if it's close in size)
-    const seen = new Uint8Array(W * Hh); let best = null;
-    let deskPx = 0;                                  // the desk's area in the image: Vector's top is a few % of it
-    for (let i = 0, j = 3; i < 4; j = i++) deskPx += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]) / 2;
-    deskPx = Math.abs(deskPx) / 1.12 / 1.12;
+    const thr = Math.max(15, 75 - 1.2 * +(cfg.tol || 22)), isDot = matcher(cfg.dot);
+    const mask = new Uint8Array(W * Hh), lit = new Uint8Array(W * Hh);
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      const s = y * W + x;
-      if (mask[s] !== 1 || seen[s]) continue;
-      const q = [s]; seen[s] = 1; let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+      const k = y * W + x, i = k * 4;
+      if (!inside([x, y], poly)) continue;
+      if (Math.abs(img[i] - bg[k * 3]) + Math.abs(img[i + 1] - bg[k * 3 + 1]) + Math.abs(img[i + 2] - bg[k * 3 + 2]) > thr) mask[k] = 1;
+      if (cfg.dot && isDot(...hsv(img[i], img[i + 1], img[i + 2]))) lit[k] = 1;
+    }
+    const cm2 = (cx, cy) => {                       // real desk area of one image pixel here
+      const p = apply(H, [cx / W, cy / Hh]), a = apply(H, [(cx + 1) / W, cy / Hh]), b = apply(H, [cx / W, (cy + 1) / Hh]);
+      return Math.abs((a[0] - p[0]) * (b[1] - p[1]) - (a[1] - p[1]) * (b[0] - p[0])) * 1e4;
+    };
+    const seen = new Uint8Array(W * Hh); let best = null;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const s0 = y * W + x;
+      if (!mask[s0] || seen[s0]) continue;
+      const q = [s0], pix = []; seen[s0] = 1; let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
       while (q.length) {
         const p = q.pop(), px = p % W, py = (p - px) / W;
-        n++; sx += px; sy += py; sxx += px * px; syy += py * py; sxy += px * py;
-        for (const o of [p - 1, p + 1, p - W, p + W]) if (o >= 0 && o < mask.length && mask[o] === 1 && !seen[o]) { seen[o] = 1; q.push(o); }
+        pix.push(p); n++; sx += px; sy += py; sxx += px * px; syy += py * py; sxy += px * py;
+        for (const o of [p - 1, p + 1, p - W, p + W]) if (o >= 0 && o < mask.length && mask[o] && !seen[o]) { seen[o] = 1; q.push(o); }
       }
-      if (n < 12 || n > deskPx * 0.08) continue;      // specks, or something far too big to be Vector
-      const cx = sx / n, cy = sy / n, b = { n, cx, cy, cxx: sxx / n - cx * cx, cyy: syy / n - cy * cy, cxy: sxy / n - cx * cy };
-      const near = last && last.px ? Math.hypot(cx - last.px[0] * W, cy - last.px[1] * Hh) : 0;
-      b.rank = n - near * 0.5;
-      if (!best || b.rank > best.rank) best = b;
+      const cx = sx / n, cy = sy / n, area = n * cm2(cx, cy);
+      if (area < 15 || area > 250) continue;        // Vector from above is ~60 cm²: not specks, not a shadow sweep
+      const here = apply(H, [cx / W, cy / Hh]);
+      const prev = last && last.desk ? Math.hypot(here[0] - last.desk[0], here[1] - last.desk[1]) * 100 : 0;
+      const rank = -Math.abs(area - 60) / 10 - (last && last.desk ? prev : 0);
+      if (!best || rank > best.rank) best = { n, cx, cy, cxx: sxx / n - cx * cx, cyy: syy / n - cy * cy, cxy: sxy / n - cx * cy, area, rank, pix, here };
     }
-    if (!best) return { ok: false };
-    const c = [best.cx / W, best.cy / Hh], pos = apply(H, c);
+    // learn the desk: everything except where Vector is now fades into the background
+    const keep = new Uint8Array(W * Hh);
+    if (best) { const R = 2 * Math.sqrt(best.n); for (let y = Math.max(0, best.cy - R | 0); y <= Math.min(Hh - 1, best.cy + R); y++) for (let x = Math.max(0, best.cx - R | 0); x <= Math.min(W - 1, best.cx + R); x++) keep[y * W + x] = 1; }
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const k = y * W + x; if (keep[k]) continue;
+      const i = k * 4; bg[k * 3] += 0.05 * (img[i] - bg[k * 3]); bg[k * 3 + 1] += 0.05 * (img[i + 1] - bg[k * 3 + 1]); bg[k * 3 + 2] += 0.05 * (img[i + 2] - bg[k * 3 + 2]);
+    }
+    if (!best || (last && last.desk && last.ok && Math.hypot(best.here[0] - last.desk[0], best.here[1] - last.desk[1]) > 0.25)) return { ok: false };
+    const c = [best.cx / W, best.cy / Hh], pos = best.here;
     let yaw = null, dotPx = null;
-    if (cfg.dot) {                                  // the dot near the gold top gives which way it faces
-      const R = 1.3 * Math.sqrt(best.n); let n = 0, sx = 0, sy = 0;   // on or right next to the gold top, on the desk
+    if (cfg.dot) {                                  // the backpack light sits just behind the middle: middle minus light = forward
+      const R = 1.3 * Math.sqrt(best.n); let n = 0, sx = 0, sy = 0;
       for (let y = Math.max(0, Math.floor(best.cy - R)); y <= Math.min(Hh - 1, best.cy + R); y++)
         for (let x = Math.max(0, Math.floor(best.cx - R)); x <= Math.min(W - 1, best.cx + R); x++)
-          if (mask[y * W + x] === 2 && Math.hypot(x - best.cx, y - best.cy) <= R && inside([x, y], poly)) { n++; sx += x; sy += y; }
-      if (n >= 2) { dotPx = [sx / n / W, sy / n / Hh]; const d = apply(H, dotPx); yaw = Math.atan2(d[1] - pos[1], d[0] - pos[0]); }
+          if (lit[y * W + x] && Math.hypot(x - best.cx, y - best.cy) <= R) { n++; sx += x; sy += y; }
+      if (n >= 1) {
+        dotPx = [sx / n / W, sy / n / Hh]; const d = apply(H, dotPx);
+        if (Math.hypot(pos[0] - d[0], pos[1] - d[1]) > 0.005) yaw = Math.atan2(pos[1] - d[1], pos[0] - d[0]);
+      }
     }
-    if (yaw === null) {                             // no dot: the blob's long axis, the way closest to last time
-      const a = 0.5 * Math.atan2(2 * best.cxy, best.cxx - best.cyy), tip = apply(H, [(best.cx + Math.cos(a) * 5) / W, (best.cy + Math.sin(a) * 5) / Hh]);
-      yaw = Math.atan2(tip[1] - pos[1], tip[0] - pos[0]);
-      if (last && last.ok && Math.cos(yaw - last.yaw) < 0) yaw += Math.PI;
-    }
+    if (yaw === null && last && last.desk && Math.hypot(pos[0] - last.desk[0], pos[1] - last.desk[1]) > 0.015)
+      yaw = Math.atan2(pos[1] - last.desk[1], pos[0] - last.desk[0]);           // which way it's been going
+    if (yaw === null) yaw = last && last.ok ? last.yaw - (cfg.flip ? Math.PI : 0) : 0;
     if (cfg.flip) yaw += Math.PI;
+    if (last && last.ok) {                          // a little smoothing: one noisy frame doesn't spin the arrow
+      const d = Math.atan2(Math.sin(yaw - last.yaw), Math.cos(yaw - last.yaw)); yaw = last.yaw + 0.5 * d;
+    }
     yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
-    return { ok: true, x: pos[0], y: pos[1], yaw, px: c, dotPx, area: best.n };
+    return { ok: true, x: pos[0], y: pos[1], yaw, px: c, dotPx, area: best.n, cm2: Math.round(best.area), desk: pos };
   }
 
   /* ── drawing ────────────────────────────────────────────── */
@@ -231,7 +258,7 @@
   function step(msg) { $('#ar-step').hidden = !msg; $('#ar-step').textContent = msg || ''; $('.ar-stage').classList.toggle('picking', !!msg); }
   const CORNER = ['front-left (your side, left)', 'front-right', 'back-right', 'back-left'];
   window.arCorners = () => { picking = 'corners'; cornerPts = []; step(`Click the desk's ${CORNER[0]} corner`); };
-  window.arPick = what => { picking = what; step(what === 'gold' ? "Click the middle of Vector's gold top" : 'Click the dot on Vector'); };
+  window.arPick = what => { picking = what; step(what === 'gold' ? 'Click on Vector' : "Click Vector's green backpack light"); };
   over.addEventListener('click', e => {
     if (!picking || !video.videoWidth) return;
     const n = toNorm(e);
@@ -242,6 +269,7 @@
       picking = null; step(null); save({ corners: cornerPts, size: [+$('#ar-w').value, +$('#ar-d').value] });
     } else {
       const c = sample(n); const what = picking; picking = null; step(null);
+      if (what === 'gold' && H) { const d = apply(H, n); last = { ok: false, desk: d, px: n }; }   // "that one is Vector"
       if (c) save({ [what]: c });
     }
   });
@@ -288,9 +316,9 @@
 
   function info(f) {
     const parts = [!cfg.corners ? '✗ desk corners not set' : `✓ desk ${cfg.size ? cfg.size.join(' × ') + ' cm' : ''}`,
-      !cfg.gold ? '✗ gold top not picked' : '✓ gold top', !cfg.dot ? '– dot not picked (heading guessed from movement)' : '✓ dot'];
-    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}°`
-      : H && cfg.gold ? "Can't see Vector. Try Match higher, or click the gold top again." : '';
+      !cfg.dot ? '– light not picked (heading comes from which way it moves)' : '✓ backpack light'];
+    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}° (${f.cm2} cm²)`
+      : H ? "Can't see Vector. Click on Vector to point it out, or move Match up." : '';
     $('#ar-track').innerHTML = `<p class="tele-note">${parts.map(esc).join('<br>')}</p>${where ? `<b>${esc(where)}</b>` : ''}`;
   }
 
