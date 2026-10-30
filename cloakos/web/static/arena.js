@@ -6,6 +6,7 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const post = (url, body = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
   const video = $('#ar-video'), over = $('#ar-overlay'), map = $('#ar-map');
+  const JS_V = '0.9.15';                           // bumped with the version: a stale tab says so
   const PW = 480;                                  // processing width (pixels): enough that ~1 cm markers are a few pixels
   const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
   let shown = false, stream = null, cfg = {}, st = null, H = null, loop = null, poll = null;
@@ -514,6 +515,7 @@
       if (cfg.size) { $('#ar-w').value = cfg.size[0]; $('#ar-d').value = cfg.size[1]; }
       if (cfg.tol) $('#ar-tol').value = cfg.tol;
     }
+    if (st.version && st.version !== JS_V) { $('#ar-step').hidden = false; $('#ar-step').textContent = `CloakOS updated to v${st.version}: reload this page (Cmd-R) before driving.`; }
     if (st.config && !!st.config.flip !== !!cfg.flip) {   // the server saw it drive and swapped the ends
       cfg.flip = st.config.flip; T.yaw = wrap(T.yaw + Math.PI); T.yawFar = 0; imu = null;
     }

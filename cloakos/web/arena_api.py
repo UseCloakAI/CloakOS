@@ -26,7 +26,8 @@ def make_arena_router(brain: "Brain") -> APIRouter:
         a = arena()
         pols = [p["name"] for p in await asyncio.to_thread(brain.trainer.policies)
                 if p["ready"] and p["task"] == "desk-pixels"]
-        return {"config": a.config, "pose": a.pose, "run": a.summary(), "running": a.running, "dock": a.dock_state, "route": a.route, "heading_confirmed": a.heading_confirmed, "camera_lag_s": a.camera_lag(),
+        from .. import __version__
+        return {"version": __version__, "config": a.config, "pose": a.pose, "run": a.summary(), "running": a.running, "dock": a.dock_state, "route": a.route, "heading_confirmed": a.heading_confirmed, "camera_lag_s": a.camera_lag(),
                 "sensors": {"prox_raw": brain.world.prox_raw, "proximity_mm": brain.world.proximity_mm, "cliff": brain.world.cliff,
                             "wheels_mmps": [brain.world.left_mmps, brain.world.right_mmps], "battery": brain.world.battery_level},
                 "battery": brain.world.battery_level, "on_charger": brain.world.on_charger,
