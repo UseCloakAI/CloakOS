@@ -247,3 +247,29 @@ The Training page:
   - The Mac firewall must allow wire-pod (`chipper`).
 
 - `cloakos/web/static/arena.js` has `JS_V`: bump it with the version so a stale Arena tab tells you to reload.
+
+## Arena frames (one convention, end to end)
+
+1. **Image:** normalised pixels (u right, v DOWN). A non-mirrored overhead camera shows the desk as
+   seen from above, but with v pointing down the image angle `atan2(dv, du)` runs the other way from
+   a physical angle: physical counter-clockwise (seen from above) = on-screen counter-clockwise =
+   image angle DECREASING.
+2. **Desk frame:** the corner homography maps the clicked front-left, front-right, back-right,
+   back-left corners to (0,0), (W,0), (W,D), (0,D). x along the front edge, y toward the back, metres.
+   Desk yaw = `atan2(dy, dx)` of the markers' back->front vector mapped through the homography.
+3. **Handedness:** that desk corner order is counter-clockwise in desk coordinates. If the clicked
+   corners are also counter-clockwise in (u, v) (positive shoelace area, e.g. the front edge at the
+   TOP of the image, as on Weston's desk), image->desk keeps orientation, so the desk frame inherits
+   the image's mirror: a physical CCW turn makes desk yaw go DOWN. `Arena.yaw_sign = -1`.
+   Front edge at the bottom (clockwise in the image): `yaw_sign = +1`. Computed from the corners only,
+   never learned; `camera_mirrored: true` in data/arena.json flips it for a mirrored video feed.
+4. **Vector's own turning:** odometry/gyro yaw is physical, CCW positive. Desk-yaw change =
+   `yaw_sign` x odometry change. Gyro fusion is OFF by default (`gyro_fusion` in arena.json): the
+   heading is the camera markers + `HeadingGate` + confirm-by-driving. The camera-vs-odometry turn
+   check (`_vote_turn_sign`) is a sanity check only: 3 disagreements in a row set `sign_conflict`,
+   which stops go-to and going home. It never changes the sign.
+5. **Physical frame for control:** `Arena.to_phys(x, y, yaw)` = the desk frame un-mirrored
+   (`(x, -y, -yaw)` when `yaw_sign == -1`). Every controller (go-to, the trained goto skill, the
+   charger route, pose prediction from wheel speeds) works in it, where +yaw = CCW = right wheel
+   faster. Arena ranges are returned in Vector's own left-to-right order (reversed when mirrored).
+   Pages, the minimap and `/api/arena` stay in the desk frame. Recordings carry `goal_phys`/`pose_phys`.

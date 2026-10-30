@@ -189,8 +189,12 @@ def real_goal_steps(steps: list[dict]) -> list[tuple[dict, list[float], np.ndarr
         if goal_odo is None or goal_key != tuple(t["goal"]):
             if not ar.get("ok") or ar.get("yaw") is None:
                 continue                                  # wait for a good overhead fix to anchor the goal
-            gx, gy = t["goal"]
-            dx, dy, d = gx - ar["x"], gy - ar["y"], float(ar["yaw"])
+            if t.get("pose_phys") and t.get("goal_phys"):        # v0.9.17+: already un-mirrored
+                (ax_, ay_, d), (gx, gy) = t["pose_phys"], t["goal_phys"]
+                dx, dy, d = gx - ax_, gy - ay_, float(d)
+            else:                                         # older recordings: desk frame (may be mirrored)
+                gx, gy = t["goal"]
+                dx, dy, d = gx - ar["x"], gy - ar["y"], float(ar["yaw"])
             fwd, left = dx * math.cos(d) + dy * math.sin(d), -dx * math.sin(d) + dy * math.cos(d)   # goal in Vector's frame
             goal_odo = (ox + fwd * math.cos(oyaw) - left * math.sin(oyaw), oy + fwd * math.sin(oyaw) + left * math.cos(oyaw))
             goal_key = tuple(t["goal"])

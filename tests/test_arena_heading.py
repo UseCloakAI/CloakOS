@@ -107,21 +107,6 @@ def test_camera_lag_is_measured_from_a_turn():
     assert abs(e.estimate() - lag) < 0.05
 
 
-def test_turn_sign_from_the_desk_corners_and_a_clockwise_turn(tmp_path, monkeypatch):
-    a, Brain = _arena(tmp_path, monkeypatch)
-    # a normal overhead view: front edge at the bottom of the image, back edge at the top
-    a.save_config({"corners": [[0.1, 0.9], [0.9, 0.9], [0.9, 0.1], [0.1, 0.1]], "size": [80, 50]})
-    assert a.yaw_sign == 1
-    Brain.world.pose = (0.0, 0.0, 0.0)
-    for _ in range(3):
-        a.update_pose({"ok": True, "x": 0.4, "y": 0.25, "yaw": math.radians(141), "yaw_src": "markers"})
-    Brain.world.pose = (0.0, 0.0, -math.radians(178))     # Vector turns clockwise 178° (its gyro: negative)
-    assert abs(math.degrees(a.heading()) - (-37)) < 1     # 141 -> -37 the short (clockwise) way, not 319
-    # a mirrored view (corners come out counter-clockwise on screen): Vector's turns flip
-    a.save_config({"corners": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]})
-    assert a.yaw_sign == -1
-
-
 def test_click_to_desk_to_goal_round_trip(tmp_path, monkeypatch):
     """The page maps a click through the corner homography; the goal the driver gets is that point."""
     import numpy as np
@@ -138,30 +123,61 @@ def test_click_to_desk_to_goal_round_trip(tmp_path, monkeypatch):
     assert gp.goal == (float(x), float(y)) and gp.frame == "arena"
 
 
-def _turn(a, Brain, cam_deg_per_step, odo_deg_per_step, steps, t0, monkeypatch):
+HIS = [[0.070, 0.315], [0.839, 0.282], [0.881, 0.741], [0.035, 0.763]]   # Weston's desk: front edge at the TOP of the image
+
+
+def _homography(corners, size):
+    import cv2
+    import numpy as np
+    return cv2.getPerspectiveTransform(np.float32(corners), np.float32([[0, 0], [size[0], 0], [size[0], size[1]], [0, size[1]]]))
+
+
+def _desk_yaw_from_image(H, centre_px, heading_img_rad):
+    """What the markers give: map Vector's centre and a point 3 cm-ish ahead of it (image) to the desk."""
+    import cv2
+    import numpy as np
+    p0 = np.float32([[centre_px]])
+    p1 = np.float32([[[centre_px[0] + 0.03 * math.cos(heading_img_rad), centre_px[1] + 0.03 * math.sin(heading_img_rad)]]])
+    a, b = cv2.perspectiveTransform(p0, H)[0, 0], cv2.perspectiveTransform(p1, H)[0, 0]
+    return math.atan2(b[1] - a[1], b[0] - a[0]), (float(a[0]), float(a[1]))
+
+
+def test_his_desk_end_to_end_turns_toward_a_target_on_the_right(tmp_path, monkeypatch):
+    """Weston's corners. A real (non-mirrored) overhead image: physical counter-clockwise, seen from
+    above, is counter-clockwise on screen = the image angle atan2(dv, du) DECREASING (v points down)."""
+    from cloakos.behaviors.goto import GoToPolicy
+    a, _ = _arena(tmp_path, monkeypatch)
+    a.save_config({"corners": HIS, "size": [80, 50]})
+    assert a.yaw_sign == -1                                   # his desk frame is a mirror image
+    H = _homography(HIS, (0.8, 0.5))
+    c = (0.45, 0.5)
+    # Vector faces North on screen (image up: angle -90°); physical CCW by d -> image angle -90° - d
+    y0, pos = _desk_yaw_from_image(H, c, -math.pi / 2)
+    y1, _ = _desk_yaw_from_image(H, c, -math.pi / 2 - 0.2)
+    dy = math.atan2(math.sin(y1 - y0), math.cos(y1 - y0))
+    assert dy * a.yaw_sign > 0                                # physical CCW moves desk yaw by yaw_sign: the geometry holds
+    # a target on the RIGHT of the screen (larger u): its desk point
+    import cv2
+    import numpy as np
+    tgt = cv2.perspectiveTransform(np.float32([[[0.8, 0.5]]]), H)[0, 0]
+    gp = GoToPolicy(None, None, None)
+    gp.set_point(float(tgt[0]), float(tgt[1]))
+    px, py, pyaw = a.to_phys(pos[0], pos[1], y0)
+    gx, gy, _ = a.to_phys(float(tgt[0]), float(tgt[1]), 0.0)
+    left, right = gp._point_controller({"pos": [px, py, 0.0], "yaw": pyaw}, math.dist(pos, tgt), (gx, gy))
+    # facing North with the target to the East (screen right) means turning CLOCKWISE: left wheel forward
+    assert left > right and left > 0
+
+
+def test_disagreement_only_stops_never_flips(tmp_path, monkeypatch):
+    a, Brain = _arena(tmp_path, monkeypatch)
+    a.save_config({"corners": HIS, "size": [80, 50]})
     import time as _t
-    yaw, odo = math.radians(10), 0.0
-    for i in range(steps):
-        monkeypatch.setattr(_t, "monotonic", lambda v=t0 + i * 0.1: v)
+    yaw, odo = 0.1, 0.0
+    for i in range(60):                                       # camera and odometry turn the SAME way: against -1 geometry
+        monkeypatch.setattr(_t, "monotonic", lambda v=3000.0 + i * 0.1: v)
         Brain.world.pose = (0.0, 0.0, odo)
         a.update_pose({"ok": True, "x": 0.4, "y": 0.25, "yaw": yaw, "yaw_src": "markers"})
-        yaw += math.radians(cam_deg_per_step)
-        odo += math.radians(odo_deg_per_step)
-    return t0 + steps * 0.1
-
-
-def test_turn_sign_is_measured_and_a_disagreement_stops_the_gyro_term(tmp_path, monkeypatch):
-    a, Brain = _arena(tmp_path, monkeypatch)
-    a.save_config({"corners": [[0.1, 0.9], [0.9, 0.9], [0.9, 0.1], [0.1, 0.1]], "size": [80, 50]})
-    assert a.yaw_sign == 1                                  # the corner guess
-    # Vector turns clockwise (gyro -), the camera sees the heading go up (+): the guess is wrong here
-    _turn(a, Brain, cam_deg_per_step=-0.0 + 5, odo_deg_per_step=-5, steps=40, t0=1000.0, monkeypatch=monkeypatch)
-    assert a.yaw_sign == -1 and a.config["turn_sign"] == -1 and not a.sign_conflict
-
-
-def test_one_disagreeing_turn_drops_to_camera_only(tmp_path, monkeypatch):
-    a, Brain = _arena(tmp_path, monkeypatch)
-    a.save_config({"corners": [[0.1, 0.9], [0.9, 0.9], [0.9, 0.1], [0.1, 0.1]], "size": [80, 50]})
-    _turn(a, Brain, cam_deg_per_step=5, odo_deg_per_step=-5, steps=14, t0=2000.0, monkeypatch=monkeypatch)
-    assert a.sign_conflict
-    assert abs(a.heading() - a.pose["yaw"]) < 1e-9          # camera only while it's unsure
+        yaw += math.radians(5)
+        odo += math.radians(5)
+    assert a.sign_conflict and a.yaw_sign == -1 and "turn_sign" not in a.config

@@ -89,9 +89,7 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
             bot["y"] += v * math.sin(bot["th"]) * 0.05
             bot["th"] += om * 0.05
             w.pose = (bot["x"] * 1000, bot["y"] * 1000, bot["th"] - bot["odo0"])
-            moving = abs(v) > 0.01
-            a.update_pose({"ok": True, "x": bot["x"], "y": bot["y"], "yaw": bot["th"] if moving else 0.0,
-                           "yaw_src": "motion" if moving else "hold"})
+            a.update_pose({"ok": True, "x": bot["x"], "y": bot["y"], "yaw": bot["th"], "yaw_src": "markers"})   # the markers see it turn
             await asyncio.sleep(0.05)
 
 
@@ -180,6 +178,7 @@ def test_gyro_heading_follows_the_camera_even_mirrored(tmp_path, monkeypatch):
             world = World()
 
         a = Arena(Brain(), tmp_path)
+        a.save_config({"gyro_fusion": True, "corners": [[0, 1], [1, 1], [1, 0], [0, 0]] if mirror == 1 else [[0, 0], [1, 0], [1, 1], [0, 1]]})
         clock = iter([100.0 + 0.1 * k for k in range(1000)])
         monkeypatch.setattr(time, "monotonic", lambda: next(clock))
         for i in range(20):                        # turning left: Vector's heading and the camera's agree (or mirror)
