@@ -311,8 +311,9 @@ class Brain:
             return self.link.why_not_connected()
         if not a.in_desk(x, y):
             return "That point is off the desk (or too close to an edge)."
-        if a.ranges_status():
-            return a.ranges_status()
+        why = a.ranges_status()
+        if why and not ("faces" in why or "heading" in why):
+            return why                                  # a heading problem is what go-to's forward check settles
         if self.frozen:
             await self.set_frozen(False, source="go_to")
         gp = self.policies["goto"]

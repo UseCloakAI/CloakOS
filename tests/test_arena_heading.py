@@ -69,3 +69,28 @@ def test_flip_is_taken_at_once(tmp_path, monkeypatch):
     assert abs(abs(a.heading()) - math.pi) < 1e-6
     a.update_pose({"ok": True, "x": 0.4, "y": 0.25, "yaw": math.pi, "yaw_src": "markers"})
     assert a.pose["yaw_src"] == "markers" and abs(abs(a.heading()) - math.pi) < 1e-6
+
+
+def test_motion_check_flips_a_backwards_camera():
+    from cloakos.arena.heading import MotionCheck
+    m = MotionCheck()
+    assert m.update(0.30, 0.20, True, -math.pi / 2)[0] is None       # anchor
+    assert m.update(0.32, 0.20, True, -math.pi / 2)[0] is None       # only 2 cm
+    v, mdir = m.update(0.335, 0.20, True, math.pi)                   # drove east 3.5 cm, camera said west
+    assert v == "flip" and abs(mdir) < 1e-6
+    assert m.update(0.40, 0.20, False, 0.0) == (None, None)          # not driving forward: no verdict
+    m.update(0.40, 0.20, True, 0.0)
+    assert m.update(0.44, 0.20, True, 0.05)[0] == "ok"
+
+
+def test_arena_flips_and_confirms_from_driving(tmp_path, monkeypatch):
+    a, Brain = _arena(tmp_path, monkeypatch)
+    Brain.world.left_mmps = Brain.world.right_mmps = 0.0
+    for _ in range(3):                           # camera locks onto the wrong end: facing west
+        a.update_pose({"ok": True, "x": 0.30, "y": 0.2, "yaw": math.pi, "yaw_src": "markers"})
+    assert not a.heading_confirmed
+    Brain.world.left_mmps = Brain.world.right_mmps = 40.0
+    for i in range(6):                           # but it drives east
+        a.update_pose({"ok": True, "x": 0.30 + 0.01 * i, "y": 0.2, "yaw": math.pi, "yaw_src": "markers"})
+    assert a.heading_confirmed and a.config.get("flip") is True
+    assert abs(a.heading()) < 0.05

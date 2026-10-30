@@ -26,6 +26,9 @@ EDGE_STOP_M = 0.03         # a buffered ray ahead shorter than this: stop
 STANDOFF_M = 0.09          # stop this far from the object's centre
 TIMEOUT_S = 60.0
 STUCK_S = 10.0
+NUDGE_MMPS = 40.0          # heading check: a slow, straight few cm forward
+NUDGE_S = 5.0              # ...given up (and go-to refused) if driving hasn't settled it by then
+NUDGE_EDGE_M = 0.08        # not this close to any desk edge (the heading, so which edge is ahead, isn't known yet)
 
 
 class GoToPolicy(Policy):
@@ -39,6 +42,7 @@ class GoToPolicy(Policy):
         self._t0 = 0.0
         self._best = math.inf
         self._best_t = 0.0
+        self._nudge_t: float | None = None
         self.frame = "odo"                    # "arena": the goal is in Arena desk metres
         self.arena_src = None                 # () -> the Arena or None, set by the brain
         self.teacher: dict | None = None      # the last decision, for recordings
@@ -65,6 +69,7 @@ class GoToPolicy(Policy):
     async def start(self) -> None:
         self._t0 = self._best_t = time.time()
         self._best = math.inf
+        self._nudge_t = None
         if self.skills.has("goto"):
             self.skills.skills["goto"].reset()
 
@@ -72,7 +77,7 @@ class GoToPolicy(Policy):
         await self.body.stop()
 
     async def step(self, obs: Obs) -> None:
-        if self.goal is None or self.status in ("arrived", "failed"):
+        if self.goal is None or self.status.startswith(("arrived", "failed")):
             await self.body.drive(0, 0, "goto")
             return
         if self.frame == "arena":
@@ -99,6 +104,9 @@ class GoToPolicy(Policy):
         base = self.skills.snapshot()
         s = a.snapshot(base) if a is not None else None
         now = time.time()
+        if a is not None and not getattr(a, "heading_confirmed", True):
+            return await self._nudge(a, now)
+        self._nudge_t = None
         if s is None:                         # no fresh overhead pose: stopping beats guessing
             self.teacher = None
             self._best_t = now                # waiting isn't being stuck
@@ -134,6 +142,29 @@ class GoToPolicy(Policy):
                         "action": [left / 220.0, right / 220.0]}
         await self.body.drive(left, right, "goto")
 
+    async def _nudge(self, a, now: float) -> None:
+        """The camera can mistake Vector's back for its front. Before steering, roll straight forward a
+        few cm: the way it moves settles which end is which (the Arena flips it if needed)."""
+        p = a.pose
+        fresh = p and p.get("ok") and p.get("x") is not None and now - p["t"] < 0.5
+        if self._nudge_t is None:
+            self._nudge_t = now
+        self._best_t = now
+        if not fresh:
+            await self.body.drive(0, 0, "goto")
+            self.status = "heading check: waiting for the desk camera"
+            if now - self._nudge_t > NUDGE_S * 2:
+                return await self._finish("failed", "the desk camera lost Vector during the heading check")
+            return
+        x, y, sz = float(p["x"]), float(p["y"]), a.size_m
+        if not sz or min(x, y, sz[0] - x, sz[1] - y) < NUDGE_EDGE_M:
+            return await self._finish("failed", "too close to a desk edge to check its heading safely: move it in a bit")
+        if now - self._nudge_t > NUDGE_S:
+            return await self._finish("failed", "couldn't confirm which way Vector faces by driving")
+        self.status = "heading check: rolling forward a few cm"
+        self.teacher = None
+        await self.body.drive(NUDGE_MMPS, NUDGE_MMPS, "goto")
+
     def _point_controller(self, s: dict, dist: float) -> tuple[float, float]:
         """No trained skill: turn toward the point, gentle gains (commands land ~0.4 s late), slow at the end."""
         ang = math.atan2(self.goal[1] - s["pos"][1], self.goal[0] - s["pos"][0]) - s["yaw"]
@@ -155,12 +186,13 @@ class GoToPolicy(Policy):
         fwd = 0.0 if abs(ang) > 0.6 or (prox is not None and prox < 0.07) or s.get("cliff") else 90.0
         return fwd - 60 * turn, fwd + 60 * turn
 
-    async def _finish(self, how: str) -> None:
-        self.status = how
+    async def _finish(self, how: str, why: str | None = None) -> None:
+        self.status = f"{how}: {why}" if why else how
+        self.why = why
         self.teacher = None
         a = self.arena_src() if self.arena_src else None
         if a is not None and self.frame == "arena":
             a.route = None
         await self.body.drive(0, 0, "goto")
-        self.bus.emit(f"goto.{how}", target=self.target["label"] if self.target else None,
+        self.bus.emit(f"goto.{how}", why=why, target=self.target["label"] if self.target else None,
                       id=self.target["id"] if self.target else None)
