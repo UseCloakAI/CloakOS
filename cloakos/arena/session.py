@@ -54,9 +54,7 @@ class Arena:
     def save_config(self, cfg: dict[str, Any]) -> dict[str, Any]:
         """Corners (image points), colours and the desk size in cm. The size also goes to training:
         half the sim desks are then your desk's size (CLOAK_DESK)."""
-        if "corners" in cfg and cfg.get("corners") != self.config.get("corners"):
-            self.config.pop("turn_sign", None)            # a new camera view: measure the turn direction again
-        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock", "mfront", "mback", "camera_lag_s", "turn_sign")})
+        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock", "mfront", "mback", "camera_lag_s", "camera_mirrored", "gyro_fusion")})
         self.file.parent.mkdir(parents=True, exist_ok=True)
         self.file.write_text(json.dumps(self.config, indent=1))
         size = self.config.get("size")
@@ -105,6 +103,8 @@ class Arena:
         from .ranges import buffered, desk_rays
         x, y, yaw, lw, rw = self._predicted()
         r = desk_rays(x, y, yaw, self.size_m, n, fov, max_range, self.obstacles())
+        if self.yaw_sign < 0:
+            r = r[::-1].copy()                         # desk-frame "left" is Vector's right in a mirrored frame
         return buffered(r, fov, (lw + rw) / 2)
 
     def _predicted(self) -> tuple[float, float, float, float, float]:
@@ -122,7 +122,7 @@ class Arena:
             rw = (getattr(cmd, "right_mmps", 0.0) or 0.0) * WHEEL_GAIN
         lw, rw = float(lw) / 1000, float(rw) / 1000
         dt = (time.time() - p["t"]) + self.camera_lag() + COMMAND_TO_MOTION_S
-        x, y, yaw = predict_pose(x, y, yaw, lw, rw, dt)
+        x, y, yaw = self.from_phys(*predict_pose(*self.to_phys(x, y, yaw), lw, rw, dt))   # wheel maths is physical
         return x, y, yaw, lw, rw
 
     def snapshot(self, base: dict) -> dict | None:
@@ -219,15 +219,15 @@ class Arena:
         if abs(do) < 0.35 or abs(dc) < 0.2 or abs(abs(dc) - abs(do)) > 0.8 * abs(do) + 0.3:
             return                                 # not a clear turn (or a glitchy reading): no vote
         vote = 1 if dc * do > 0 else -1
-        self._votes = (self._votes + [vote])[-2:]
-        if vote != self.yaw_sign:
+        # vote = the sign the data implies (camera desk-yaw change vs physical odometry turn); the
+        # geometry says yaw_sign. A sanity check only: 3 against in a row stops driving, never flips.
+        self._votes = (self._votes + [vote])[-3:]
+        if len(self._votes) == 3 and all(v != self.yaw_sign for v in self._votes):
+            if not self.sign_conflict:
+                log.warning("arena: camera and odometry turned opposite to the desk geometry 3 times "
+                            "(last: camera %.2f, odometry %.2f rad); stopping go-to/home", dc, do)
             self.sign_conflict = True
-            log.warning("arena: camera and gyro disagree on turn direction (camera %.2f, gyro %.2f rad): camera-only heading", dc, do)
-        if len(self._votes) == 2 and self._votes[0] == self._votes[1]:
-            if self._votes[0] != self.yaw_sign:
-                self.save_config({"turn_sign": self._votes[0]})
-                log.info("arena: turn direction measured: %+d (saved)", self._votes[0])
-                self._trusted = (float(p["yaw"]), odo)      # restart the gyro term from now
+        elif vote == self.yaw_sign:
             self.sign_conflict = False
 
     _yaw_prev: tuple[float, float] | None = None
@@ -288,30 +288,41 @@ class Arena:
 
     @property
     def yaw_sign(self) -> int:
-        """How Vector's own turning (counter-clockwise +, seen from above) maps onto the desk frame.
-
-        Worked out from the desk corners, not guessed from motion (the camera lags the gyro, so
-        "learning" it from turns could settle on the wrong sign and turn the arrow the long way).
-        Corners are clicked front-left, front-right, back-right, back-left. In image pixels (y down)
-        a normal top-down view gives a clockwise-on-screen order (negative shoelace area): the desk
-        frame is then a true top-down frame and the gyro's sign is kept (+1). A positive area means
-        the view is mirrored (selfie-style camera, or corners clicked the other way): -1."""
-        ts = self.config.get("turn_sign")
-        if ts in (1, -1):                          # measured on this desk: wins over the corner guess
-            return int(ts)
+        """+1 if a physical counter-clockwise turn (seen from above; Vector's gyro/odometry +) makes the
+        desk-frame yaw go UP, -1 if it makes it go DOWN. From the corner homography only (see AGENTS.md,
+        "Arena frames"): the corners are clicked front-left, front-right, back-right, back-left and map
+        to desk (0,0), (W,0), (W,D), (0,D), a counter-clockwise order in desk coordinates. If they are
+        also counter-clockwise in image (u right, v down) coordinates, image->desk keeps orientation
+        (det > 0) and, because a top-down camera image with v down is itself a mirror of the physical
+        top-down view, the desk frame is a mirror too: -1. Clockwise in the image (front edge at the
+        bottom, the usual setup): +1. config camera_mirrored=true (a mirrored video feed) flips it."""
         c = self.config.get("corners")
+        sign = 1
         if c and len(c) == 4:
             area = sum(c[i][0] * c[(i + 1) % 4][1] - c[(i + 1) % 4][0] * c[i][1] for i in range(4))
-            if abs(area) > 1e-6:
-                return 1 if area < 0 else -1
-        return -1 if self._yaw_corr < -0.05 else 1
+            sign = -1 if area > 0 else 1
+        return -sign if self.config.get("camera_mirrored") else sign
+
+    @property
+    def gyro_fusion(self) -> bool:
+        """Carry the heading with Vector's odometry between camera readings. Off by default: the
+        camera markers + heading filter + confirm-by-driving (v0.9.11) are the heading."""
+        return bool(self.config.get("gyro_fusion", False))
+
+    # physical frame: the desk frame un-mirrored, so +yaw is a physical counter-clockwise turn and
+    # the wheel maths (right faster = turn left = +yaw) holds. Controllers work here.
+    def to_phys(self, x: float, y: float, yaw: float) -> tuple[float, float, float]:
+        return (x, y, yaw) if self.yaw_sign > 0 else (x, -y, -yaw)
+
+    def from_phys(self, x: float, y: float, yaw: float) -> tuple[float, float, float]:
+        return self.to_phys(x, y, yaw)                 # a mirror is its own inverse
 
     def imu(self) -> dict[str, Any]:
         """For the page: the fused heading (Vector's gyro-based heading, kept true by the camera) and
         the gyro's turn rate right now, so the arrow turns with Vector instead of a camera-lag later."""
         w = getattr(self.brain, "world", None)
         gz = float((getattr(w, "gyro", None) or (0, 0, 0))[2]) if w is not None else 0.0
-        return {"yaw": self.heading(), "om": self.yaw_sign * gz}
+        return {"yaw": self.heading(), "om": self.yaw_sign * gz if self.gyro_fusion else 0.0}
 
 
     def _odo_yaw(self) -> float | None:
@@ -332,9 +343,9 @@ class Arena:
     _trusted: tuple[float, float | None] | None = None     # last trusted camera heading, and odometry then
 
     def heading(self) -> float | None:  # noqa: C901
-        """THE heading (desk frame, rad, 0 = +x/right, +pi/2 = toward the back edge): the last trusted
-        camera heading, carried forward by however far Vector's odometry has turned since. The page
-        shows this same number in its text, video arrow and map."""
+        """THE heading (desk frame, rad, 0 = +x, +pi/2 = +y = toward the back edge): the last trusted
+        camera heading (plus Vector's odometry turn since, only with gyro_fusion on). The page shows
+        this same number in its text, video arrow and map."""
         if self._trusted is None:
             return None
         y, o0 = self._trusted
@@ -344,7 +355,7 @@ class Arena:
             if p and p.get("ok") and p.get("yaw_src") in ("markers", "light", "motion", "set"):
                 return float(p["yaw"])
             return math.atan2(math.sin(y), math.cos(y))
-        if odo is not None and o0 is not None:
+        if self.gyro_fusion and odo is not None and o0 is not None:
             y += self.yaw_sign * math.atan2(math.sin(odo - o0), math.cos(odo - o0))
         return math.atan2(math.sin(y), math.cos(y))
 
@@ -384,11 +395,12 @@ class Arena:
         b, c = self.brain, self.config["charger"]
         tx, ty = c["x"] + math.cos(c["yaw"]) * self.APPROACH, c["y"] + math.sin(c["yaw"]) * self.APPROACH
         face = c["yaw"] + math.pi                                    # looking at the charger
+        tx, ty, face = self.to_phys(tx, ty, face)                    # steer in the physical frame
         self.dock_state = "driving to the charger"
         end, phase = time.time() + timeout, "drive"
         best_d, best_t = math.inf, time.time()            # stalled (no headway in 12 s): let Vector's own docking finish
         spin, odo_prev = 0.0, self._odo_yaw()
-        self.route = {"target": [tx, ty], "charger": [c["x"], c["y"]], "phase": phase}
+        self.route = {"target": list(self.from_phys(tx, ty, 0.0)[:2]), "charger": [c["x"], c["y"]], "phase": phase}
         try:
             while time.time() < end:
                 await asyncio.sleep(0.1)
@@ -398,7 +410,7 @@ class Arena:
                 if not p or not p.get("ok") or p.get("x") is None or time.time() - p["t"] > LOST_S or yaw is None:
                     await b.body.drive(0, 0, "arena")
                     continue
-                x, y = float(p["x"]), float(p["y"])
+                x, y, yaw = self.to_phys(float(p["x"]), float(p["y"]), yaw)
                 odo = self._odo_yaw()
                 if odo is not None and odo_prev is not None:
                     spin += abs(math.atan2(math.sin(odo - odo_prev), math.cos(odo - odo_prev)))

@@ -134,22 +134,27 @@ class GoToPolicy(Policy):
             return await self._finish("arrived")
         if now - self._t0 > TIMEOUT_S * 2 or now - self._best_t > STUCK_S:
             return await self._finish("failed")
-        rays = a.ranges(9, RAY_FOV, RAY_MAX)
+        rays = a.ranges(9, RAY_FOV, RAY_MAX)            # already in Vector's own left/right order
+        # steer in the physical frame (the desk frame may be a mirror image: see AGENTS.md "Arena frames")
+        px, py, pyaw = a.to_phys(s["pos"][0], s["pos"][1], s["yaw"]) if hasattr(a, "to_phys") else (s["pos"][0], s["pos"][1], s["yaw"])
+        gx, gy, _ = a.to_phys(self.goal[0], self.goal[1], 0.0) if hasattr(a, "to_phys") else (*self.goal, 0.0)
+        sp, goal_p = {**s, "pos": [px, py, 0.0], "yaw": pyaw}, (gx, gy)
         if self.skills.has("goto"):
-            left, right, _ = self.skills.act("goto", self.goal, s)
+            left, right, _ = self.skills.act("goto", goal_p, sp)
             src = "skill"
             if left + right < 0:              # no reversing on the desk: Vector has no cliff sensors behind
                 w = (right - left) / 2
                 left, right = -w, w
         else:
-            left, right = self._point_controller(s, dist)
+            left, right = self._point_controller(sp, dist, goal_p)
             src = "controller"
         # never drive at an edge: the middle rays are already shortened by the stopping distance,
         # and the goal is always inside the desk, so a short ray ahead means the edge is closer than it
         if rays is not None and (left + right) > 0 and float(min(rays[3:6])) < min(EDGE_STOP_M, dist):
             left = right = 0.0
             self.status = "edge ahead: stopped"
-        self.teacher = {"task": "goto", "src": src, "goal": list(self.goal), "goal_rel": goal_features(s, self.goal),
+        self.teacher = {"task": "goto", "src": src, "goal": list(self.goal), "goal_rel": goal_features(sp, goal_p),
+                        "goal_phys": list(goal_p), "pose_phys": [px, py, pyaw],
                         "action": [left / 220.0, right / 220.0]}
         await self.body.drive(left, right, "goto")
 
@@ -176,9 +181,11 @@ class GoToPolicy(Policy):
         self.teacher = None
         await self.body.drive(NUDGE_MMPS, NUDGE_MMPS, "goto")
 
-    def _point_controller(self, s: dict, dist: float) -> tuple[float, float]:
-        """No trained skill: turn toward the point, gentle gains (commands land ~0.4 s late), slow at the end."""
-        ang = math.atan2(self.goal[1] - s["pos"][1], self.goal[0] - s["pos"][0]) - s["yaw"]
+    def _point_controller(self, s: dict, dist: float, goal=None) -> tuple[float, float]:
+        """No trained skill: turn toward the point, gentle gains (commands land ~0.4 s late), slow at the end.
+        s and goal in a PHYSICAL frame (+yaw = counter-clockwise = right wheel faster)."""
+        goal = goal or self.goal
+        ang = math.atan2(goal[1] - s["pos"][1], goal[0] - s["pos"][0]) - s["yaw"]
         ang = (ang + math.pi) % (2 * math.pi) - math.pi
         if abs(ang) > 0.8:                                   # well off: turn in place, slowly
             w = 35.0 if ang > 0 else -35.0

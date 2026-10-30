@@ -34,7 +34,7 @@ def _arena(tmp_path, pose):
     from cloakos.arena.session import Arena
     brain = types.SimpleNamespace(world=types.SimpleNamespace(pose=None, gyro=None))
     a = Arena(brain, tmp_path)
-    a.config = {"corners": [[0, 0], [1, 0], [1, 1], [0, 1]], "size": [100, 60]}
+    a.config = {"corners": [[0, 1], [1, 1], [1, 0], [0, 0]], "size": [100, 60]}
     if pose:
         a.update_pose({**pose, "ok": True})
     return a

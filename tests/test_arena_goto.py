@@ -35,7 +35,7 @@ def _setup(tmp_path, x=0.2, y=0.2, yaw=0.0):
     body = FakeBody()
     brain = types.SimpleNamespace(world=types.SimpleNamespace(pose=None, gyro=None, left_mmps=0.0, right_mmps=0.0), body=body)
     a = Arena(brain, tmp_path)
-    a.config = {"corners": [[0, 0], [1, 0], [1, 1], [0, 1]], "size": [100, 60]}
+    a.config = {"corners": [[0, 1], [1, 1], [1, 0], [0, 0]], "size": [100, 60]}
     a.update_pose({"x": x, "y": y, "yaw": yaw, "ok": True})
     skills = types.SimpleNamespace(has=lambda t: False, snapshot=lambda: {"pos": [0, 0, 0], "yaw": 0.0, "left_mmps": 0, "right_mmps": 0})
     bus = FakeBus()
