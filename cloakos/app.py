@@ -634,6 +634,7 @@ class Brain:
         self.recorder.record(
             {
                 "t": round(obs.t, 3),
+                "t_mono": round(time.monotonic(), 4),        # for lining up with other streams (wall clock can jump)
                 "mode": self.mode,
                 "obs": self.world.sensors(),
                 "drives": self.drives.snapshot(),

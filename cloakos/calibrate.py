@@ -238,10 +238,12 @@ class Calibrator:
                 if top:
                     ratios.append(float(np.median(top)) / 100.0)
                 await asyncio.sleep(0.4)
-            prox = []
+            prox, raw = [], []
             for _ in range(40):
                 if w.proximity_mm:
                     prox.append(w.proximity_mm)
+                if w.prox_raw:
+                    raw.append(dict(w.prox_raw))
                 await asyncio.sleep(0.05)
         finally:
             await body.stop()
@@ -255,5 +257,11 @@ class Calibrator:
         return {
             "command_to_motion_s": med(lags), "stop_s": med(stops), "wheel_speed_ratio": med(ratios),
             "trials_ok": len(lags),
-            "distance_sensor": {"readings": len(prox), "std_mm": round(float(np.std(prox)), 2) if len(prox) > 5 else None},
+            # "readings" = solid hits; with nothing within ~40 cm ahead that is correctly 0, so the raw
+            # stream says whether the sensor itself is alive (samples, median mm and quality, how often clear)
+            "distance_sensor": {"readings": len(prox), "std_mm": round(float(np.std(prox)), 2) if len(prox) > 5 else None,
+                                "raw_samples": len(raw),
+                                "raw_median_mm": med([r["mm"] for r in raw]) if raw else None,
+                                "raw_median_quality": med([r["quality"] for r in raw]) if raw else None,
+                                "clear_frac": round(sum(r["clear"] for r in raw) / len(raw), 2) if raw else None},
         }

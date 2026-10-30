@@ -50,7 +50,7 @@ class Arena:
     def save_config(self, cfg: dict[str, Any]) -> dict[str, Any]:
         """Corners (image points), colours and the desk size in cm. The size also goes to training:
         half the sim desks are then your desk's size (CLOAK_DESK)."""
-        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock", "mfront", "mback")})
+        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock", "mfront", "mback", "camera_lag_s")})
         self.file.parent.mkdir(parents=True, exist_ok=True)
         self.file.write_text(json.dumps(self.config, indent=1))
         size = self.config.get("size")
@@ -115,7 +115,7 @@ class Arena:
             lw = (getattr(cmd, "left_mmps", 0.0) or 0.0) * WHEEL_GAIN
             rw = (getattr(cmd, "right_mmps", 0.0) or 0.0) * WHEEL_GAIN
         lw, rw = float(lw) / 1000, float(rw) / 1000
-        dt = (time.time() - p["t"]) + COMMAND_TO_MOTION_S
+        dt = (time.time() - p["t"]) + self.camera_lag() + COMMAND_TO_MOTION_S
         x, y, yaw = predict_pose(x, y, yaw, lw, rw, dt)
         return x, y, yaw, lw, rw
 
@@ -154,6 +154,7 @@ class Arena:
         h = self.heading()
         return {"ok": bool(p.get("ok")), "age": round(time.time() - p["t"], 2),
                 "x": p.get("x"), "y": p.get("y"), "yaw": h, "yaw_src": p.get("yaw_src"),
+                "confirmed": self.heading_confirmed, "camera_lag_s": self.camera_lag(),
                 "ranges": None if r is None else [round(float(v), 3) for v in r], "status": self.ranges_status()}
 
     def update_pose(self, p: dict[str, Any]) -> None:
@@ -175,6 +176,7 @@ class Arena:
         if not p.get("ok") and self.pose and time.time() - self.pose["t"] > LOST_S:
             self.heading_confirmed = False             # lost it: the next sighting has to be confirmed again
         self.pose = {**p, "t": time.time()}
+        self._note_lag(p)
         if p.get("ok") and p.get("x") is not None and p.get("yaw_src") is not None:
             self._check_motion(float(p["x"]), float(p["y"]))
         # the camera's heading is only sure when it saw the light or watched it move; Vector's own
@@ -192,6 +194,31 @@ class Arena:
             self._yaw_prev = (cam, odo)
 
     _yaw_prev: tuple[float, float] | None = None
+    _lag = None
+    _lag_n = 0
+
+    def camera_lag(self) -> float:
+        """Seconds the overhead camera runs behind (measured while turning; saved; 0.15 s until then)."""
+        v = self.config.get("camera_lag_s")
+        return float(v) if v is not None else 0.15
+
+    def _note_lag(self, p: dict[str, Any]) -> None:
+        odo = self._odo_yaw()
+        if odo is None:
+            return
+        from .lag import LagEstimator
+        if self._lag is None:
+            self._lag = LagEstimator()
+        now = time.monotonic()
+        self._lag.add_odo(now, odo)
+        if p.get("ok") and p.get("yaw_raw", p.get("yaw")) is not None and p.get("yaw_src") in ("markers", "light", "untrusted"):
+            self._lag.add_cam(now, float(p.get("yaw_raw", p["yaw"])))
+        self._lag_n += 1
+        if self._lag_n % 50 == 0:                     # every ~5 s
+            est = self._lag.estimate()
+            if est is not None and abs(est - self.camera_lag()) > 0.02:
+                self.save_config({"camera_lag_s": round(est, 3)})
+
     heading_confirmed = False                          # driving forward has shown which end is the front
     _motion = None
 

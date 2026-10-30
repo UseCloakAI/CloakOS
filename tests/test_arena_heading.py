@@ -94,3 +94,14 @@ def test_arena_flips_and_confirms_from_driving(tmp_path, monkeypatch):
         a.update_pose({"ok": True, "x": 0.30 + 0.01 * i, "y": 0.2, "yaw": math.pi, "yaw_src": "markers"})
     assert a.heading_confirmed and a.config.get("flip") is True
     assert abs(a.heading()) < 0.05
+
+
+def test_camera_lag_is_measured_from_a_turn():
+    from cloakos.arena.lag import LagEstimator
+    e, lag = LagEstimator(), 0.24
+    for i in range(80):                          # turning at 1 rad/s, odometry at 50 Hz, camera at 10 Hz
+        t = i * 0.02
+        e.add_odo(t, math.sin(t * 3) * 1.5)
+        if i % 5 == 0 and t > lag:
+            e.add_cam(t, math.sin((t - lag) * 3) * 1.5)
+    assert abs(e.estimate() - lag) < 0.05
