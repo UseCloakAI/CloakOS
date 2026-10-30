@@ -514,6 +514,10 @@
       if (cfg.size) { $('#ar-w').value = cfg.size[0]; $('#ar-d').value = cfg.size[1]; }
       if (cfg.tol) $('#ar-tol').value = cfg.tol;
     }
+    if (st.config && !!st.config.flip !== !!cfg.flip) {   // the server saw it drive and swapped the ends
+      cfg.flip = st.config.flip; T.yaw = wrap(T.yaw + Math.PI); T.yawFar = 0; imu = null;
+    }
+    confirmed = !!st.heading_confirmed;
     const sel = $('#ar-policy'), was = sel.value;
     sel.innerHTML = `<option value="">Me (Teleop, or whatever is driving)</option>` + st.policies.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
     if ([...sel.options].some(o => o.value === was)) sel.value = was;
@@ -545,7 +549,7 @@
       : H ? "Can't see Vector. Click on Vector to point it out, or move Match up." : '';
     const names = { markers: '✓ colour markers', light: 'backpack light', motion: 'which way it moved', set: 'you set it', hold: 'coasting (lost it for a moment)', untrusted: '⚠ not trusted (jumping): ranges wait' };
     const src = f && f.ok ? (srvSrc === 'untrusted' ? 'untrusted' : f.src) : null;
-    const using = src ? `<p class="tele-note" id="ar-src">Heading from: <b>${esc(names[src] || src)}</b></p>` : '';
+    const using = src ? `<p class="tele-note" id="ar-src">Heading from: <b>${esc(names[src] || src)}</b> · ${confirmed ? '✓ confirmed by driving' : '– not yet confirmed by driving (go-to nudges forward first)'}</p>` : '';
     $('#ar-track').innerHTML = `<p class="tele-note">${parts.map(esc).join('<br>')}</p>${where ? `<b>${esc(where)}</b>` : ''}${using}`;
   }
 
@@ -611,7 +615,7 @@
     return { ok: false };
   }
 
-  let srvSrc = null;                                  // what the server believes after its heading check
+  let srvSrc = null, confirmed = false;                                  // what the server believes after its heading check
   function frame() {
     const f = smooth(track());
     if (f && f.ok) f.show = shown_yaw(f.yaw);        // ONE heading for the text, the video arrow and the map

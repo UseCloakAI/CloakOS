@@ -171,7 +171,12 @@ class Arena:
                 p["yaw_src"] = "untrusted"            # said honestly: ranges wait until it settles
         elif p.get("ok") and p.get("yaw") is not None and p.get("yaw_src") is None:
             self._trusted = (float(p["yaw"]), self._odo_yaw())   # a caller that knows the true pose (sim, tests)
+            self.heading_confirmed = True
+        if not p.get("ok") and self.pose and time.time() - self.pose["t"] > LOST_S:
+            self.heading_confirmed = False             # lost it: the next sighting has to be confirmed again
         self.pose = {**p, "t": time.time()}
+        if p.get("ok") and p.get("x") is not None and p.get("yaw_src") is not None:
+            self._check_motion(float(p["x"]), float(p["y"]))
         # the camera's heading is only sure when it saw the light or watched it move; Vector's own
         # odometry is sure for short turns (in place, where the camera can't tell). Keep the offset
         # between the two, so heading = odometry + offset is good all the time.
@@ -187,6 +192,33 @@ class Arena:
             self._yaw_prev = (cam, odo)
 
     _yaw_prev: tuple[float, float] | None = None
+    heading_confirmed = False                          # driving forward has shown which end is the front
+    _motion = None
+
+    def _forward(self) -> bool:
+        """Vector is driving straight forward right now (its wheels, else what was asked)."""
+        w = getattr(self.brain, "world", None)
+        lw, rw = getattr(w, "left_mmps", None), getattr(w, "right_mmps", None)
+        if lw is None or rw is None:
+            cmd = getattr(getattr(self.brain, "body", None), "cmd", None)
+            lw, rw = getattr(cmd, "left_mmps", 0.0) or 0.0, getattr(cmd, "right_mmps", 0.0) or 0.0
+        lw, rw = float(lw), float(rw)
+        return lw > 15 and rw > 15 and abs(lw - rw) < 0.25 * max(lw, rw)
+
+    def _check_motion(self, x: float, y: float) -> None:
+        from .heading import MotionCheck
+        if self._motion is None:
+            self._motion = MotionCheck()
+        verdict, mdir = self._motion.update(x, y, self._forward(), self.heading())
+        if verdict == "flip":                      # the camera had the ends swapped: fix it for good
+            self.save_config({"flip": not self.config.get("flip")})
+            self.set_heading(mdir)
+            self.flips = getattr(self, "flips", 0) + 1
+        if verdict in ("flip", "ok"):
+            if verdict == "ok" and self._trusted is None:
+                self.set_heading(mdir)
+            self.heading_confirmed = True
+            self.pose = {**self.pose, "confirmed": True}
     _gate = None
     _yaw_corr = 0.0
 
@@ -278,7 +310,7 @@ class Arena:
                 if b.estop or b.frozen or b.mode != "home":
                     return False
                 p, yaw = self.pose, self.heading()
-                if not p or time.time() - p["t"] > LOST_S or yaw is None:
+                if not p or not p.get("ok") or p.get("x") is None or time.time() - p["t"] > LOST_S or yaw is None:
                     await b.body.drive(0, 0, "arena")
                     continue
                 x, y = float(p["x"]), float(p["y"])

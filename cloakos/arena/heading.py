@@ -51,3 +51,35 @@ class HeadingGate:
             self.yaw, self.cand = math.atan2(s, c), []
             return self.yaw, True
         return self.yaw, False
+
+
+MOVE_M = 0.03        # driven straight forward this far: the way it went is the way it faces
+FLIP_RAD = 2.4       # camera heading this far (~140°) off the motion: it read the wrong end
+
+
+class MotionCheck:
+    """Settles the camera's 180° ambiguity: while Vector drives straight forward, the direction its
+    tracked position moves IS its heading. update() says 'flip' (camera has the ends swapped),
+    'ok' (camera agrees) or None (not enough straight forward driving yet)."""
+
+    def __init__(self) -> None:
+        self.anchor: tuple[float, float] | None = None
+
+    def update(self, x: float, y: float, forward: bool, cam_yaw: float | None) -> tuple[str | None, float | None]:
+        if not forward:
+            self.anchor = None
+            return None, None
+        if self.anchor is None:
+            self.anchor = (x, y)
+            return None, None
+        dx, dy = x - self.anchor[0], y - self.anchor[1]
+        if math.hypot(dx, dy) < MOVE_M:
+            return None, None
+        self.anchor = (x, y)
+        mdir = math.atan2(dy, dx)
+        if cam_yaw is None:
+            return "ok", mdir
+        d = abs(wrap(cam_yaw - mdir))
+        if d > FLIP_RAD:
+            return "flip", mdir
+        return ("ok", mdir) if d < 0.6 else (None, mdir)
