@@ -417,7 +417,8 @@ class RobotLink:
         elif kind == "wake_word" and msg.WhichOneof("wake_word_type") == "wake_word_begin":
             self.bus.emit("raw.wake_word")
 
-    EDGE_BACK_MMPS = -70.0             # back-off speed (Body reads the sign/size of edge_v)
+    EDGE_BACK_MMPS = -70.0
+    EDGE_MAX_MM = 80.0                 # never back off further than this in one reflex (it once went 327 mm)             # back-off speed (Body reads the sign/size of edge_v)
 
     async def _edge_reflex(self) -> None:
         """Get clear of an edge, worked out from what it was doing when it hit (Vector only says "edge",
@@ -462,9 +463,16 @@ class RobotLink:
                 dur = 0.7 + min(0.6, abs(fwd) / 150 * 0.6)   # faster in = further out
                 self.edge_until = time.time() + dur
                 end = self.edge_until
+                too_far = False
                 while time.time() < end:                    # re-send: nothing gets to cancel it
+                    if start and w.pose and math.dist(start[:2], w.pose[:2]) > self.EDGE_MAX_MM:
+                        too_far = True                      # far enough: more would be driving blind
+                        break
                     await c.drive_wheels(self.edge_v, self.edge_v, 300)
                     await asyncio.sleep(0.15)
+                if too_far:
+                    cleared = not w.cliff
+                    break
                 if not w.cliff:
                     cleared = True
                     break
