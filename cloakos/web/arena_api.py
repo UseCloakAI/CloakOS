@@ -42,7 +42,13 @@ def make_arena_router(brain: "Brain") -> APIRouter:
     async def pose(body: dict = Body(...)) -> dict[str, Any]:
         a = arena()
         a.update_pose(body)
-        return {"ok": True, **a.imu()}
+        return {"ok": True, **a.imu(), "yaw_src": (a.pose or {}).get("yaw_src")}
+
+    @r.post("/heading")
+    async def heading(body: dict = Body(...)) -> dict[str, Any]:
+        """{"yaw": rad} in the desk frame: which way Vector faces right now (it should be sitting still)."""
+        arena().set_heading(float(body["yaw"]))
+        return {"ok": True}
 
     @r.post("/run")
     async def run(body: dict = Body(...)) -> dict[str, Any]:
