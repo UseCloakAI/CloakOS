@@ -308,7 +308,7 @@ class Brain:
         if self.estop:
             return "Emergency stop is on."
         if not self.link.connected:
-            return "Vector isn't connected."
+            return self.link.why_not_connected()
         if not a.in_desk(x, y):
             return "That point is off the desk (or too close to an edge)."
         if a.ranges_status():

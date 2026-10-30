@@ -166,8 +166,11 @@ class Arena:
             p["yaw_raw"] = p["yaw"]
             if trusted:
                 p["yaw"] = y
+                self._trusted = (y, self._odo_yaw())
             else:
                 p["yaw_src"] = "untrusted"            # said honestly: ranges wait until it settles
+        elif p.get("ok") and p.get("yaw") is not None and p.get("yaw_src") is None:
+            self._trusted = (float(p["yaw"]), self._odo_yaw())   # a caller that knows the true pose (sim, tests)
         self.pose = {**p, "t": time.time()}
         # the camera's heading is only sure when it saw the light or watched it move; Vector's own
         # odometry is sure for short turns (in place, where the camera can't tell). Keep the offset
@@ -182,10 +185,6 @@ class Arena:
                 if abs(do) > 0.03 and abs(dc) < 1.0:
                     self._yaw_corr = max(-5.0, min(5.0, self._yaw_corr + dc * do))
             self._yaw_prev = (cam, odo)
-            sg = self.yaw_sign
-            d = math.atan2(math.sin(cam - sg * odo - self._yaw_off), math.cos(cam - sg * odo - self._yaw_off))
-            self._yaw_off += d if (self._yaw_fresh) else 0.3 * d
-            self._yaw_fresh = False
 
     _yaw_prev: tuple[float, float] | None = None
     _gate = None
@@ -201,9 +200,8 @@ class Arena:
         the gyro's turn rate right now, so the arrow turns with Vector instead of a camera-lag later."""
         w = getattr(self.brain, "world", None)
         gz = float((getattr(w, "gyro", None) or (0, 0, 0))[2]) if w is not None else 0.0
-        return {"yaw": self.heading() if not self._yaw_fresh else None, "om": self.yaw_sign * gz}
+        return {"yaw": self.heading(), "om": self.yaw_sign * gz}
 
-    _yaw_off, _yaw_fresh = 0.0, True
 
     def _odo_yaw(self) -> float | None:
         pose = getattr(self.brain.world, "pose", None) if hasattr(self.brain, "world") else None
@@ -216,18 +214,23 @@ class Arena:
             self._gate = HeadingGate()
         odo = self._odo_yaw()
         self._gate.set(yaw, odo)
-        if odo is not None:
-            self._yaw_off = math.atan2(math.sin(yaw - self.yaw_sign * odo), math.cos(yaw - self.yaw_sign * odo))
-            self._yaw_fresh = False
+        self._trusted = (math.atan2(math.sin(yaw), math.cos(yaw)), odo)
         if self.pose:
             self.pose = {**self.pose, "yaw": yaw, "yaw_src": "set"}
 
+    _trusted: tuple[float, float | None] | None = None     # last trusted camera heading, and odometry then
+
     def heading(self) -> float | None:
+        """THE heading (desk frame, rad, 0 = +x/right, +pi/2 = toward the back edge): the last trusted
+        camera heading, carried forward by however far Vector's odometry has turned since. The page
+        shows this same number in its text, video arrow and map."""
+        if self._trusted is None:
+            return None
+        y, o0 = self._trusted
         odo = self._odo_yaw()
-        if odo is not None and not self._yaw_fresh:
-            y = self.yaw_sign * odo + self._yaw_off
-            return math.atan2(math.sin(y), math.cos(y))
-        return float(self.pose["yaw"]) if self.pose and self.pose.get("ok") else None
+        if odo is not None and o0 is not None:
+            y += self.yaw_sign * math.atan2(math.sin(odo - o0), math.cos(odo - o0))
+        return math.atan2(math.sin(y), math.cos(y))
 
     # ── the page: the right mode while you're in the Arena ──────
 
@@ -321,7 +324,7 @@ class Arena:
         if self.dock_task and not self.dock_task.done():
             return "Already going home."
         if not self.brain.link.connected:
-            return "Vector isn't connected."
+            return self.brain.link.why_not_connected()
         self.dock_task = asyncio.create_task(self._dock_and_return())
         return None
 
