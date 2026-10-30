@@ -136,3 +136,32 @@ def test_click_to_desk_to_goal_round_trip(tmp_path, monkeypatch):
     gp = GoToPolicy(None, None, None)
     gp.set_point(float(x), float(y))
     assert gp.goal == (float(x), float(y)) and gp.frame == "arena"
+
+
+def _turn(a, Brain, cam_deg_per_step, odo_deg_per_step, steps, t0, monkeypatch):
+    import time as _t
+    yaw, odo = math.radians(10), 0.0
+    for i in range(steps):
+        monkeypatch.setattr(_t, "monotonic", lambda v=t0 + i * 0.1: v)
+        Brain.world.pose = (0.0, 0.0, odo)
+        a.update_pose({"ok": True, "x": 0.4, "y": 0.25, "yaw": yaw, "yaw_src": "markers"})
+        yaw += math.radians(cam_deg_per_step)
+        odo += math.radians(odo_deg_per_step)
+    return t0 + steps * 0.1
+
+
+def test_turn_sign_is_measured_and_a_disagreement_stops_the_gyro_term(tmp_path, monkeypatch):
+    a, Brain = _arena(tmp_path, monkeypatch)
+    a.save_config({"corners": [[0.1, 0.9], [0.9, 0.9], [0.9, 0.1], [0.1, 0.1]], "size": [80, 50]})
+    assert a.yaw_sign == 1                                  # the corner guess
+    # Vector turns clockwise (gyro -), the camera sees the heading go up (+): the guess is wrong here
+    _turn(a, Brain, cam_deg_per_step=-0.0 + 5, odo_deg_per_step=-5, steps=40, t0=1000.0, monkeypatch=monkeypatch)
+    assert a.yaw_sign == -1 and a.config["turn_sign"] == -1 and not a.sign_conflict
+
+
+def test_one_disagreeing_turn_drops_to_camera_only(tmp_path, monkeypatch):
+    a, Brain = _arena(tmp_path, monkeypatch)
+    a.save_config({"corners": [[0.1, 0.9], [0.9, 0.9], [0.9, 0.1], [0.1, 0.1]], "size": [80, 50]})
+    _turn(a, Brain, cam_deg_per_step=5, odo_deg_per_step=-5, steps=14, t0=2000.0, monkeypatch=monkeypatch)
+    assert a.sign_conflict
+    assert abs(a.heading() - a.pose["yaw"]) < 1e-9          # camera only while it's unsure

@@ -20,15 +20,19 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import logging
 import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+log = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from ..app import Brain
 
 CELL = 0.05
+SPIN_LIMIT = 2.5 * math.pi   # turned this far without getting closer: something's wrong, stop
 LOST_S = 3.0          # no sighting this long: tracking is lost (paused, not a fall)
 
 
@@ -50,7 +54,9 @@ class Arena:
     def save_config(self, cfg: dict[str, Any]) -> dict[str, Any]:
         """Corners (image points), colours and the desk size in cm. The size also goes to training:
         half the sim desks are then your desk's size (CLOAK_DESK)."""
-        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock", "mfront", "mback", "camera_lag_s")})
+        if "corners" in cfg and cfg.get("corners") != self.config.get("corners"):
+            self.config.pop("turn_sign", None)            # a new camera view: measure the turn direction again
+        self.config.update({k: v for k, v in cfg.items() if k in ("corners", "size", "gold", "dot", "flip", "tol", "camera", "charger", "auto_dock", "mfront", "mback", "camera_lag_s", "turn_sign")})
         self.file.parent.mkdir(parents=True, exist_ok=True)
         self.file.write_text(json.dumps(self.config, indent=1))
         size = self.config.get("size")
@@ -179,19 +185,50 @@ class Arena:
         self._note_lag(p)
         if p.get("ok") and p.get("x") is not None and p.get("yaw_src") is not None:
             self._check_motion(float(p["x"]), float(p["y"]))
-        # the camera's heading is only sure when it saw the light or watched it move; Vector's own
-        # odometry is sure for short turns (in place, where the camera can't tell). Keep the offset
-        # between the two, so heading = odometry + offset is good all the time.
+        self._vote_turn_sign(p)
+
+    # ── which way Vector's own turning goes in the desk frame: measured, corners only a prior ──
+    _turn_hist = None
+    _votes: list[int] = []
+    sign_conflict = False          # the camera and the gyro just disagreed on turn direction
+
+    def _vote_turn_sign(self, p: dict[str, Any]) -> None:
+        """Over each ~1 s of turning, does the camera's heading change the same way as Vector's
+        odometry (times the current sign)? Two votes in a row the other way: switch and save. One
+        vote against: stop trusting the gyro term right away (camera-only heading) until settled."""
         odo = self._odo_yaw()
-        if p.get("ok") and odo is not None and p.get("yaw_src") in ("markers", "light", "motion"):
-            cam = float(p["yaw"])
-            prev = self._yaw_prev
-            if prev is not None:                           # do camera and Vector agree which way is left?
-                dc = math.atan2(math.sin(cam - prev[0]), math.cos(cam - prev[0]))
-                do = math.atan2(math.sin(odo - prev[1]), math.cos(odo - prev[1]))
-                if abs(do) > 0.03 and abs(dc) < 1.0:
-                    self._yaw_corr = max(-5.0, min(5.0, self._yaw_corr + dc * do))
-            self._yaw_prev = (cam, odo)
+        if odo is None or not p.get("ok") or p.get("yaw_src") not in ("markers", "light"):
+            return
+        from collections import deque
+        if self._turn_hist is None:
+            self._turn_hist = deque()
+        now, cam = time.monotonic(), float(p.get("yaw_raw", p["yaw"]))
+        h = self._turn_hist
+        h.append((now, cam, odo))
+        while h and now - h[0][0] > 1.5:
+            h.popleft()
+        if now - h[0][0] < 0.8:
+            return
+        t0, c0, o0 = h[0]
+        dc = 0.0                                   # camera turn, summed step by step (no wrap-around surprises)
+        for (_, a, _), (_, b, _) in zip(list(h), list(h)[1:]):
+            dc += math.atan2(math.sin(b - a), math.cos(b - a))
+        do = math.atan2(math.sin(odo - o0), math.cos(odo - o0))
+        h.clear()
+        h.append((now, cam, odo))
+        if abs(do) < 0.35 or abs(dc) < 0.2 or abs(abs(dc) - abs(do)) > 0.8 * abs(do) + 0.3:
+            return                                 # not a clear turn (or a glitchy reading): no vote
+        vote = 1 if dc * do > 0 else -1
+        self._votes = (self._votes + [vote])[-2:]
+        if vote != self.yaw_sign:
+            self.sign_conflict = True
+            log.warning("arena: camera and gyro disagree on turn direction (camera %.2f, gyro %.2f rad): camera-only heading", dc, do)
+        if len(self._votes) == 2 and self._votes[0] == self._votes[1]:
+            if self._votes[0] != self.yaw_sign:
+                self.save_config({"turn_sign": self._votes[0]})
+                log.info("arena: turn direction measured: %+d (saved)", self._votes[0])
+                self._trusted = (float(p["yaw"]), odo)      # restart the gyro term from now
+            self.sign_conflict = False
 
     _yaw_prev: tuple[float, float] | None = None
     _lag = None
@@ -259,6 +296,9 @@ class Arena:
         a normal top-down view gives a clockwise-on-screen order (negative shoelace area): the desk
         frame is then a true top-down frame and the gyro's sign is kept (+1). A positive area means
         the view is mirrored (selfie-style camera, or corners clicked the other way): -1."""
+        ts = self.config.get("turn_sign")
+        if ts in (1, -1):                          # measured on this desk: wins over the corner guess
+            return int(ts)
         c = self.config.get("corners")
         if c and len(c) == 4:
             area = sum(c[i][0] * c[(i + 1) % 4][1] - c[(i + 1) % 4][0] * c[i][1] for i in range(4))
@@ -291,7 +331,7 @@ class Arena:
 
     _trusted: tuple[float, float | None] | None = None     # last trusted camera heading, and odometry then
 
-    def heading(self) -> float | None:
+    def heading(self) -> float | None:  # noqa: C901
         """THE heading (desk frame, rad, 0 = +x/right, +pi/2 = toward the back edge): the last trusted
         camera heading, carried forward by however far Vector's odometry has turned since. The page
         shows this same number in its text, video arrow and map."""
@@ -299,6 +339,11 @@ class Arena:
             return None
         y, o0 = self._trusted
         odo = self._odo_yaw()
+        if self.sign_conflict:                     # don't add a turn we can't trust: camera only
+            p = self.pose
+            if p and p.get("ok") and p.get("yaw_src") in ("markers", "light", "motion", "set"):
+                return float(p["yaw"])
+            return math.atan2(math.sin(y), math.cos(y))
         if odo is not None and o0 is not None:
             y += self.yaw_sign * math.atan2(math.sin(odo - o0), math.cos(odo - o0))
         return math.atan2(math.sin(y), math.cos(y))
@@ -342,6 +387,7 @@ class Arena:
         self.dock_state = "driving to the charger"
         end, phase = time.time() + timeout, "drive"
         best_d, best_t = math.inf, time.time()            # stalled (no headway in 12 s): let Vector's own docking finish
+        spin, odo_prev = 0.0, self._odo_yaw()
         self.route = {"target": [tx, ty], "charger": [c["x"], c["y"]], "phase": phase}
         try:
             while time.time() < end:
@@ -353,10 +399,20 @@ class Arena:
                     await b.body.drive(0, 0, "arena")
                     continue
                 x, y = float(p["x"]), float(p["y"])
+                odo = self._odo_yaw()
+                if odo is not None and odo_prev is not None:
+                    spin += abs(math.atan2(math.sin(odo - odo_prev), math.cos(odo - odo_prev)))
+                odo_prev = odo
+                if self.sign_conflict or spin > SPIN_LIMIT:
+                    await b.body.drive(0, 0, "arena")
+                    self.dock_state = ("stopped: camera and gyro disagree on which way it turns" if self.sign_conflict
+                                       else "stopped: turned over 1.25 times without getting closer")
+                    log.warning("arena route: %s", self.dock_state)
+                    return False
                 if phase == "drive":
                     d = math.hypot(tx - x, ty - y)
                     if d < best_d - 0.02:
-                        best_d, best_t = d, time.time()
+                        best_d, best_t, spin = d, time.time(), 0.0
                     elif time.time() - best_t > 12:
                         self.dock_state = "no headway: Vector's own docking takes it from here"
                         return False
