@@ -238,3 +238,5 @@ The Training page:
   - On an iPhone hotspot, turn on "Maximize Compatibility".
   - macOS Local Network permission is required: "no route to host" means it's missing.
   - The Mac firewall must allow wire-pod (`chipper`).
+
+- `cloakos/web/static/arena.js` has `JS_V`: bump it with the version so a stale Arena tab tells you to reload.
