@@ -171,6 +171,7 @@ def test_gyro_heading_follows_the_camera_even_mirrored(tmp_path, monkeypatch):
     from cloakos.arena.session import Arena
 
     monkeypatch.setenv("CLOAK_ENV_FILE", str(tmp_path / ".env"))
+    import time
     for mirror in (1, -1):
         class World:
             pose, gyro = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
@@ -179,13 +180,15 @@ def test_gyro_heading_follows_the_camera_even_mirrored(tmp_path, monkeypatch):
             world = World()
 
         a = Arena(Brain(), tmp_path)
-        for i in range(12):                        # turning left: Vector's heading and the camera's agree (or mirror)
+        clock = iter([100.0 + 0.1 * k for k in range(1000)])
+        monkeypatch.setattr(time, "monotonic", lambda: next(clock))
+        for i in range(20):                        # turning left: Vector's heading and the camera's agree (or mirror)
             odo = 0.2 * i
             Brain.world.pose, Brain.world.gyro = (0, 0, odo), (0, 0, 1.0)
             a.update_pose({"ok": True, "x": 0.5, "y": 0.3, "yaw": 1.0 + mirror * odo, "yaw_src": "light"})
         assert a.yaw_sign == mirror
-        Brain.world.pose = (0, 0, 2.6)              # turning on with no camera reading: the gyro carries it
-        want = 1.0 + mirror * 2.6
+        Brain.world.pose = (0, 0, 4.2)              # turning on with no camera reading: the gyro carries it
+        want = 1.0 + mirror * 4.2
         h = a.heading()
         assert abs(math.atan2(math.sin(h - want), math.cos(h - want))) < 0.05
         assert a.imu()["om"] == mirror * 1.0

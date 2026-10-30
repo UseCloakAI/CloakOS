@@ -26,6 +26,7 @@ EDGE_STOP_M = 0.03         # a buffered ray ahead shorter than this: stop
 STANDOFF_M = 0.09          # stop this far from the object's centre
 TIMEOUT_S = 60.0
 STUCK_S = 10.0
+SPIN_LIMIT = 2.5 * math.pi   # turned 1.25 times without getting closer: stop, something's wrong
 NUDGE_MMPS = 40.0          # heading check: a slow, straight few cm forward
 NUDGE_S = 5.0              # ...given up (and go-to refused) if driving hasn't settled it by then
 NUDGE_EDGE_M = 0.08        # not this close to any desk edge (the heading, so which edge is ahead, isn't known yet)
@@ -43,6 +44,7 @@ class GoToPolicy(Policy):
         self._best = math.inf
         self._best_t = 0.0
         self._nudge_t: float | None = None
+        self._spin, self._odo_prev = 0.0, None
         self.frame = "odo"                    # "arena": the goal is in Arena desk metres
         self.arena_src = None                 # () -> the Arena or None, set by the brain
         self.teacher: dict | None = None      # the last decision, for recordings
@@ -70,6 +72,7 @@ class GoToPolicy(Policy):
         self._t0 = self._best_t = time.time()
         self._best = math.inf
         self._nudge_t = None
+        self._spin, self._odo_prev = 0.0, None
         if self.skills.has("goto"):
             self.skills.skills["goto"].reset()
 
@@ -114,11 +117,19 @@ class GoToPolicy(Policy):
             self.status = "waiting for the desk camera"
             return
         self.status = "driving"
+        odo = a._odo_yaw() if a is not None else None
+        if odo is not None and getattr(self, "_odo_prev", None) is not None:
+            self._spin += abs(math.atan2(math.sin(odo - self._odo_prev), math.cos(odo - self._odo_prev)))
+        self._odo_prev = odo
+        if a is not None and getattr(a, "sign_conflict", False):
+            return await self._finish("failed", "the camera and Vector's gyro disagree on which way it turns")
+        if getattr(self, "_spin", 0.0) > SPIN_LIMIT:
+            return await self._finish("failed", "turned over 1.25 times without getting closer")
         if a is not None:
             a.route = {"target": list(self.goal), "charger": list(self.goal), "phase": "goto"}
         dist = math.dist(s["pos"][:2], self.goal)
         if dist < self._best - 0.01:
-            self._best, self._best_t = dist, now
+            self._best, self._best_t, self._spin = dist, now, 0.0
         if dist < POINT_ARRIVE_M:
             return await self._finish("arrived")
         if now - self._t0 > TIMEOUT_S * 2 or now - self._best_t > STUCK_S:
