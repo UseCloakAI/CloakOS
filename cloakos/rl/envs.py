@@ -38,6 +38,7 @@ TASKS = {
     "wander": "Roam the room without bumping into things",
     "desk": "Desk: roam a random desk, never fall, avoid things (teacher, sees exact edges in the sim)",
     "desk-pixels": "Desk from the camera: learns from the desk teacher, runs on the real robot",
+    "goto-pixels": "Go to a point from the camera: learns from the privileged go-to teacher; the goal comes from its own odometry",
     "recover": "Get back on its treads after a fall (experimental: train long)",
 }
 SENSORS = {"map": "Map ranges + robot sensors (recommended)", "robot": "Robot sensors only"}

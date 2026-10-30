@@ -112,6 +112,8 @@ class LearnedPolicy(Policy):
         meta = json.loads((folder / "meta.json").read_text())
         self.pixels = None
         self._frames: tuple[int, np.ndarray | None, np.ndarray | None] = (-1, None, None)
+        if meta.get("task") == "goto-pixels":
+            raise ValueError("the go-to camera driver can't drive yet: it's trained and tested in the sim first (next step wires it in)")
         if meta["sensors"] == "pixels":                 # the desk student: camera + body sensors
             from .pixelnet import PixelNet
             self.pixels, self.model = PixelNet(folder / "policy.npz"), None

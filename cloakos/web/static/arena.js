@@ -6,7 +6,7 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const post = (url, body = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
   const video = $('#ar-video'), over = $('#ar-overlay'), map = $('#ar-map');
-  const JS_V = '0.9.15';                           // bumped with the version: a stale tab says so
+  const JS_V = '0.9.16';                           // bumped with the version: a stale tab says so
   const PW = 480;                                  // processing width (pixels): enough that ~1 cm markers are a few pixels
   const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
   let shown = false, stream = null, cfg = {}, st = null, H = null, loop = null, poll = null;

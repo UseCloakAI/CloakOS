@@ -98,8 +98,15 @@ teacher-driven steps.
    `GoToPolicy` in the "arena" frame: the trained goto skill if one ships, else a slow controller
    (70 mm/s max, 25 mm/s inside 12 cm, arrives within 2.5 cm); stops for an edge ahead; holds still when
    the overhead pose is stale. Each tick records `teacher` = goal, `goal_rel` (`envs.goal_features`, the
-   same goal input sim goto training uses) and the action. The camera student doesn't take a goal input
-   yet: a goal-conditioned student is the next step for point-to-point.
+   same goal input sim goto training uses) and the action.
+3b. **Goal-conditioned camera student (v0.9.16, code ready, not trained yet):** `rl/goal_student.py`
+   (Training skill "goto-pixels"). Inputs: camera (this + previous frame, lagged/dropped like the real
+   stream), body sensors (wheels, distance sensor, cliff, upright, last action) and `goal_features` from
+   Vector's OWN dead-reckoned odometry since the start (never the overhead pose). Teacher: a trained
+   goto/map driver, else a privileged point-and-drive controller on the true sim pose and exact ranges
+   (forward only). DAgger rounds as in `student.py`. Real data: Arena go-to recordings, the goal is moved
+   into the odometry frame once at the start of each go-to (`real_goal_steps`). Loading it as a driver is
+   refused until it passes the sim exam and gets wired into `LearnedPolicy` (next).
 4. Find an object (search until the detector sees it).
 5. Remembered objects without the 3D map: an Arena/world object memory (label, desk x/y, last seen).
 6. Camera-student distillation for each skill, so it works without the overhead camera.
