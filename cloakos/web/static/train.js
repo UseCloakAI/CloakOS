@@ -13,16 +13,17 @@
     goto: 'Learns to drive to a point by trial and error (PPO) in the simulator, many rooms at once.',
     wander: 'Learns to roam without bumping into things, by trial and error (PPO) in the simulator.',
     desk: 'Simulator driver: learns to roam a random desk without falling off. It sees the exact desk edges, so it only runs in the Simulator. Step 1.',
+    'goto-pixels': 'Go-to camera driver: learns to drive to a point from the camera only, copying a teacher that knows the true pose. The goal comes from Vector\'s own wheel odometry, as on the real robot. Trains and tests in the simulator; real Arena go-to recordings make it better.',
     'desk-pixels': 'Camera driver: copies the Simulator driver using only the camera (with its real lag), so it runs on your real Vector. Step 2.',
     recover: 'Learns to get back on its treads after a fall. Experimental: needs a long run.',
   };
   const LINES = { goto: ['reward', 'reaches goal'], wander: ['reward', 'no falls'], desk: ['reward', 'stays on desk'],
-    'desk-pixels': ['desk covered', 'stays on desk'], recover: ['reward', 'recovered'] };
+    'desk-pixels': ['desk covered', 'stays on desk'], 'goto-pixels': ['reaches goal', 'reaches goal'], recover: ['reward', 'recovered'] };
   const num = n => n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(0)}k` : `${n}`;
   const dur = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
     return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`; };
   let pending = null, follow = true, chartRows = '', trHours = '8', showAll = false;
-  const NAME = { desk: 'Simulator driver', 'desk-pixels': 'Camera driver', goto: 'Go-to driver', wander: 'Roaming driver', recover: 'Get-up driver' };
+  const NAME = { desk: 'Simulator driver', 'desk-pixels': 'Camera driver', 'goto-pixels': 'Go-to camera driver', goto: 'Go-to driver', wander: 'Roaming driver', recover: 'Get-up driver' };
   const STEPS = [['Simulator', 'Learns to drive a desk without falling'], ['Camera', 'Learns to do it from the camera only'], ['Your desk', 'Your real drives make it better']];
 
   function paintPath() {
@@ -221,13 +222,14 @@
   function formFit() {
     if (!st) return;
     const t = $('#rl-task').value, ready = (st.policies || []).filter(p => p.ready && !p.training);
-    $('#rl-sensors-row').hidden = ['balance', 'desk', 'desk-pixels', 'recover'].includes(t);
+    $('#rl-sensors-row').hidden = ['balance', 'desk', 'desk-pixels', 'goto-pixels', 'recover'].includes(t);
     $('#rl-desc').textContent = (DESC[t] || '') + ' The big Start button above already picks the right thing for you.';
     keep($('#rl-resume'), '<option value="">Start fresh</option>' + ready.filter(p => p.task === t && (t.startsWith('desk') || p.sensors === $('#rl-sensors').value))
       .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join(''));
-    const px = t === 'desk-pixels';
+    const px = t === 'desk-pixels' || t === 'goto-pixels';
     $('#rl-teacher-row').hidden = $('#rl-real-row').hidden = !px;
-    keep($('#rl-teacher'), ready.filter(p => p.task === 'desk').map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('') || '<option value="">Train a Desk teacher first</option>');
+    if (t === 'goto-pixels') keep($('#rl-teacher'), '<option value="">Built-in privileged controller</option>' + ready.filter(p => p.task === 'goto' && p.sensors === 'map').map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join(''));
+    else keep($('#rl-teacher'), ready.filter(p => p.task === 'desk').map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('') || '<option value="">Train a Desk teacher first</option>');
     keep($('#rl-real'), (st.recordings || []).map(e => `<option value="${esc(e.name)}">${esc(e.name)} · ${e.frames} frames</option>`).join(''));
   }
 

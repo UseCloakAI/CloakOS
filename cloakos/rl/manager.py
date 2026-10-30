@@ -78,6 +78,23 @@ class Trainer:
             if hours:
                 cmd += ["--hours", str(float(hours))]
             return self._launch(name, out, cmd)
+        if task == "goto-pixels":
+            name = f"goto-pixels-{time.strftime('%Y%m%d-%H%M%S')}"
+            out = self.root / name
+            out.mkdir(parents=True, exist_ok=True)
+            cmd = [sys.executable, "-m", "cloakos.rl.goal_student", "--steps", str(int(steps)), "--out", str(out)]
+            if teacher and (self.root / teacher / "meta.json").exists():
+                tm = json.loads((self.root / teacher / "meta.json").read_text())
+                if tm.get("task") == "goto" and tm.get("sensors") == "map":
+                    cmd += ["--teacher", str(self.root / teacher)]
+            if envs:
+                cmd += ["--envs", str(int(envs))]
+            if real:
+                eps = Path(self.root.parent) / "episodes"
+                cmd += ["--real", *[str(eps / Path(r).name) for r in real]]
+            if hours:
+                cmd += ["--hours", str(float(hours))]
+            return self._launch(name, out, cmd)
         name = f"{task}-{make_spec(task, sensors).sensors}-{time.strftime('%Y%m%d-%H%M%S')}"
         out = self.root / name
         out.mkdir(parents=True, exist_ok=True)
@@ -253,6 +270,8 @@ class Trainer:
             raise ValueError(f"no run {name}")
         if meta.get("finished"):
             raise ValueError(f"{name} already finished; use Build on to train it more")
+        if meta.get("task") == "goto-pixels":
+            raise ValueError("go-to camera runs can't be continued yet; start a new one")
         if meta.get("task") == "desk-pixels":
             if not (out / "student.pt").exists():
                 raise ValueError("it stopped before its first checkpoint; start it again")
