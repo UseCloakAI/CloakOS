@@ -63,6 +63,17 @@ class RobotLink:
         self.target = "sim" if sim_cfg.get("enabled") else "real"
         self.sim = None                       # cloakos.sim.Sim, created the first time it's used
 
+    last_error: str | None = None
+
+    def why_not_connected(self) -> str:
+        """Vector isn't connected, and the real reason (for the page, not just the log)."""
+        if self.state == "connected" and self.client is None:
+            return "Vector isn't connected (the link is restarting; try again in a few seconds)."
+        why = self.hint or self.last_error
+        if self.target == "sim":
+            return "Vector isn't connected: CloakOS is set to the simulator, not the real robot."
+        return f"Vector isn't connected (link {self.state}{': ' + why if why else ''})."
+
     @property
     def connected(self) -> bool:
         return self.state == "connected" and self.client is not None
@@ -91,6 +102,7 @@ class RobotLink:
             except Exception as e:
                 msg = " ".join(str(e).split()) or type(e).__name__
                 self.hint = hint_for(msg)
+                self.last_error = msg
                 log.warning("robot link: %s", msg)
             finally:
                 if hold is not None:
@@ -157,6 +169,7 @@ class RobotLink:
         except Exception as e:
             log.warning("could not list animation triggers: %s", e)
         self.hint = None
+        self.last_error = None
         self._set_state("connected", name=bot.name, serial=bot.serial, host=bot.host, target=self.target)
         log.info("connected to %s (%d anim triggers)", bot.name, len(self.anim_triggers))
         if self._want_control:

@@ -119,6 +119,9 @@ class GoToPolicy(Policy):
         if self.skills.has("goto"):
             left, right, _ = self.skills.act("goto", self.goal, s)
             src = "skill"
+            if left + right < 0:              # no reversing on the desk: Vector has no cliff sensors behind
+                w = (right - left) / 2
+                left, right = -w, w
         else:
             left, right = self._point_controller(s, dist)
             src = "controller"

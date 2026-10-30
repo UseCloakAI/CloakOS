@@ -96,7 +96,8 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
 
 
     sim = asyncio.create_task(physics())
-    a.update_pose({"ok": True, "x": 0.3, "y": 0.15, "yaw": math.pi / 2, "yaw_src": "light"})
+    for _ in range(3):                                # the heading locks after a few agreeing readings
+        a.update_pose({"ok": True, "x": 0.3, "y": 0.15, "yaw": math.pi / 2, "yaw_src": "light"})
     assert a.can_route() and a.dock() is None
     for _ in range(600):
         await asyncio.sleep(0.1)

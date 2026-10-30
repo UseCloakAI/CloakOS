@@ -439,7 +439,7 @@
     if (f && f.ok) {
       const [x, y] = M([f.x, f.y]), r = 0.05 * k;
       m.fillStyle = '#22c55e'; m.beginPath(); m.arc(x, y, Math.max(4, r), 0, Math.PI * 2); m.fill();
-      m.strokeStyle = '#22c55e'; m.lineWidth = 3; m.beginPath(); m.moveTo(x, y); m.lineTo(x + Math.cos(f.yaw) * r * 2.2, y - Math.sin(f.yaw) * r * 2.2); m.stroke();
+      m.strokeStyle = '#22c55e'; m.lineWidth = 3; m.beginPath(); m.moveTo(x, y); m.lineTo(x + Math.cos(f.show ?? f.yaw) * r * 2.2, y - Math.sin(f.show ?? f.yaw) * r * 2.2); m.stroke();
     }
   }
 
@@ -482,10 +482,15 @@
   // "which way is Vector facing?" while it sits still: desk frame, y toward the back edge
   window.arFace = dir => {
     const yaw = { away: Math.PI / 2, toward: -Math.PI / 2, right: 0, left: Math.PI }[dir];
-    T.yaw = yaw; T.om = 0; T.yawFar = 0;
+    T.yaw = yaw; T.om = 0; T.yawFar = 0; imu = null;
     post('/api/arena/heading', { yaw }).catch(() => {});
   };
-  window.arFlip = () => save({ flip: !cfg.flip });
+  window.arFlip = () => {                            // a flip is the user's word: the server takes it at once, not as a jump
+    const yaw = wrap((shown_yaw(T.yaw)) + Math.PI);
+    T.yaw = yaw; T.om = 0; T.yawFar = 0; imu = null;
+    post('/api/arena/heading', { yaw }).catch(() => {});
+    return save({ flip: !cfg.flip });
+  };
   async function save(patch) {
     if (patch.mfront || patch.mback) gaps.length = 0;
     cfg = { ...cfg, ...patch }; rebuild();
@@ -536,7 +541,7 @@
   function info(f) {
     const parts = [!cfg.corners ? '✗ desk corners not set' : `✓ desk ${cfg.size ? cfg.size.join(' × ') + ' cm' : ''}`,
       cfg.mfront && cfg.mback ? '✓ front + back markers' : `– markers: ${cfg.mfront ? '' : 'front '}${cfg.mback ? '' : 'back '}not picked`, !cfg.dot ? '– light not picked (heading comes from which way it moves)' : '✓ backpack light'];
-    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}° (${f.cm2 === 'markers' ? 'from the markers' : f.cm2 === 'held' ? 'coasting' : f.cm2 + ' cm²'})`
+    const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${((f.show ?? f.yaw) * 57.3).toFixed(0)}° (${f.cm2 === 'markers' ? 'from the markers' : f.cm2 === 'held' ? 'coasting' : f.cm2 + ' cm²'})`
       : H ? "Can't see Vector. Click on Vector to point it out, or move Match up." : '';
     const names = { markers: '✓ colour markers', light: 'backpack light', motion: 'which way it moved', set: 'you set it', hold: 'coasting (lost it for a moment)', untrusted: '⚠ not trusted (jumping): ranges wait' };
     const src = f && f.ok ? (srvSrc === 'untrusted' ? 'untrusted' : f.src) : null;
@@ -553,9 +558,9 @@
   let imu = null;                                     // Vector's own gyro: turn rate now, and its heading kept true by the camera
   const T = { pos: null, vel: [0, 0], yaw: 0, om: 0, t: 0, seen: 0, markerT: 0, far: 0, farPos: null, yawFar: 0, px: null, src: 'hold' };
   const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
-  function shown_yaw() {                             // what the arrow shows: the gyro heading if fresh, else the camera's
+  function shown_yaw(fallback) {                     // the server's heading (what driving uses) if fresh, else the page's
     if (imu && imu.yaw != null && performance.now() / 1000 - imu.t < 0.5) return wrap(imu.yaw + imu.om * (performance.now() / 1000 - imu.t));
-    return T.yaw;
+    return fallback != null ? fallback : T.yaw;
   }
   function smooth(raw) {
     if (!raw) return raw;
@@ -563,6 +568,7 @@
     let m = raw.ok ? raw : null;
     if (m && m.cm2 === 'markers') T.markerT = now;
     else if (m && cfg.mfront && cfg.mback && now - T.markerT < 1.0) m = null;      // markers just now: don't trust the shape guess
+    if (m && T.pos && now - T.seen > 0.7) T.pos = null;   // it was lost: take the first good sighting, wherever it is
     if (!T.pos) {
       if (!m) return raw;
       Object.assign(T, { pos: [m.x, m.y], vel: [0, 0], yaw: m.yaw, t: now, seen: now, px: m.px, src: m.src });
@@ -596,7 +602,7 @@
         T.yaw = ny; T.yawFar = 0;
       }
       T.seen = now; T.px = m.px; T.src = m.src;
-      return { ...m, x: T.pos[0], y: T.pos[1], yaw: T.yaw, show: shown_yaw(), desk: T.pos.slice() };
+      return { ...m, x: T.pos[0], y: T.pos[1], yaw: T.yaw, desk: T.pos.slice() };
     }
     if (now - T.seen < 0.7) {                         // short dropout: coast
       T.vel = [T.vel[0] * 0.8, T.vel[1] * 0.8]; T.pos = pred; T.yaw = wrap(T.yaw + T.om * dt); T.om *= 0.7;
@@ -608,6 +614,7 @@
   let srvSrc = null;                                  // what the server believes after its heading check
   function frame() {
     const f = smooth(track());
+    if (f && f.ok) f.show = shown_yaw(f.yaw);        // ONE heading for the text, the video arrow and the map
     if (f && f.ok) { last = f; if (!path.length || Math.hypot(path[path.length - 1][0] - f.x, path[path.length - 1][1] - f.y) > 0.01) { path.push([f.x, f.y]); if (path.length > 1200) path = path.slice(-600); } }
     else if (f) last = { ...(last || {}), ok: false };
     draw(f);
