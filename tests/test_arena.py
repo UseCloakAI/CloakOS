@@ -77,7 +77,7 @@ async def test_routes_to_the_charger_docks_and_comes_back(tmp_path, monkeypatch)
     br = Brain()
     br.body = Body(bot)
     a = Arena(br, tmp_path)
-    a.save_config({"corners": [[0, 0], [1, 0], [1, 1], [0, 1]], "size": [140, 60], "charger": {"x": 1.2, "y": 0.45, "yaw": math.pi}})
+    a.save_config({"corners": [[0, 1], [1, 1], [1, 0], [0, 0]], "size": [140, 60], "charger": {"x": 1.2, "y": 0.45, "yaw": math.pi}})
 
     async def physics():                              # the robot moves; the camera and odometry see it
         while True:
@@ -159,7 +159,7 @@ async def test_a_run_can_start_from_the_charger(tmp_path, monkeypatch):
         async def set_mode(self, m): Brain.mode = m
 
     a = Arena(Brain(), tmp_path)
-    a.save_config({"corners": [[0, 0], [1, 0], [1, 1], [0, 1]], "size": [140, 60]})
+    a.save_config({"corners": [[0, 1], [1, 1], [1, 0], [0, 0]], "size": [140, 60]})
     assert await a.start(None, 30) is None
     assert not World.on_charger and Brain.mode == "teleop" and a.running
     await a.stop()

@@ -251,7 +251,19 @@ class Arena:
 
     @property
     def yaw_sign(self) -> int:
-        """+1 normally; -1 if the desk view is mirrored (corners clicked the other way round)."""
+        """How Vector's own turning (counter-clockwise +, seen from above) maps onto the desk frame.
+
+        Worked out from the desk corners, not guessed from motion (the camera lags the gyro, so
+        "learning" it from turns could settle on the wrong sign and turn the arrow the long way).
+        Corners are clicked front-left, front-right, back-right, back-left. In image pixels (y down)
+        a normal top-down view gives a clockwise-on-screen order (negative shoelace area): the desk
+        frame is then a true top-down frame and the gyro's sign is kept (+1). A positive area means
+        the view is mirrored (selfie-style camera, or corners clicked the other way): -1."""
+        c = self.config.get("corners")
+        if c and len(c) == 4:
+            area = sum(c[i][0] * c[(i + 1) % 4][1] - c[(i + 1) % 4][0] * c[i][1] for i in range(4))
+            if abs(area) > 1e-6:
+                return 1 if area < 0 else -1
         return -1 if self._yaw_corr < -0.05 else 1
 
     def imu(self) -> dict[str, Any]:

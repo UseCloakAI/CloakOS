@@ -105,3 +105,34 @@ def test_camera_lag_is_measured_from_a_turn():
         if i % 5 == 0 and t > lag:
             e.add_cam(t, math.sin((t - lag) * 3) * 1.5)
     assert abs(e.estimate() - lag) < 0.05
+
+
+def test_turn_sign_from_the_desk_corners_and_a_clockwise_turn(tmp_path, monkeypatch):
+    a, Brain = _arena(tmp_path, monkeypatch)
+    # a normal overhead view: front edge at the bottom of the image, back edge at the top
+    a.save_config({"corners": [[0.1, 0.9], [0.9, 0.9], [0.9, 0.1], [0.1, 0.1]], "size": [80, 50]})
+    assert a.yaw_sign == 1
+    Brain.world.pose = (0.0, 0.0, 0.0)
+    for _ in range(3):
+        a.update_pose({"ok": True, "x": 0.4, "y": 0.25, "yaw": math.radians(141), "yaw_src": "markers"})
+    Brain.world.pose = (0.0, 0.0, -math.radians(178))     # Vector turns clockwise 178° (its gyro: negative)
+    assert abs(math.degrees(a.heading()) - (-37)) < 1     # 141 -> -37 the short (clockwise) way, not 319
+    # a mirrored view (corners come out counter-clockwise on screen): Vector's turns flip
+    a.save_config({"corners": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]})
+    assert a.yaw_sign == -1
+
+
+def test_click_to_desk_to_goal_round_trip(tmp_path, monkeypatch):
+    """The page maps a click through the corner homography; the goal the driver gets is that point."""
+    import numpy as np
+    corners = [[0.1, 0.9], [0.9, 0.9], [0.9, 0.1], [0.1, 0.1]]
+    size = (0.8, 0.5)
+    import cv2
+    H = cv2.getPerspectiveTransform(np.float32(corners), np.float32([[0, 0], [size[0], 0], [size[0], size[1]], [0, size[1]]]))
+    click = np.float32([[[0.15, 0.15]]])                  # near the top-left of the image = back-left of the desk
+    x, y = cv2.perspectiveTransform(click, H)[0, 0]
+    assert x < 0.1 and y > 0.4                            # left, and toward the back (large y)
+    from cloakos.behaviors.goto import GoToPolicy
+    gp = GoToPolicy(None, None, None)
+    gp.set_point(float(x), float(y))
+    assert gp.goal == (float(x), float(y)) and gp.frame == "arena"
