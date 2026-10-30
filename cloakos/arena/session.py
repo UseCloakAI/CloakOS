@@ -83,6 +83,8 @@ class Arena:
             return "Arena isn't tracking Vector"
         if self.heading() is None:
             return "Arena doesn't know which way Vector faces yet"
+        if p.get("yaw_src") == "untrusted":
+            return "Arena's heading is jumping around (not trusted yet)"
         return None
 
     def obstacles(self) -> list[tuple[float, float, float]]:
@@ -155,12 +157,23 @@ class Arena:
                 "ranges": None if r is None else [round(float(v), 3) for v in r], "status": self.ranges_status()}
 
     def update_pose(self, p: dict[str, Any]) -> None:
+        p = dict(p)
+        if p.get("ok") and p.get("yaw") is not None and p.get("yaw_src") in ("markers", "light", "motion"):
+            if self._gate is None:
+                from .heading import HeadingGate
+                self._gate = HeadingGate()
+            y, trusted = self._gate.update(float(p["yaw"]), p["yaw_src"], self._odo_yaw())
+            p["yaw_raw"] = p["yaw"]
+            if trusted:
+                p["yaw"] = y
+            else:
+                p["yaw_src"] = "untrusted"            # said honestly: ranges wait until it settles
         self.pose = {**p, "t": time.time()}
         # the camera's heading is only sure when it saw the light or watched it move; Vector's own
         # odometry is sure for short turns (in place, where the camera can't tell). Keep the offset
         # between the two, so heading = odometry + offset is good all the time.
         odo = self._odo_yaw()
-        if p.get("ok") and odo is not None and p.get("yaw_src") in ("light", "motion"):
+        if p.get("ok") and odo is not None and p.get("yaw_src") in ("markers", "light", "motion"):
             cam = float(p["yaw"])
             prev = self._yaw_prev
             if prev is not None:                           # do camera and Vector agree which way is left?
@@ -171,10 +184,11 @@ class Arena:
             self._yaw_prev = (cam, odo)
             sg = self.yaw_sign
             d = math.atan2(math.sin(cam - sg * odo - self._yaw_off), math.cos(cam - sg * odo - self._yaw_off))
-            self._yaw_off += d if self._yaw_fresh else 0.3 * d
+            self._yaw_off += d if (self._yaw_fresh) else 0.3 * d
             self._yaw_fresh = False
 
     _yaw_prev: tuple[float, float] | None = None
+    _gate = None
     _yaw_corr = 0.0
 
     @property
@@ -194,6 +208,19 @@ class Arena:
     def _odo_yaw(self) -> float | None:
         pose = getattr(self.brain.world, "pose", None) if hasattr(self.brain, "world") else None
         return float(pose[2]) if pose else None
+
+    def set_heading(self, yaw: float) -> None:
+        """The user says which way Vector faces right now (desk frame): pin the camera and gyro to it."""
+        from .heading import HeadingGate
+        if self._gate is None:
+            self._gate = HeadingGate()
+        odo = self._odo_yaw()
+        self._gate.set(yaw, odo)
+        if odo is not None:
+            self._yaw_off = math.atan2(math.sin(yaw - self.yaw_sign * odo), math.cos(yaw - self.yaw_sign * odo))
+            self._yaw_fresh = False
+        if self.pose:
+            self.pose = {**self.pose, "yaw": yaw, "yaw_src": "set"}
 
     def heading(self) -> float | None:
         odo = self._odo_yaw()

@@ -100,13 +100,21 @@
     if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
     return [(h * 60 + 360) % 360, mx ? d / mx : 0, mx];
   }
+  /* Colour match that survives glare and shade: hue decides (it barely moves with brightness),
+     saturation and brightness only need to be "enough of it", not equal to what was clicked: a
+     sticker under a lamp reads paler and brighter, in shadow darker. Markers not found for a while
+     widen the hue window a little (up to 1.5x), and narrow back once they're seen again. */
+  let mkMiss = 0;
   function matcher(c) {
     if (!c) return () => false;
-    // tight by default: a wooden desk is gold's neighbour (Match widens it for dim or uneven light)
-    const t = +(cfg.tol || 22), ht = t * 0.6, st2 = 0.08 + t / 300, vt = 0.12 + t / 250, useHue = c[1] > 0.2;
+    const t = +(cfg.tol || 22), widen = 1 + Math.min(0.5, mkMiss / 40);
+    if (c[1] <= 0.2) {                                // a grey/white target: no hue to go on, brightness has to do
+      const vt = 0.12 + t / 250, st2 = 0.08 + t / 300;
+      return (h, s, v) => Math.abs(v - c[2]) < vt && Math.abs(s - c[1]) < st2;
+    }
+    const ht = t * 0.6 * widen, smin = Math.max(0.18, c[1] * 0.4), vmin = Math.max(0.18, c[2] * 0.35);
     return (h, s, v) => {
-      if (Math.abs(v - c[2]) > vt || Math.abs(s - c[1]) > st2) return false;
-      if (!useHue) return true;
+      if (s < smin || v < vmin) return false;
       const dh = Math.abs(h - c[0]); return Math.min(dh, 360 - dh) < ht;
     };
   }
@@ -201,6 +209,7 @@
       if (gap < 0.015 || gap > 0.12 || (want && Math.abs(gap - want) > 0.015)) continue;   // both on Vector, always the same spacing
       const mid = [(f.d[0] + b.d[0]) / 2, (f.d[1] + b.d[1]) / 2];
       const prev = last && last.desk ? Math.hypot(mid[0] - last.desk[0], mid[1] - last.desk[1]) * 100 : 0;
+      if (T && T.pos && Math.hypot(mid[0] - T.pos[0], mid[1] - T.pos[1]) > 0.05) continue;   // both markers must be on Vector, not glare elsewhere
       const score = -prev + 0.2 * Math.min(f.n, b.n);
       if (!best || score > best.score) best = { f, b, mid, score };
     }
@@ -291,6 +300,7 @@
     let mk = markerPair(img, W, Hh, poly, x0, x1, y0, y1);
     const close = roiMarkers((T && T.px) || (mk && mk.px) || (last && last.px));   // the close look wins when it finds them
     if (close) { close.pxc = [close.px[0] * W, close.px[1] * Hh]; mk = close; }
+    mkMiss = mk ? 0 : mkMiss + 1;
     const cm2 = (cx, cy) => {                       // real desk area of one image pixel here
       const p = apply(H, [cx / W, cy / Hh]), a = apply(H, [(cx + 1) / W, cy / Hh]), b = apply(H, [cx / W, (cy + 1) / Hh]);
       return Math.abs((a[0] - p[0]) * (b[1] - p[1]) - (a[1] - p[1]) * (b[0] - p[0])) * 1e4;
@@ -326,7 +336,7 @@
     if (mk) {                                        // both markers seen: position and heading straight from them
       let yaw = mk.yaw + (cfg.flip ? Math.PI : 0);         // raw: the motion filter does the (one) smoothing
       yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
-      return { ok: true, x: mk.mid[0], y: mk.mid[1], yaw, src: 'light', px: mk.px, dotPx: mk.dotPx, area: 60, cm2: 'markers', desk: mk.mid };
+      return { ok: true, x: mk.mid[0], y: mk.mid[1], yaw, src: 'markers', px: mk.px, dotPx: mk.dotPx, area: 60, cm2: 'markers', desk: mk.mid };
     }
     if (missing > 30) { relearn = true; missing = 0; }   // lost for 3 s: maybe it faded in while sitting still, look again
     if (!best || (last && last.desk && last.ok && Math.hypot(best.here[0] - last.desk[0], best.here[1] - last.desk[1]) > 0.25)) return { ok: false };
@@ -469,6 +479,12 @@
   window.arAutoDock = on => save({ auto_dock: on });
   window.arSaveSize = () => save({ size: [+$('#ar-w').value, +$('#ar-d').value] });
   window.arTol = v => { cfg.tol = +v; clearTimeout(window._arTolT); window._arTolT = setTimeout(() => save({ tol: +v }), 400); };
+  // "which way is Vector facing?" while it sits still: desk frame, y toward the back edge
+  window.arFace = dir => {
+    const yaw = { away: Math.PI / 2, toward: -Math.PI / 2, right: 0, left: Math.PI }[dir];
+    T.yaw = yaw; T.om = 0; T.yawFar = 0;
+    post('/api/arena/heading', { yaw }).catch(() => {});
+  };
   window.arFlip = () => save({ flip: !cfg.flip });
   async function save(patch) {
     if (patch.mfront || patch.mback) gaps.length = 0;
@@ -522,7 +538,10 @@
       cfg.mfront && cfg.mback ? '✓ front + back markers' : `– markers: ${cfg.mfront ? '' : 'front '}${cfg.mback ? '' : 'back '}not picked`, !cfg.dot ? '– light not picked (heading comes from which way it moves)' : '✓ backpack light'];
     const where = f && f.ok ? `Vector at ${(f.x * 100).toFixed(0)}, ${(f.y * 100).toFixed(0)} cm, facing ${(f.yaw * 57.3).toFixed(0)}° (${f.cm2 === 'markers' ? 'from the markers' : f.cm2 === 'held' ? 'coasting' : f.cm2 + ' cm²'})`
       : H ? "Can't see Vector. Click on Vector to point it out, or move Match up." : '';
-    $('#ar-track').innerHTML = `<p class="tele-note">${parts.map(esc).join('<br>')}</p>${where ? `<b>${esc(where)}</b>` : ''}`;
+    const names = { markers: '✓ colour markers', light: 'backpack light', motion: 'which way it moved', set: 'you set it', hold: 'coasting (lost it for a moment)', untrusted: '⚠ not trusted (jumping): ranges wait' };
+    const src = f && f.ok ? (srvSrc === 'untrusted' ? 'untrusted' : f.src) : null;
+    const using = src ? `<p class="tele-note" id="ar-src">Heading from: <b>${esc(names[src] || src)}</b></p>` : '';
+    $('#ar-track').innerHTML = `<p class="tele-note">${parts.map(esc).join('<br>')}</p>${where ? `<b>${esc(where)}</b>` : ''}${using}`;
   }
 
   /* ── the 10 Hz loop ─────────────────────────────────────── */
@@ -570,7 +589,7 @@
       const fresh = imu && performance.now() / 1000 - imu.t < 0.5;
       if (fresh) T.om = imu.om;                       // the gyro knows the turn rate right now: no guessing
       const py = wrap(T.yaw + T.om * dt), dy = wrap(m.yaw - py);
-      if (Math.abs(dy) > 1.2 && m.src !== 'light') { T.yawFar++; if (T.yawFar >= 3) { T.yaw = m.yaw; T.om = 0; T.yawFar = 0; } }
+      if (Math.abs(dy) > 1.2) { T.yawFar++; if (T.yawFar >= 15) { T.yaw = m.yaw; T.om = 0; T.yawFar = 0; } }
       else {
         const ny = wrap(py + (m.src === 'light' ? 0.75 : 0.3) * dy);
         if (!fresh) T.om = Math.max(-4, Math.min(4, 0.5 * T.om + 0.5 * wrap(ny - T.yaw) / dt));
@@ -586,6 +605,7 @@
     return { ok: false };
   }
 
+  let srvSrc = null;                                  // what the server believes after its heading check
   function frame() {
     const f = smooth(track());
     if (f && f.ok) { last = f; if (!path.length || Math.hypot(path[path.length - 1][0] - f.x, path[path.length - 1][1] - f.y) > 0.01) { path.push([f.x, f.y]); if (path.length > 1200) path = path.slice(-600); } }
@@ -593,7 +613,7 @@
     draw(f);
     if (++tick % 5 === 0) info(f);
     if (f && H) post('/api/arena/pose', f.ok ? { ok: true, x: f.x, y: f.y, yaw: f.yaw, yaw_src: f.src } : { ok: false })
-      .then(r => { if (r && r.ok) imu = { yaw: r.yaw, om: r.om, t: performance.now() / 1000 }; }).catch(() => {});
+      .then(r => { if (r) srvSrc = r.yaw_src || null; if (r && r.ok) imu = { yaw: r.yaw, om: r.om, t: performance.now() / 1000 }; }).catch(() => {});
   }
 
   // tracking runs at most 10x a second and never more than about a third of the time, so the page
