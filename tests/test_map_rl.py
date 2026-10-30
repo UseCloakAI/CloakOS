@@ -237,6 +237,7 @@ def test_guided_plan_and_keep_training(tmp_path):
     import time
 
     from cloakos.rl.manager import Trainer
+    from cloakos.rl.envs import DESK_REWARD_V
 
     t = Trainer(tmp_path)
     started = []
@@ -250,7 +251,7 @@ def test_guided_plan_and_keep_training(tmp_path):
     (d / "exam.json").write_text(json.dumps({"passed": True, "score": 1050}))
     old = t.plan()                                      # passed, but under the old desk rules: retrain it first
     assert old["stage"] == 1 and old["start"]["resume"] is None and "before the desk practice got harder" in old["why"]
-    (d / "meta.json").write_text(json.dumps({"task": "desk", "sensors": "map", "created": 1, "reward_v": 2}))
+    (d / "meta.json").write_text(json.dumps({"task": "desk", "sensors": "map", "created": 1, "reward_v": DESK_REWARD_V}))
     p = t.plan([{"name": "ep1", "frames": 50, "created": time.time()}])
     assert p["stage"] == 2 and p["start"]["teacher"] == "desk-map-1" and p["start"]["real"] == ["ep1"]
     t.set_auto(True)
@@ -288,3 +289,18 @@ def test_train_more_continues_from_that_driver(tmp_path):
     assert a[0] == "desk" and kw["resume"] == "desk-map-old" and kw["hours"] == 8
     t.train_more("desk-map-old", 2, keep=True)          # Keep going picked: a session from it, then carry on
     assert t.auto["on"] and t.auto["last"]["session"] == "run-more"
+
+
+def test_desk_reward_punishes_going_round_and_round():
+    import numpy as np
+    from cloakos.rl.envs import VectorEnv
+    e = VectorEnv("desk")
+    e.reset(seed=3)
+    tail = []
+    for i in range(150):                          # spin on the spot: safe, but no driver should settle for it
+        _, r, d, t, _ = e.step(np.array([-0.3, 0.3], np.float32))
+        if i >= 50:
+            tail.append(r)
+        if d or t:
+            break
+    assert sum(tail) < -0.5

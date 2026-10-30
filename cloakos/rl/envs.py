@@ -44,7 +44,7 @@ SENSORS = {"map": "Map ranges + robot sensors (recommended)", "robot": "Robot se
 ALIASES = {"explore": "wander", "rays": "map"}       # names used by older policies
 RAY_FOV = math.radians(180)
 RAY_MAX = 1.0
-DESK_REWARD_V = 2               # bump when the desk reward changes: older desk drivers get retrained (v2: steer clear of things, roam)
+DESK_REWARD_V = 3               # bump when the desk reward changes: older desk drivers get retrained (v2: steer clear of things, roam; v3: no circling)
 REAL_LAG_STEPS = (3, 5)          # command -> motion, in 0.1 s steps (calibration: 0.41 s)
 REAL_WHEEL_GAIN = (0.82, 0.92)   # wheels deliver this share of the asked speed (calibration: 0.86)
 
@@ -67,7 +67,7 @@ class Spec:
 def make_spec(task: str, sensors: str = "map") -> Spec:
     task, sensors = ALIASES.get(task, task), ALIASES.get(sensors, sensors)
     if task == "desk":                 # the teacher: always sees exact edges + things (sim-only)
-        return Spec("desk", "map", episode_s=40.0)
+        return Spec("desk", "map", episode_s=60.0)     # long enough that a loop has to repeat itself
     if task == "recover":
         return Spec("recover", "robot", control_hz=10.0, max_speed=200.0, episode_s=10.0)
     return Spec(task, sensors if sensors in SENSORS else "map", episode_s=40.0 if task == "wander" else 30.0)
@@ -297,6 +297,8 @@ if gym is not None:
             self.act_delay = int(self.rng.integers(REAL_LAG_STEPS[0], REAL_LAG_STEPS[1] + 1))
             self.obs_delay = int(self.rng.integers(0, 2))
             self.wheel_gain = float(self.rng.uniform(*REAL_WHEEL_GAIN))
+            self.wheel_skew = float(self.rng.uniform(-0.04, 0.04))   # real wheels never match: "straight" curves a little
+            self.turn_ema = 0.0
             self._act_q = deque([np.zeros(3, np.float32)] * self.act_delay)
             self.reflex = EdgeReflex(self.act_delay - 1, self.spec_.control_hz) if task != "recover" else None
             self._obs_q = deque(maxlen=self.obs_delay + 1)
@@ -321,7 +323,7 @@ if gym is not None:
                 if v is not None:                          # the edge reflex owns the wheels (robot side)
                     sim.set_wheels(v, v, 300.0)
                 else:
-                    sim.set_wheels(left * self.wheel_gain, right * self.wheel_gain, 400.0)   # same ramp as Body.apply
+                    sim.set_wheels(left * self.wheel_gain * (1 + self.wheel_skew), right * self.wheel_gain * (1 - self.wheel_skew), 400.0)   # same ramp as Body.apply
             sim.step(1.0 / spec.control_hz)
             self.t += 1
             s = sim.snapshot
@@ -343,24 +345,30 @@ if gym is not None:
                     reward += 3.0
                     done, info["success"] = True, True
             elif spec.task == "desk":
-                # roam like a pet, not a patrol loop: somewhere not seen for 30 s pays, going straight
-                # back over the last 15 s costs a little, and driving forward only pays while exploring
+                # roam like a pet, not a patrol loop. v2 re-paid a cell after 30 s and only lightly taxed
+                # going back over it, so a big safe circle in the middle of the desk (never near an edge)
+                # paid almost as well as exploring: the driver learned to circle. Now: a cell pays once per
+                # episode, every revisit costs, sustained turning one way costs, and forward speed only pays
+                # when it is new ground and fairly straight.
                 cell = (int(s["pos"][0] // 0.05), int(s["pos"][1] // 0.05))
-                fresh = True
                 if cell != self.cell:
                     seen = self.seen_t.get(cell)
-                    if seen is None or self.t - seen > 300:
-                        reward += 0.1
-                    elif self.t - seen < 150:
-                        reward -= 0.03
-                    self.recent = seen is not None and self.t - seen < 150
+                    if seen is None:
+                        reward += 0.15
+                    else:
+                        reward -= 0.04 if self.t - seen < 300 else 0.02
+                    self.recent = seen is not None
                     self.cell = cell
                 fresh = not self.recent
                 self.seen_t[cell] = self.t
                 self.visited.add(cell)
                 fwd = (s["left_mmps"] + s["right_mmps"]) / 2 / spec.max_speed
+                turn = (s["right_mmps"] - s["left_mmps"]) / 2 / spec.max_speed
+                self.turn_ema = 0.95 * self.turn_ema + 0.05 * turn       # ~2 s memory of which way it's been turning
+                if abs(self.turn_ema) > 0.12:
+                    reward -= 0.06 * (abs(self.turn_ema) - 0.12) / 0.88 + 0.008   # going round and round
                 if fresh:
-                    reward += 0.01 * max(0.0, fwd)
+                    reward += 0.02 * max(0.0, fwd) * (1 - min(1.0, 2 * abs(turn)))
                 if s["bump"]:
                     reward -= 3.0
                     info["bump"] = True
