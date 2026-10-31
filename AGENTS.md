@@ -60,8 +60,22 @@ Part of the Cloak platform (usecloak.org). Repo: `UseCloakAI/CloakOS`.
   line. It kills the shell.
 - UI checks: serve `cloakos/web` statically (`python -m http.server` from `cloakos/web`, then open
   `/static/index.html`), mock `/api/*` with Playwright routes, and screenshot.
-  - Arena tracking can be tested with Chromium's fake camera
-    (`--use-file-for-fake-video-capture=x.y4m`) and synthetic videos made with OpenCV.
+- Arena tracking can be tested with Chromium's fake camera
+  (`--use-file-for-fake-video-capture=x.y4m`) and synthetic videos made with OpenCV.
+
+## Cursor Cloud specific instructions
+
+The dashboard is already running at `http://127.0.0.1:8765` in the simulator. `.env` has
+`CLOAK_SIM=1`, `CLOAK_SHARE=0`, and `CLOAK_SETUP_DONE=1`, so the setup wizard stays out of the way.
+There is no robot and no wire-pod. Leave the Simulator on **Sim**.
+
+`python`, `pytest`, and `cloakos` come from `/opt/cloakos-venv`. Headless MuJoCo needs
+`MUJOCO_GL=osmesa` (no GPU; EGL does not load). The `dev` extra is installed. Kokoro and the
+training extra (`torch`, `stable-baselines3`) are not: voice stays off, and Training says to
+install the `rl` extra. Do not import torch in a process that already loaded MuJoCo with osmesa.
+
+Sim tests can segfault on the way out after they pass. Trust the pytest summary, not exit code 139.
+Keep tests short. Don't start a training run.
 
 ## The 3D map is parked (on purpose)
 
