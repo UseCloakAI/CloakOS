@@ -139,12 +139,12 @@ auto_update() {      # auto-update [--now]: install a newer Cloak (and with it a
   fi
   local init_old init_new
   init_old="$(cat "$HOME_DIR/app/cloakos/__init__.py" 2>/dev/null || true)"
-  init_new="$(curl -fsSL -m 15 "https://raw.githubusercontent.com/$REPO/$latest/cloakos/__init__.py" 2>/dev/null || true)"
+  init_new="$(curl -fsSL -m 15 "https://raw.githubusercontent.com/$REPO/$latest/vector-edition/cloakos/__init__.py" 2>/dev/null || true)"
   from_label="$(label "$(pyvar __version__ <<<"$init_old")" "$(pyvar NOUS_VERSION <<<"$init_old")")"
   to_label="$(label "$(pyvar __version__ <<<"$init_new")" "$(pyvar NOUS_VERSION <<<"$init_new")")"
   echo "$(date '+%F %T') updating CloakOS $from_label (${installed:0:7}) -> $to_label (${latest:0:7})"
   running && was_running=1
-  if curl -fsSL "https://raw.githubusercontent.com/$REPO/$latest/install.sh" \
+  if curl -fsSL "https://raw.githubusercontent.com/$REPO/$latest/vector-edition/install.sh" \
       | CLOAK_REF="$latest" CLOAK_CHANNEL="$(channel)" CLOAK_HOME="$HOME_DIR" CLOAK_NO_OPEN=1 CLOAK_FROM_UPDATER=1 bash; then
     write_status "updated" "$latest"; [[ "$force" == "--now" ]] && echo "Updated to CloakOS $to_label (${latest:0:7})."
   else
@@ -163,7 +163,7 @@ cloakos_home() {
 uninstall() {        # the standalone uninstaller does the work; run a copy, since it deletes this folder
   local tmp; tmp="$(mktemp)"
   if [[ -f "$HOME_DIR/bin/uninstall.sh" ]]; then cp "$HOME_DIR/bin/uninstall.sh" "$tmp"
-  else curl -fsSL "https://raw.githubusercontent.com/$REPO/main/uninstall.sh" -o "$tmp"; fi
+  else curl -fsSL "https://raw.githubusercontent.com/$REPO/main/vector-edition/uninstall.sh" -o "$tmp"; fi
   CLOAK_HOME="$HOME_DIR" bash "$tmp" "$@"
   rm -f "$tmp"
 }
