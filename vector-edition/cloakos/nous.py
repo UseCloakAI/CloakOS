@@ -62,7 +62,7 @@ def check(timeout: float = 15.0) -> dict:
     try:
         with httpx.Client(timeout=timeout) as c:
             sha = c.get(f"https://api.github.com/repos/{REPO}/commits/main", headers={"Accept": "application/vnd.github.sha"}).text.strip()
-            m = c.get(f"https://raw.githubusercontent.com/{REPO}/{sha}/cloakos/rl/pretrained/manifest.json").json()
+            m = c.get(f"https://raw.githubusercontent.com/{REPO}/{sha}/vector-edition/cloakos/rl/pretrained/manifest.json").json()
     except Exception as e:
         out["error"] = f"couldn't check ({type(e).__name__}). Are you online?"
         return out
@@ -89,7 +89,7 @@ def update(timeout: float = 120.0) -> dict:
             for skill, files in m["skills"].items():
                 (tmp / skill).mkdir()
                 for name, digest in files.items():
-                    data = c.get(f"https://raw.githubusercontent.com/{REPO}/{sha}/cloakos/rl/pretrained/{skill}/{name}").content
+                    data = c.get(f"https://raw.githubusercontent.com/{REPO}/{sha}/vector-edition/cloakos/rl/pretrained/{skill}/{name}").content
                     if hashlib.sha256(data).hexdigest() != digest:
                         raise ValueError(f"{skill}/{name} didn't match its checksum")
                     (tmp / skill / name).write_bytes(data)
