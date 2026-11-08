@@ -9,3 +9,7 @@ CloakOS download; install it on its own:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/UseCloakAI/CloakOS/main/vector-edition/install.sh | bash
 ```
+
+## Shell
+
+[`shell/`](shell/) is the native CloakOS UI prototype (Flutter + liquid glass), starting on macOS.
